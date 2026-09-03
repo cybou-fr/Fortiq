@@ -20,7 +20,7 @@ public static class PasswordPipeProtocol
     }
 }
 
-internal sealed class TestOnlyPasswordPipeServer(Guid operationId, IKeyLease lease)
+internal sealed class PasswordPipeServer(Guid operationId, IKeyLease lease)
 {
     internal async Task ServeOnceAsync(CancellationToken token)
     {

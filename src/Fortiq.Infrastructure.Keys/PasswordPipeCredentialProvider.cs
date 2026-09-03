@@ -8,16 +8,19 @@ namespace Fortiq.Infrastructure.Keys;
 /// pinned helper path and a non-secret operation ID.
 /// </summary>
 /// <remarks>
-/// P0 only. The pipe server does not yet verify the client PID and service identity, and the
-/// installer-defined SDDL is a P1 gate, so this provider must not ship in a release build.
+/// Known limitation, tracked as the production password broker gate: the pipe is restricted to the
+/// current user and the handover is a one-shot challenge-response, but the server does not yet
+/// verify the connecting client's PID and service identity, and the installer-defined SDDL is not
+/// applied. Until that lands, the handover is only as strong as the isolation between processes
+/// running as the same user.
 /// </remarks>
-internal sealed class TestOnlyPasswordCredentialProvider : IEngineCredentialProvider
+public sealed class PasswordPipeCredentialProvider : IEngineCredentialProvider
 {
     private readonly string _helperPath;
     private readonly IKeyLease _lease;
     private readonly TimeSpan _handoverTimeout;
 
-    internal TestOnlyPasswordCredentialProvider(string helperPath, IKeyLease lease, TimeSpan? handoverTimeout = null)
+    public PasswordPipeCredentialProvider(string helperPath, IKeyLease lease, TimeSpan? handoverTimeout = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(helperPath);
         ArgumentNullException.ThrowIfNull(lease);
@@ -39,7 +42,7 @@ internal sealed class TestOnlyPasswordCredentialProvider : IEngineCredentialProv
             throw new ArgumentException("A credential session requires the operation ID it belongs to.", nameof(operationId));
         }
 
-        var server = new TestOnlyPasswordPipeServer(operationId, _lease);
+        var server = new PasswordPipeServer(operationId, _lease);
         var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var served = server.ServeOnceAsync(lifetime.Token);
         return Task.FromResult<IEngineCredentialSession>(

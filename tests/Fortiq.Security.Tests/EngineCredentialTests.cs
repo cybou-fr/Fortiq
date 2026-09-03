@@ -16,7 +16,7 @@ public sealed class EngineCredentialTests
         EnginePasswordV1Encoder.Encode(lease, encoded);
         var password = Encoding.ASCII.GetString(encoded);
 
-        var provider = new TestOnlyPasswordCredentialProvider(helper, lease);
+        var provider = new PasswordPipeCredentialProvider(helper, lease);
         var operationId = Guid.NewGuid();
         await using var session = await provider.BeginAsync(operationId, CancellationToken.None);
 
@@ -36,7 +36,7 @@ public sealed class EngineCredentialTests
     {
         var helper = Path.Combine(AppContext.BaseDirectory, "Fortiq.Security.Tests.dll");
         using var lease = new TestOnlyKeyLease(new byte[EnginePasswordV1Encoder.EngineUnlockSecretSize]);
-        var provider = new TestOnlyPasswordCredentialProvider(helper, lease, TimeSpan.FromMilliseconds(200));
+        var provider = new PasswordPipeCredentialProvider(helper, lease, TimeSpan.FromMilliseconds(200));
 
         await using var session = await provider.BeginAsync(Guid.NewGuid(), CancellationToken.None);
 

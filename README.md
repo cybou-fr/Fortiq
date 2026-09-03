@@ -127,9 +127,29 @@ derivation, seed выводится стандартным PBKDF2-HMAC-SHA512 (2
 Версии пакетов заданы централизованно в `Directory.Packages.props`, как требует dependency policy
 ADR-013; диапазоны и floating versions запрещены.
 
-`Fortiq.Recover inspect` уже проверяет schema manifest, pinned restic binary и наличие
-repository config, возвращая machine-readable JSON. CLI намеренно не принимает password,
-secret или recovery phrase через command line; unlock-команды пока fail closed.
+`Fortiq.Recover` работает поверх recovery kit и больше не fail-closed. Команды:
+
+```powershell
+Fortiq.Recover inspect   --repository <repo> --engine-root <engines> [--envelope <kit.cbor>]
+Fortiq.Recover snapshots --repository <repo> --engine-root <engines> --envelope <kit.cbor>
+Fortiq.Recover check     --repository <repo> --engine-root <engines> --envelope <kit.cbor>
+Fortiq.Recover restore   --repository <repo> --engine-root <engines> --envelope <kit.cbor> `
+                         --snapshot <id> --target <dir> [--source <original path>]
+```
+
+`inspect` описывает kit по публичному заголовку envelope и никогда не запрашивает recovery material.
+Остальные команды читают мнемонику **только из stdin**: аргументы процесса видны другим процессам и
+попадают в историю оболочки и логи, поэтому `--password`, `--secret`, `--recovery-phrase` и
+`--mnemonic` отвергаются парсером. Неверная мнемоника даёт единый `UnlockFailed` и exit code 77 без
+раскрытия snapshot metadata; неизвестный suite envelope — явную ошибку вместо попытки угадать.
+
+Инструмент зависит только от репозитория, pinned движка и kit: ни Fortiq service, ни локального
+состояния, ни сети. Распакованный EUS живёт лишь в пределах команды, внутри лиза с зачисткой буфера,
+и доходит до restic через одноразовый pipe helper — не через аргумент или environment.
+
+E2E-001 теперь выполняется в полной форме: после удаления локального состояния Fortiq отдельный
+процесс `Fortiq.Recover` восстанавливает датасет, имея только kit, и тест сверяет SHA-256 каждого
+файла, а также что ни мнемоника, ни engine password не появились в выводе.
 
 ## Принципы
 

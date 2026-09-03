@@ -21,7 +21,7 @@ public sealed class PasswordHandoverTests
         var expected = TestDataset.Create(source);
 
         using var lease = new TestOnlyKeyLease(Secret(1));
-        var adapter = workspace.Adapter("state", new TestOnlyPasswordCredentialProvider(HelperPath, lease));
+        var adapter = workspace.Adapter("state", new PasswordPipeCredentialProvider(HelperPath, lease));
 
         var descriptor = await adapter.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
         var backup = await adapter.CreateSnapshotAsync(new CreateSnapshot(descriptor, source, "test-source"), CancellationToken.None);
@@ -46,12 +46,12 @@ public sealed class PasswordHandoverTests
         TestDataset.Create(source);
 
         using var correct = new TestOnlyKeyLease(Secret(1));
-        var owner = workspace.Adapter("state-owner", new TestOnlyPasswordCredentialProvider(HelperPath, correct));
+        var owner = workspace.Adapter("state-owner", new PasswordPipeCredentialProvider(HelperPath, correct));
         var descriptor = await owner.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
         var backup = await owner.CreateSnapshotAsync(new CreateSnapshot(descriptor, source, "test-source"), CancellationToken.None);
 
         using var wrong = new TestOnlyKeyLease(Secret(2));
-        var attacker = workspace.Adapter("state-wrong", new TestOnlyPasswordCredentialProvider(HelperPath, wrong));
+        var attacker = workspace.Adapter("state-wrong", new PasswordPipeCredentialProvider(HelperPath, wrong));
 
         var failure = await Assert.ThrowsAsync<UnlockFailedException>(
             () => attacker.ListSnapshotsAsync(new ListSnapshots(descriptor), CancellationToken.None));

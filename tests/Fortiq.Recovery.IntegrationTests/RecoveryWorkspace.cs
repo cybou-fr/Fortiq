@@ -53,6 +53,9 @@ internal sealed class RecoveryWorkspace : IDisposable
             credentials ?? new InsecureNoPasswordCredentialProvider(),
             EnsureDirectory(stateDirectory));
 
+    /// <summary>The engine root of the repository checkout, with its manifest and pinned binary.</summary>
+    public static string EngineRootPath => Path.Combine(FindRepositoryRoot(), "engines");
+
     /// <summary>The directory receipts are written to, as a Fortiq run would own it.</summary>
     public string ReceiptDirectory => EnsureDirectory("receipts");
 
@@ -115,7 +118,7 @@ internal sealed class RecoveryWorkspace : IDisposable
 
     private static async Task<VerifiedEngine> VerifyPinnedEngineAsync(CancellationToken cancellationToken)
     {
-        var engineRoot = Path.Combine(FindRepositoryRoot(), "engines");
+        var engineRoot = EngineRootPath;
         var manifest = await EngineManifestReader.ReadAsync(Path.Combine(engineRoot, "manifest.json"), cancellationToken);
         var entry = manifest.Engines.Single(candidate => candidate.Name == "restic" && candidate.Rid == "win-x64");
         Skip.IfNot(

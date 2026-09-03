@@ -10,7 +10,7 @@ public sealed class PasswordPipeProtocolTests
     public async Task TransfersPasswordOnce()
     {
         var id = Guid.NewGuid(); using var lease = new TestOnlyKeyLease(Enumerable.Range(0, 32).Select(x => (byte)x).ToArray());
-        var server = new TestOnlyPasswordPipeServer(id, lease); await using var output = new MemoryStream();
+        var server = new PasswordPipeServer(id, lease); await using var output = new MemoryStream();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await Task.WhenAll(server.ServeOnceAsync(timeout.Token), PasswordHelperClient.RunAsync(id, output, timeout.Token));
         Assert.Equal("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\n", Encoding.ASCII.GetString(output.ToArray()));
