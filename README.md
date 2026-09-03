@@ -95,6 +95,18 @@ Failed и cancelled операции тоже оставляют receipt — с�
 restore. Переменная окружения `FORTIQ_TEST_ARTIFACTS` заставляет тесты сохранить receipts прогона в
 указанный каталог.
 
+Реализован формат `KeyEnvelopeV1` из ADR-002: deterministic CBOR (RFC 8949), строгий декодер
+(отклоняет дубликаты полей, indefinite-length, trailing data, неизвестные critical fields и
+превышение лимитов) и AEAD-обёртка EUS с authenticated context из всех публичных полей envelope.
+`RecoverySecretEnvelope` выводит KEK через HKDF-SHA-256 из 256-битной recovery entropy и
+заворачивает EUS в AES-256-GCM. Он использует только платформенную криптографию, поэтому не
+затрагивает gate ADR-013 на Argon2 — production `PasswordEnvelopeV1` по-прежнему заблокирован.
+Неизвестный suite приводит к явной ошибке, а не к попытке угадать параметры; любой отказ unwrap —
+единый `UnlockFailed`.
+
+Версии пакетов заданы централизованно в `Directory.Packages.props`, как требует dependency policy
+ADR-013; диапазоны и floating versions запрещены.
+
 `Fortiq.Recover inspect` уже проверяет schema manifest, pinned restic binary и наличие
 repository config, возвращая machine-readable JSON. CLI намеренно не принимает password,
 secret или recovery phrase через command line; unlock-команды пока fail closed.

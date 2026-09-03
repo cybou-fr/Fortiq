@@ -1,0 +1,22 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- ADR-013 requires security-critical package versions to be defined centrally and never as
+         ranges or floating versions. Every package the solution uses is pinned here. -->
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageVersion Include="System.Formats.Cbor" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Test infrastructure">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="Xunit.SkippableFact" Version="1.5.23" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+</Project>
