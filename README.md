@@ -141,10 +141,10 @@ ADR-013; диапазоны и floating versions запрещены.
 `Fortiq.Recover` работает поверх recovery kit и больше не fail-closed. Команды:
 
 ```powershell
-Fortiq.Recover inspect   --repository <repo> --engine-root <engines> [--envelope <kit.cbor>]
-Fortiq.Recover snapshots --repository <repo> --engine-root <engines> --envelope <kit.cbor>
-Fortiq.Recover check     --repository <repo> --engine-root <engines> --envelope <kit.cbor>
-Fortiq.Recover restore   --repository <repo> --engine-root <engines> --envelope <kit.cbor> `
+Fortiq.Recover inspect   --repository <repo> --engine-root <engines> [--kit <kit dir>]
+Fortiq.Recover snapshots --repository <repo> --engine-root <engines> --kit <kit dir>
+Fortiq.Recover check     --repository <repo> --engine-root <engines> --kit <kit dir>
+Fortiq.Recover restore   --repository <repo> --engine-root <engines> --kit <kit dir> `
                          --snapshot <id> --target <dir> [--source <original path>]
 ```
 
@@ -154,6 +154,16 @@ Stable source ID пишется внутрь репозитория движко
 метаданных репозитория, `null` если их нет) и отдельно `path` — filesystem path движка идентичностью
 не считается и ею не подменяется. Идентификатор ограничен ASCII-формой без запятых, потому что restic
 режет значение `--tag` по запятой; недопустимый id отвергается до запуска движка.
+
+Recovery kit — это каталог: манифест `kit.json` схемы `fortiq.recovery-kit` (repository ID и
+локатор, идентичность движка, список unlock-методов с их SHA-256, инструкция) плюс файлы envelope.
+Чтение кита проверяет схему, хеш каждого envelope, его декодирование и принадлежность тому же
+репозиторию; расхождение манифеста с содержимым — отказ, а не выбор. Мнемоника в кит не пишется.
+
+Репозиторий вместе с китом создаёт `RepositoryProvisioner` (`Fortiq.Provisioning`): он генерирует
+EUS через CSPRNG, инициализирует репозиторий, заворачивает EUS в BIP-39 envelope и записывает кит
+**после** создания репозитория, так что кит никогда не указывает в пустоту. Мнемоника возвращается
+ровно один раз — это единственная копия, Fortiq не может её воспроизвести.
 
 `inspect` описывает kit по публичному заголовку envelope и никогда не запрашивает recovery material.
 Остальные команды читают мнемонику **только из stdin**: аргументы процесса видны другим процессам и

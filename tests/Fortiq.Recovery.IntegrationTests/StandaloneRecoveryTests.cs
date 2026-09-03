@@ -1,16 +1,16 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text.Json;
 using Fortiq.Application;
 using Fortiq.Infrastructure.Keys;
+using Fortiq.Provisioning;
 using Fortiq.Recover;
 
 namespace Fortiq.Recovery.IntegrationTests;
 
 /// <summary>
-/// E2E-001 in its full form: after the local Fortiq state is destroyed, a separate
-/// <c>Fortiq.Recover</c> process opens the repository with nothing but the recovery kit and restores
-/// the dataset. The mnemonic is typed on standard input; it never appears in a process argument.
+/// E2E-001 in its full form: a repository and its kit are created by product code, the local Fortiq
+/// state is destroyed, and a separate <c>Fortiq.Recover</c> process restores the dataset from the kit
+/// alone. The mnemonic is typed on standard input; it never appears in a process argument.
 /// </summary>
 public sealed class StandaloneRecoveryTests
 {
@@ -22,29 +22,26 @@ public sealed class StandaloneRecoveryTests
     {
         using var workspace = await RecoveryWorkspace.CreateAsync("standalone-recovery", CancellationToken.None);
         var source = Path.Combine(workspace.Root, "source");
-        var repository = workspace.EnsureDirectory("repository");
         var expected = TestDataset.Create(source);
 
-        var engineUnlockSecret = RandomNumberGenerator.GetBytes(32);
-        var mnemonic = Bip39Mnemonic.Create();
-        using var lease = new BufferKeyLease(engineUnlockSecret);
+        var provisioned = await ProvisionAsync(workspace);
+        using var lease = UnlockKit(workspace, provisioned);
 
         var backupState = workspace.EnsureDirectory("state-backup");
         var adapter = workspace.Adapter("state-backup", new PasswordPipeCredentialProvider(HelperPath, lease));
-        var descriptor = await adapter.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
-        var backup = await adapter.CreateSnapshotAsync(new CreateSnapshot(descriptor, source, "test-source"), CancellationToken.None);
-
-        // The recovery kit is written once the repository exists, and holds only the wrapped secret.
-        var envelopePath = Path.Combine(workspace.EnsureDirectory("kit"), "engine-unlock.cbor");
-        var envelope = Bip39RecoveryEnvelope.Wrap(descriptor.Id.ToArray(), mnemonic, lease);
-        await File.WriteAllBytesAsync(envelopePath, KeyEnvelopeCodec.Encode(envelope));
+        var backup = await adapter.CreateSnapshotAsync(
+            new CreateSnapshot(provisioned.Repository, source, "test-source"),
+            CancellationToken.None);
 
         // Everything Fortiq kept outside the repository and the kit is destroyed.
         Directory.Delete(backupState, recursive: true);
 
+        var kit = KitDirectory(workspace);
+        var repository = provisioned.Repository.Location;
+
         var listed = await RunRecoverAsync(
-            ["snapshots", "--repository", repository, "--engine-root", RecoveryWorkspace.EngineRootPath, "--envelope", envelopePath],
-            mnemonic);
+            ["snapshots", "--repository", repository, "--engine-root", RecoveryWorkspace.EngineRootPath, "--kit", kit],
+            provisioned.RecoveryMnemonic);
         Assert.Equal(0, listed.ExitCode);
         using (var document = JsonDocument.Parse(listed.StandardOutput))
         {
@@ -53,8 +50,8 @@ public sealed class StandaloneRecoveryTests
         }
 
         var checkResult = await RunRecoverAsync(
-            ["check", "--repository", repository, "--engine-root", RecoveryWorkspace.EngineRootPath, "--envelope", envelopePath],
-            mnemonic);
+            ["check", "--repository", repository, "--engine-root", RecoveryWorkspace.EngineRootPath, "--kit", kit],
+            provisioned.RecoveryMnemonic);
         Assert.Equal(0, checkResult.ExitCode);
         using (var document = JsonDocument.Parse(checkResult.StandardOutput))
         {
@@ -67,12 +64,12 @@ public sealed class StandaloneRecoveryTests
                 "restore",
                 "--repository", repository,
                 "--engine-root", RecoveryWorkspace.EngineRootPath,
-                "--envelope", envelopePath,
+                "--kit", kit,
                 "--snapshot", backup.SnapshotId,
                 "--target", target,
                 "--source", source
             ],
-            mnemonic);
+            provisioned.RecoveryMnemonic);
 
         Assert.Equal(0, restored.ExitCode);
         foreach (var entry in expected)
@@ -82,10 +79,14 @@ public sealed class StandaloneRecoveryTests
             Assert.Equal(entry.Sha256, TestDataset.HashFile(file));
         }
 
-        // Neither the mnemonic nor the engine password may appear in what the tool printed.
+        // The mnemonic may not appear in anything the tool printed, and the kit must not contain it.
         var printed = restored.StandardOutput + restored.StandardError;
-        Assert.DoesNotContain(mnemonic, printed, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(Convert.ToHexStringLower(engineUnlockSecret), printed.ToLowerInvariant(), StringComparison.Ordinal);
+        Assert.DoesNotContain(provisioned.RecoveryMnemonic, printed, StringComparison.OrdinalIgnoreCase);
+        foreach (var file in Directory.EnumerateFiles(kit))
+        {
+            var content = await File.ReadAllTextAsync(file);
+            Assert.DoesNotContain(provisioned.RecoveryMnemonic, content, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     [SkippableFact]
@@ -93,21 +94,15 @@ public sealed class StandaloneRecoveryTests
     {
         using var workspace = await RecoveryWorkspace.CreateAsync("standalone-metadata", CancellationToken.None);
         var source = Path.Combine(workspace.Root, "source");
-        var repository = workspace.EnsureDirectory("repository");
         TestDataset.Create(source);
 
-        using var lease = new BufferKeyLease(RandomNumberGenerator.GetBytes(32));
-        var mnemonic = Bip39Mnemonic.Create();
-        var adapter = workspace.RecordingAdapter("state", new PasswordPipeCredentialProvider(HelperPath, lease));
-        var descriptor = await adapter.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
-        var backup = await adapter.CreateSnapshotAsync(
-            new CreateSnapshot(descriptor, source, "workstation:documents"),
-            CancellationToken.None);
+        var provisioned = await ProvisionAsync(workspace);
+        using var lease = UnlockKit(workspace, provisioned);
 
-        var envelopePath = Path.Combine(workspace.EnsureDirectory("kit"), "engine-unlock.cbor");
-        await File.WriteAllBytesAsync(
-            envelopePath,
-            KeyEnvelopeCodec.Encode(Bip39RecoveryEnvelope.Wrap(descriptor.Id.ToArray(), mnemonic, lease)));
+        var adapter = workspace.RecordingAdapter("state", new PasswordPipeCredentialProvider(HelperPath, lease));
+        var backup = await adapter.CreateSnapshotAsync(
+            new CreateSnapshot(provisioned.Repository, source, "workstation:documents"),
+            CancellationToken.None);
 
         // Every receipt and everything else Fortiq kept locally is destroyed. The identity of the
         // source has to come out of the repository itself.
@@ -115,8 +110,13 @@ public sealed class StandaloneRecoveryTests
         Directory.Delete(workspace.EnsureDirectory("state"), recursive: true);
 
         var listed = await RunRecoverAsync(
-            ["snapshots", "--repository", repository, "--engine-root", RecoveryWorkspace.EngineRootPath, "--envelope", envelopePath],
-            mnemonic);
+            [
+                "snapshots",
+                "--repository", provisioned.Repository.Location,
+                "--engine-root", RecoveryWorkspace.EngineRootPath,
+                "--kit", KitDirectory(workspace)
+            ],
+            provisioned.RecoveryMnemonic);
 
         Assert.Equal(0, listed.ExitCode);
         using var document = JsonDocument.Parse(listed.StandardOutput);
@@ -134,22 +134,22 @@ public sealed class StandaloneRecoveryTests
     {
         using var workspace = await RecoveryWorkspace.CreateAsync("standalone-wrong-secret", CancellationToken.None);
         var source = Path.Combine(workspace.Root, "source");
-        var repository = workspace.EnsureDirectory("repository");
         TestDataset.Create(source);
 
-        using var lease = new BufferKeyLease(RandomNumberGenerator.GetBytes(32));
-        var mnemonic = Bip39Mnemonic.Create();
+        var provisioned = await ProvisionAsync(workspace);
+        using var lease = UnlockKit(workspace, provisioned);
         var adapter = workspace.Adapter("state", new PasswordPipeCredentialProvider(HelperPath, lease));
-        var descriptor = await adapter.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
-        var backup = await adapter.CreateSnapshotAsync(new CreateSnapshot(descriptor, source, "test-source"), CancellationToken.None);
-
-        var envelopePath = Path.Combine(workspace.EnsureDirectory("kit"), "engine-unlock.cbor");
-        await File.WriteAllBytesAsync(
-            envelopePath,
-            KeyEnvelopeCodec.Encode(Bip39RecoveryEnvelope.Wrap(descriptor.Id.ToArray(), mnemonic, lease)));
+        var backup = await adapter.CreateSnapshotAsync(
+            new CreateSnapshot(provisioned.Repository, source, "test-source"),
+            CancellationToken.None);
 
         var result = await RunRecoverAsync(
-            ["snapshots", "--repository", repository, "--engine-root", RecoveryWorkspace.EngineRootPath, "--envelope", envelopePath],
+            [
+                "snapshots",
+                "--repository", provisioned.Repository.Location,
+                "--engine-root", RecoveryWorkspace.EngineRootPath,
+                "--kit", KitDirectory(workspace)
+            ],
             Bip39Mnemonic.Create());
 
         Assert.Equal(RecoveryCli.ExitUnlockFailed, result.ExitCode);
@@ -162,32 +162,77 @@ public sealed class StandaloneRecoveryTests
     public async Task InspectDescribesTheKitWithoutAskingForRecoveryMaterial()
     {
         using var workspace = await RecoveryWorkspace.CreateAsync("standalone-inspect", CancellationToken.None);
-        var source = Path.Combine(workspace.Root, "source");
-        var repository = workspace.EnsureDirectory("repository");
-        TestDataset.Create(source);
-
-        using var lease = new BufferKeyLease(RandomNumberGenerator.GetBytes(32));
-        var mnemonic = Bip39Mnemonic.Create();
-        var adapter = workspace.Adapter("state", new PasswordPipeCredentialProvider(HelperPath, lease));
-        var descriptor = await adapter.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
-
-        var envelopePath = Path.Combine(workspace.EnsureDirectory("kit"), "engine-unlock.cbor");
-        await File.WriteAllBytesAsync(
-            envelopePath,
-            KeyEnvelopeCodec.Encode(Bip39RecoveryEnvelope.Wrap(descriptor.Id.ToArray(), mnemonic, lease)));
+        var provisioned = await ProvisionAsync(workspace);
 
         // No mnemonic is offered on standard input at all.
         var result = await RunRecoverAsync(
-            ["inspect", "--repository", repository, "--engine-root", RecoveryWorkspace.EngineRootPath, "--envelope", envelopePath],
+            [
+                "inspect",
+                "--repository", provisioned.Repository.Location,
+                "--engine-root", RecoveryWorkspace.EngineRootPath,
+                "--kit", KitDirectory(workspace)
+            ],
             mnemonic: null);
 
         Assert.Equal(0, result.ExitCode);
         using var document = JsonDocument.Parse(result.StandardOutput);
-        var kit = document.RootElement.GetProperty("envelope");
+        var kit = document.RootElement.GetProperty("kit");
         Assert.True(document.RootElement.GetProperty("repositoryPresent").GetBoolean());
-        Assert.Equal(Bip39RecoveryEnvelope.SuiteId, kit.GetProperty("suite").GetString());
-        Assert.True(kit.GetProperty("supported").GetBoolean());
-        Assert.Equal(descriptor.Id.ToString().ToLowerInvariant(), kit.GetProperty("repositoryId").GetString());
+        Assert.Equal(provisioned.Repository.Id.ToString().ToLowerInvariant(), kit.GetProperty("repositoryId").GetString());
+
+        var method = Assert.Single(kit.GetProperty("unlockMethods").EnumerateArray());
+        Assert.Equal("bip39", method.GetProperty("providerType").GetString());
+        Assert.Equal(Bip39RecoveryEnvelope.SuiteId, method.GetProperty("suite").GetString());
+        Assert.True(method.GetProperty("supported").GetBoolean());
+    }
+
+    [SkippableFact]
+    public async Task ATamperedKitIsRefusedBeforeAnyUnlockIsAttempted()
+    {
+        using var workspace = await RecoveryWorkspace.CreateAsync("standalone-tampered-kit", CancellationToken.None);
+        var provisioned = await ProvisionAsync(workspace);
+        var kit = KitDirectory(workspace);
+
+        var envelopeFile = Directory.EnumerateFiles(kit, "*.cbor").Single();
+        var bytes = await File.ReadAllBytesAsync(envelopeFile);
+        bytes[^1] ^= 0x01;
+        await File.WriteAllBytesAsync(envelopeFile, bytes);
+
+        var result = await RunRecoverAsync(
+            [
+                "inspect",
+                "--repository", provisioned.Repository.Location,
+                "--engine-root", RecoveryWorkspace.EngineRootPath,
+                "--kit", kit
+            ],
+            mnemonic: null);
+
+        Assert.Equal(RecoveryCli.ExitDataError, result.ExitCode);
+        Assert.Contains("does not match the hash", result.StandardError, StringComparison.Ordinal);
+    }
+
+    private static string KitDirectory(RecoveryWorkspace workspace) => Path.Combine(workspace.Root, "kit");
+
+    private static async Task<ProvisionedRepository> ProvisionAsync(RecoveryWorkspace workspace)
+    {
+        Skip.IfNot(File.Exists(HelperPath), "The password helper was not built next to the tests.");
+
+        var provisioner = new RepositoryProvisioner(RecoveryWorkspace.EngineRootPath, HelperPath);
+        return await provisioner.CreateAsync(
+            workspace.EnsureDirectory("repository"),
+            KitDirectory(workspace),
+            workspace.EnsureDirectory("state-provision"),
+            CancellationToken.None);
+    }
+
+    /// <summary>Opens the kit the way any later run has to: with the mnemonic and nothing else.</summary>
+    private static IKeyLease UnlockKit(RecoveryWorkspace workspace, ProvisionedRepository provisioned)
+    {
+        var opened = RecoveryKitStore.ReadAsync(KitDirectory(workspace), CancellationToken.None).GetAwaiter().GetResult();
+        return Bip39RecoveryEnvelope.Unwrap(
+            opened.Envelopes[0],
+            provisioned.Repository.Id.ToArray(),
+            provisioned.RecoveryMnemonic);
     }
 
     private static async Task<ProcessResult> RunRecoverAsync(string[] arguments, string? mnemonic)

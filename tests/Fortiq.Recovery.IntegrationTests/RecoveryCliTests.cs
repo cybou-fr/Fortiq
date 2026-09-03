@@ -9,12 +9,12 @@ public sealed class RecoveryCliTests
     public void ParsesRestore()
     {
         var command = RecoveryCli.Parse(
-            ["restore", "--repository", "repo", "--engine-root", "engines", "--envelope", "kit.cbor", "--snapshot", "abc", "--target", "restore"]);
+            ["restore", "--repository", "repo", "--engine-root", "engines", "--kit", "kit", "--snapshot", "abc", "--target", "restore"]);
 
         Assert.Equal(RecoveryOperation.Restore, command.Operation);
         Assert.NotNull(command.Target);
         Assert.True(Path.IsPathFullyQualified(command.Target));
-        Assert.True(Path.IsPathFullyQualified(command.Envelope!));
+        Assert.True(Path.IsPathFullyQualified(command.Kit!));
     }
 
     [Theory]
@@ -29,7 +29,7 @@ public sealed class RecoveryCliTests
     [InlineData("snapshots")]
     [InlineData("check")]
     [InlineData("restore")]
-    public void UnlockCommandsRequireAnEnvelope(string operation)
+    public void UnlockCommandsRequireAKit(string operation)
     {
         string[] args = operation == "restore"
             ? [operation, "--repository", "repo", "--engine-root", "engines", "--snapshot", "abc", "--target", "out"]
@@ -39,11 +39,11 @@ public sealed class RecoveryCliTests
     }
 
     [Fact]
-    public void InspectDoesNotRequireAnEnvelopeAndDoesNotUnlock()
+    public void InspectDoesNotRequireAKitAndDoesNotUnlock()
     {
         var command = RecoveryCli.Parse(["inspect", "--repository", "repo", "--engine-root", "engines"]);
 
-        Assert.Null(command.Envelope);
+        Assert.Null(command.Kit);
         Assert.False(command.RequiresUnlock);
     }
 
@@ -73,7 +73,7 @@ public sealed class RecoveryCliTests
         var error = new StringWriter();
 
         var code = await RecoveryCli.RunAsync(
-            ["check", "--repository", "repo", "--engine-root", "engines", "--envelope", "kit.cbor"],
+            ["check", "--repository", "repo", "--engine-root", "engines", "--kit", "kit"],
             new FakeExecutor(new UnlockFailedException()),
             new FakeMaterial(),
             output,

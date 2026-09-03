@@ -28,10 +28,12 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
         using var engine = await VerifyEngineAsync(command.EngineRoot, token);
         if (!command.RequiresUnlock)
         {
-            return Inspect(command, engine);
+            return await InspectAsync(command, engine, token);
         }
 
-        var envelope = await ReadEnvelopeAsync(command.Envelope!, token);
+        var kit = await RecoveryKitStore.ReadAsync(command.Kit!, token);
+        var envelope = kit.Envelopes.SingleOrDefault(candidate => candidate.Suite == Bip39RecoveryEnvelope.SuiteId)
+            ?? throw new InvalidDataException("The recovery kit holds no unlock method this tool supports.");
         var mnemonic = await material.ReadMnemonicAsync(token);
 
         // The unwrapped secret exists only for the duration of this command, and only inside a lease
@@ -71,27 +73,30 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
         return await EngineBinaryVerifier.VerifyAsync(engineRoot, entry, token);
     }
 
-    private static async Task<KeyEnvelopeV1> ReadEnvelopeAsync(string path, CancellationToken token)
+    private static async Task<object> InspectAsync(RecoveryCommand command, VerifiedEngine engine, CancellationToken token)
     {
-        var encoded = await File.ReadAllBytesAsync(path, token);
-        return KeyEnvelopeCodec.Decode(encoded);
-    }
-
-    private static object Inspect(RecoveryCommand command, VerifiedEngine engine)
-    {
-        object? envelope = null;
-        if (command.Envelope is not null && File.Exists(command.Envelope))
+        object? kit = null;
+        if (command.Kit is not null)
         {
-            // Inspect reads only the public header of the kit; it never asks for recovery material.
-            var decoded = KeyEnvelopeCodec.Decode(File.ReadAllBytes(command.Envelope));
-            envelope = new
+            // Inspect reads and verifies the public part of the kit - manifest, envelope hashes and
+            // the repository each envelope belongs to. It never asks for recovery material.
+            var opened = await RecoveryKitStore.ReadAsync(command.Kit, token);
+            kit = new
             {
-                envelopeId = Convert.ToHexStringLower(decoded.EnvelopeId),
-                repositoryId = Convert.ToHexStringLower(decoded.RepositoryId),
-                providerType = decoded.ProviderType.ToString().ToLowerInvariant(),
-                suite = decoded.Suite,
-                createdAt = decoded.CreatedAt,
-                supported = decoded.Suite == Bip39RecoveryEnvelope.SuiteId
+                repositoryId = opened.Manifest.RepositoryId,
+                repositoryLocator = opened.Manifest.RepositoryLocator,
+                createdAt = opened.Manifest.CreatedAt,
+                engine = opened.Manifest.Engine,
+                unlockMethods = opened.Manifest.UnlockMethods
+                    .Select(method => new
+                    {
+                        method.ProviderType,
+                        method.Suite,
+                        method.EnvelopeId,
+                        supported = method.Suite == Bip39RecoveryEnvelope.SuiteId
+                    })
+                    .ToArray(),
+                instructions = opened.Manifest.Instructions
             };
         }
 
@@ -102,7 +107,7 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
             repository = command.Repository,
             repositoryPresent = File.Exists(Path.Combine(command.Repository, "config")),
             engine = new { engine.Name, engine.Version, engine.Rid, engine.Sha256 },
-            envelope,
+            kit,
             unlockRequired = true
         };
     }

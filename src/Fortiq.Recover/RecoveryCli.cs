@@ -9,7 +9,7 @@ public sealed record RecoveryCommand(
     RecoveryOperation Operation,
     string Repository,
     string EngineRoot,
-    string? Envelope,
+    string? Kit,
     string? SnapshotId,
     string? Target,
     string? Source)
@@ -42,7 +42,7 @@ public static class RecoveryCli
     private static readonly JsonSerializerOptions OutputJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private static readonly string[] KnownOptions =
-        ["--repository", "--engine-root", "--envelope", "--snapshot", "--target", "--source"];
+        ["--repository", "--engine-root", "--kit", "--snapshot", "--target", "--source"];
 
     public static async Task<int> RunAsync(
         string[] args,
@@ -103,7 +103,7 @@ public static class RecoveryCli
 
         var repository = RequiredPath(options, "--repository");
         var engineRoot = RequiredPath(options, "--engine-root");
-        options.TryGetValue("--envelope", out var envelope);
+        options.TryGetValue("--kit", out var kit);
         options.TryGetValue("--snapshot", out var snapshot);
         options.TryGetValue("--target", out var target);
         options.TryGetValue("--source", out var source);
@@ -118,16 +118,16 @@ public static class RecoveryCli
             throw new ArgumentException("Snapshot, target and source are restore-only.", nameof(args));
         }
 
-        if (operation != RecoveryOperation.Inspect && string.IsNullOrWhiteSpace(envelope))
+        if (operation != RecoveryOperation.Inspect && string.IsNullOrWhiteSpace(kit))
         {
-            throw new ArgumentException($"{operation} requires --envelope.", nameof(args));
+            throw new ArgumentException($"{operation} requires --kit.", nameof(args));
         }
 
         return new RecoveryCommand(
             operation,
             repository,
             engineRoot,
-            envelope is null ? null : Path.GetFullPath(envelope),
+            kit is null ? null : Path.GetFullPath(kit),
             snapshot,
             target is null ? null : Path.GetFullPath(target),
             source);
