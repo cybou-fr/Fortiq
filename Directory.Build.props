@@ -3,5 +3,14 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>
+
+  <PropertyGroup Condition="'$(OutputType)' == 'Exe' Or '$(OutputType)' == 'WinExe'">
+    <ApplicationIcon>$(MSBuildThisFileDirectory)assets\icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)assets\icon.png" Pack="true" PackagePath="\" Condition="Exists('$(MSBuildThisFileDirectory)assets\icon.png')" Visible="false" />
+  </ItemGroup>
 </Project>

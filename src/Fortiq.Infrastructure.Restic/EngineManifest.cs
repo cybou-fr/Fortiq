@@ -26,6 +26,7 @@ public static partial class EngineManifestReader
     private const string ExpectedSchema = "fortiq.engine-manifest";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = false,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
     };

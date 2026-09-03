@@ -21,7 +21,15 @@ public sealed record ResticProcessRequest(
 
 public sealed record ResticProcessResult(int ExitCode, string StandardOutput, string StandardError);
 
-public sealed class ResticProcessRunner
+public interface IResticProcessRunner
+{
+    Task<ResticProcessResult> RunAsync(
+        VerifiedEngine engine,
+        ResticProcessRequest request,
+        CancellationToken cancellationToken);
+}
+
+public sealed class ResticProcessRunner : IResticProcessRunner
 {
     public const int DefaultOutputLimit = 4 * 1024 * 1024;
     private static readonly HashSet<string> AllowedEnvironmentVariables =

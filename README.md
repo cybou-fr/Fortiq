@@ -1,5 +1,9 @@
 # Fortiq
 
+<p align="center">
+  <img src="assets/icon.png" alt="Fortiq Logo" width="128" height="128" />
+</p>
+
 Fortiq — sovereign recovery platform для организаций, которым нужны проверяемые,
 зашифрованные и устойчивые к уничтожению резервные копии под собственным контролем.
 
@@ -14,7 +18,7 @@ Fortiq — sovereign recovery platform для организаций, котор
 
 Исполняемый P0-каркас создан на .NET 10 LTS. Сейчас он содержит Domain value objects,
 state machine backup job, application-порт repository engine и первые unit tests. Следующий
-milestone — golden-output parsers и `ResticRepositoryEngine` local adapter из
+milestone — `Fortiq.Recover` CLI из
 [плана исполняемого прототипа](docs/11-executable-prototype.md). Production Argon2
 integration отдельно заблокирована review gates из
 [ADR-013](docs/adr/ADR-013-argon2-dependency-policy.md).
@@ -33,6 +37,29 @@ dotnet test Fortiq.sln --configuration Release
 Pinned metadata restic хранится в `engines/manifest.json`. Сам бинарник не входит в
 исходный репозиторий: до появления проверенного acquisition step его нельзя подменять
 глобально установленной версией.
+
+Version-pinned fixtures команд `version`, `init`, `backup`, `snapshots`, `check` и
+`restore` находятся в `test-assets/restic-output/0.19.1`. Parser требует согласованности
+exit code и обязательного terminal event: один progress или summary не создаёт успешный
+receipt.
+
+Текущий `ResticRepositoryEngine` имеет internal visibility и использует
+`--insecure-no-password` только как P0 test seam. Этот режим нельзя экспортировать в
+Service или recovery CLI. Production activation требует одноразовый password helper и
+проверяемую подпись всех Windows EXE/DLL согласно supply-chain policy.
+
+Test-only key lease хранит собственную копию EUS, отзывает доступ и обнуляет доступный
+буфер при `Dispose`. `EnginePasswordV1` кодируется напрямую в предоставленный mutable
+буфер без создания immutable secret-string.
+
+P0 password helper использует одноразовый `CurrentUserOnly` Named Pipe, получает через
+аргументы только operation ID и пишет password с единственным завершающим newline.
+Challenge-response проверяет целостность protocol round-trip, но не заменяет обязательную
+P1-проверку client PID/service identity и installer-defined SDDL.
+
+`Fortiq.Recover inspect` уже проверяет schema manifest, pinned restic binary и наличие
+repository config, возвращая machine-readable JSON. CLI намеренно не принимает password,
+secret или recovery phrase через command line; unlock-команды пока fail closed.
 
 ## Принципы
 

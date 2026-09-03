@@ -5,6 +5,10 @@ namespace Fortiq.Restic.ContractTests;
 
 public sealed class EngineManifestTests : IDisposable
 {
+    private static readonly System.Text.Json.JsonSerializerOptions CamelCaseJson = new()
+    {
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+    };
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"fortiq-tests-{Guid.NewGuid():N}");
 
     public EngineManifestTests() => Directory.CreateDirectory(_root);
@@ -39,6 +43,21 @@ public sealed class EngineManifestTests : IDisposable
 
         await Assert.ThrowsAsync<System.Text.Json.JsonException>(
             () => EngineManifestReader.ReadAsync(path, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ReaderAcceptsCamelCaseManifest()
+    {
+        var bytes = "engine"u8.ToArray();
+        var entry = await CreateEntryAsync(bytes);
+        var path = Path.Combine(_root, "valid.json");
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            new EngineManifest("fortiq.engine-manifest", 1, [entry]), CamelCaseJson);
+        await File.WriteAllTextAsync(path, json, CancellationToken.None);
+
+        var manifest = await EngineManifestReader.ReadAsync(path, CancellationToken.None);
+
+        Assert.Single(manifest.Engines);
     }
 
     public void Dispose() => Directory.Delete(_root, recursive: true);

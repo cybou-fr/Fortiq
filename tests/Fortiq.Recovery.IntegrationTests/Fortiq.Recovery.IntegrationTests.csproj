@@ -19,14 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Restic\Fortiq.Infrastructure.Restic.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="..\..\test-assets\restic-output\0.19.1\**\*">
-      <Link>restic-output\0.19.1\%(RecursiveDir)%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <ProjectReference Include="..\..\src\Fortiq.Recover\Fortiq.Recover.csproj" />
   </ItemGroup>
 
 </Project>
