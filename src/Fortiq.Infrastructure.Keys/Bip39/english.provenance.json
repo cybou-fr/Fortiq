@@ -1,0 +1,11 @@
+{
+  "schema": "fortiq.wordlist-provenance",
+  "version": 1,
+  "list": "bip39-english",
+  "wordCount": 2048,
+  "sourceUrl": "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt",
+  "specification": "https://github.com/bitcoin/bips/blob/master/bip-0039/bip-0039-wordlists.md",
+  "normalizedSha256": "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda",
+  "normalization": "words joined with a single line feed and one trailing line feed, UTF-8, no BOM",
+  "retrievedOn": "2026-09-03"
+}

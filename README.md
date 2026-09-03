@@ -104,6 +104,13 @@ restore. Переменная окружения `FORTIQ_TEST_ARTIFACTS` зас�
 Неизвестный suite приводит к явной ошибке, а не к попытке угадать параметры; любой отказ unwrap —
 единый `UnlockFailed`.
 
+`Bip39RecoveryEnvelopeV1` реализован: мнемоника проверяется по словарю и checksum до любой
+derivation, seed выводится стандартным PBKDF2-HMAC-SHA512 (2048 итераций, salt `mnemonic` +
+опциональная passphrase), а KEK — отдельным HKDF с Fortiq-контекстом. Encode, decode и seed
+сверяются со всеми официальными English-векторами BIP-39 (`test-assets/bip39/`). Английский словарь
+встроен в assembly, чтобы recovery работал офлайн; его происхождение и normalized SHA-256
+зафиксированы в `src/Fortiq.Infrastructure.Keys/Bip39/english.provenance.json` и проверяются тестом.
+
 Версии пакетов заданы централизованно в `Directory.Packages.props`, как требует dependency policy
 ADR-013; диапазоны и floating versions запрещены.
 

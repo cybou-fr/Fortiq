@@ -1,0 +1,10 @@
+{
+  "schema": "fortiq.test-vector-provenance",
+  "version": 1,
+  "set": "bip39-official-vectors",
+  "sourceUrl": "https://raw.githubusercontent.com/trezor/python-mnemonic/master/vectors.json",
+  "sha256": "fa3b937b7cff9c9b8ecd3aa011faeb8d6dd67993174b72326e83f4de8fdb30f8",
+  "passphrase": "TREZOR",
+  "retrievedOn": "2026-09-03",
+  "note": "Reference vectors published with the BIP-39 implementation; they contain no Fortiq secrets."
+}

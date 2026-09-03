@@ -19,6 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="$(MSBuildThisFileDirectory)..\..\test-assets\bip39\vectors.json" Link="bip39-vectors.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Keys\Fortiq.Infrastructure.Keys.csproj" />
     <ProjectReference Include="..\..\src\Fortiq.PasswordHelper\Fortiq.PasswordHelper.csproj" />
   </ItemGroup>

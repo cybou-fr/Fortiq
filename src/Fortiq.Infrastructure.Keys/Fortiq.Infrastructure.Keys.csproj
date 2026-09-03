@@ -1,6 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <!-- The recovery tool must work offline, so the BIP-39 English wordlist ships in the assembly.
+         Its provenance and normalized SHA-256 are recorded in Bip39/english.provenance.json. -->
+    <EmbeddedResource Include="Bip39\english.txt" />
+    <None Include="Bip39\english.provenance.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="System.Formats.Cbor" />
   </ItemGroup>
 
