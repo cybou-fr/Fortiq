@@ -2,7 +2,16 @@ namespace Fortiq.Domain;
 
 public sealed record RepositoryDescriptor(RepositoryId Id, string Location);
 
-public sealed record SnapshotDescriptor(string Id, DateTimeOffset CreatedAt, string SourceStableId);
+/// <summary>
+/// A snapshot as the repository itself describes it. <paramref name="SourceStableId"/> comes from the
+/// metadata Fortiq wrote into the repository and is null for a snapshot that carries none, which is
+/// deliberately distinguishable from the filesystem path the engine recorded.
+/// </summary>
+public sealed record SnapshotDescriptor(
+    string Id,
+    DateTimeOffset CreatedAt,
+    string? SourceStableId,
+    string SourcePath);
 
 public sealed record BackupReceipt(
     Guid OperationId,

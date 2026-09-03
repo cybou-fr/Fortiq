@@ -116,7 +116,14 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
             version = 1,
             repositoryId = repository.Id.ToString(),
             snapshots = snapshots
-                .Select(snapshot => new { id = snapshot.Id, createdAt = snapshot.CreatedAt, source = snapshot.SourceStableId })
+                .Select(snapshot => new
+                {
+                    id = snapshot.Id,
+                    createdAt = snapshot.CreatedAt,
+                    // Read from the repository's own metadata; null means the snapshot carries none.
+                    source = snapshot.SourceStableId,
+                    path = snapshot.SourcePath
+                })
                 .ToArray()
         };
     }

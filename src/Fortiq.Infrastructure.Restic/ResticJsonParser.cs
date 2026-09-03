@@ -16,7 +16,13 @@ public sealed record ResticBackupSummary(
     DateTimeOffset StartedAt,
     DateTimeOffset CompletedAt);
 
-public sealed record ResticSnapshot(string Id, DateTimeOffset Time, IReadOnlyList<string> Paths, string Hostname, string ProgramVersion);
+public sealed record ResticSnapshot(
+    string Id,
+    DateTimeOffset Time,
+    IReadOnlyList<string> Paths,
+    IReadOnlyList<string> Tags,
+    string Hostname,
+    string ProgramVersion);
 
 public sealed record ResticCheckSummary(long ErrorCount, IReadOnlyList<string> BrokenPacks, bool SuggestRepairIndex, bool SuggestPrune)
 {
@@ -86,6 +92,8 @@ public static partial class ResticJsonParser
                 RequireIdentifier(root, "id"),
                 RequireDateTimeOffset(root, "time"),
                 RequireStringArray(root, "paths"),
+                // Restic omits the field entirely when a snapshot has no tags.
+                OptionalStringArray(root, "tags"),
                 RequireString(root, "hostname"),
                 RequireString(root, "program_version")));
         }

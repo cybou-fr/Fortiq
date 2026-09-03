@@ -38,7 +38,15 @@ internal sealed class ResticRepositoryEngine : IBackupRepository
         var operationId = OperationId(command);
         var result = await RunAsync(
             ResticOperation.Backup,
-            [NormalizePath(command.SourcePath), "--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
+            [
+                NormalizePath(command.SourcePath),
+                // The stable source identity is written into the repository, so a recovery on a
+                // clean machine can tell what a snapshot is without any local Fortiq state.
+                "--tag", ResticSnapshotMetadata.TagArgument(command.SourceStableId),
+                "--repo", NormalizePath(command.Repository.Location),
+                "--json",
+                "--no-cache"
+            ],
             operationId,
             cancellationToken);
         var summary = ResticJsonParser.ParseBackup(result);
@@ -59,7 +67,11 @@ internal sealed class ResticRepositoryEngine : IBackupRepository
             OperationId(query),
             cancellationToken);
         return ResticJsonParser.ParseSnapshots(result)
-            .Select(snapshot => new SnapshotDescriptor(snapshot.Id, snapshot.Time, snapshot.Paths.Count == 0 ? string.Empty : snapshot.Paths[0]))
+            .Select(snapshot => new SnapshotDescriptor(
+                snapshot.Id,
+                snapshot.Time,
+                ResticSnapshotMetadata.ReadSourceStableId(snapshot.Tags),
+                snapshot.Paths.Count == 0 ? string.Empty : snapshot.Paths[0]))
             .ToArray();
     }
 

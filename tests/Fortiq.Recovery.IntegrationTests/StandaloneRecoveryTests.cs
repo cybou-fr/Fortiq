@@ -89,6 +89,47 @@ public sealed class StandaloneRecoveryTests
     }
 
     [SkippableFact]
+    public async Task TheSourceIdentityComesFromTheRepositoryAndNotFromLocalEvidence()
+    {
+        using var workspace = await RecoveryWorkspace.CreateAsync("standalone-metadata", CancellationToken.None);
+        var source = Path.Combine(workspace.Root, "source");
+        var repository = workspace.EnsureDirectory("repository");
+        TestDataset.Create(source);
+
+        using var lease = new BufferKeyLease(RandomNumberGenerator.GetBytes(32));
+        var mnemonic = Bip39Mnemonic.Create();
+        var adapter = workspace.RecordingAdapter("state", new PasswordPipeCredentialProvider(HelperPath, lease));
+        var descriptor = await adapter.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
+        var backup = await adapter.CreateSnapshotAsync(
+            new CreateSnapshot(descriptor, source, "workstation:documents"),
+            CancellationToken.None);
+
+        var envelopePath = Path.Combine(workspace.EnsureDirectory("kit"), "engine-unlock.cbor");
+        await File.WriteAllBytesAsync(
+            envelopePath,
+            KeyEnvelopeCodec.Encode(Bip39RecoveryEnvelope.Wrap(descriptor.Id.ToArray(), mnemonic, lease)));
+
+        // Every receipt and everything else Fortiq kept locally is destroyed. The identity of the
+        // source has to come out of the repository itself.
+        Directory.Delete(workspace.ReceiptDirectory, recursive: true);
+        Directory.Delete(workspace.EnsureDirectory("state"), recursive: true);
+
+        var listed = await RunRecoverAsync(
+            ["snapshots", "--repository", repository, "--engine-root", RecoveryWorkspace.EngineRootPath, "--envelope", envelopePath],
+            mnemonic);
+
+        Assert.Equal(0, listed.ExitCode);
+        using var document = JsonDocument.Parse(listed.StandardOutput);
+        var snapshot = document.RootElement
+            .GetProperty("snapshots")
+            .EnumerateArray()
+            .Single(candidate => candidate.GetProperty("id").GetString() == backup.SnapshotId);
+
+        Assert.Equal("workstation:documents", snapshot.GetProperty("source").GetString());
+        Assert.Equal(source, snapshot.GetProperty("path").GetString());
+    }
+
+    [SkippableFact]
     public async Task AWrongMnemonicFailsAsUnlockFailedWithoutRevealingSnapshots()
     {
         using var workspace = await RecoveryWorkspace.CreateAsync("standalone-wrong-secret", CancellationToken.None);

@@ -145,6 +145,13 @@ Fortiq.Recover restore   --repository <repo> --engine-root <engines> --envelope 
                          --snapshot <id> --target <dir> [--source <original path>]
 ```
 
+Stable source ID пишется внутрь репозитория движковыми тегами (`fortiq.v1` и
+`fortiq.source=<id>`), а не только в receipt: восстановление на чистой машине узнаёт, что представляет
+собой snapshot, не имея ни одного локального файла Fortiq. `snapshots` возвращает `source` (из
+метаданных репозитория, `null` если их нет) и отдельно `path` — filesystem path движка идентичностью
+не считается и ею не подменяется. Идентификатор ограничен ASCII-формой без запятых, потому что restic
+режет значение `--tag` по запятой; недопустимый id отвергается до запуска движка.
+
 `inspect` описывает kit по публичному заголовку envelope и никогда не запрашивает recovery material.
 Остальные команды читают мнемонику **только из stdin**: аргументы процесса видны другим процессам и
 попадают в историю оболочки и логи, поэтому `--password`, `--secret`, `--recovery-phrase` и
