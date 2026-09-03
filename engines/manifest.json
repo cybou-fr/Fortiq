@@ -1,0 +1,18 @@
+{
+  "schema": "fortiq.engine-manifest",
+  "version": 1,
+  "engines": [
+    {
+      "name": "restic",
+      "version": "0.19.1",
+      "rid": "win-x64",
+      "relativePath": "restic/0.19.1/win-x64/restic.exe",
+      "binaryLength": 31660032,
+      "binarySha256": "b0dd1fd21eea5d8fe1325f55f7118213c21f36de8a261e04c0624a5ab9fd7830",
+      "archiveSha256": "da948ad707ed690426473aaba2046cd61f8f90f6f0e7dab6be0d5796531de67d",
+      "sourceUrl": "https://github.com/restic/restic/releases/download/v0.19.1/restic_0.19.1_windows_amd64.zip",
+      "license": "BSD-2-Clause",
+      "upstreamCommit": "6aa3a51"
+    }
+  ]
+}

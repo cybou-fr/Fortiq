@@ -1,6 +1,42 @@
-bin/
-obj/
-.vs/
+# Fortiq repository ignores
+
+# User-requested exclusions
+docs/
+.idea/
+
+# Engine downloads & binaries
+engines/restic/
+
+# Build artifacts (.NET)
+**/[Bb]in/
+**/[Oo]bj/
+[Bb]uild/
 TestResults/
-*.user
 *.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.dbmdl
+
+# IDE & Editor files
+.vs/
+.vscode/
+*.DotSettings.user
+*.DotSettings
+_ReSharper*/
+
+# Operating System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# Logs & Temporary files
+*.log
+*.tmp
+*.bak

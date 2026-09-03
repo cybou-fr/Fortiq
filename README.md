@@ -14,7 +14,7 @@ Fortiq — sovereign recovery platform для организаций, котор
 
 Исполняемый P0-каркас создан на .NET 10 LTS. Сейчас он содержит Domain value objects,
 state machine backup job, application-порт repository engine и первые unit tests. Следующий
-milestone — проверка engine manifest и `ResticRepositoryEngine` process adapter из
+milestone — golden-output parsers и `ResticRepositoryEngine` local adapter из
 [плана исполняемого прототипа](docs/11-executable-prototype.md). Production Argon2
 integration отдельно заблокирована review gates из
 [ADR-013](docs/adr/ADR-013-argon2-dependency-policy.md).
@@ -29,6 +29,10 @@ dotnet test Fortiq.sln --configuration Release
 
 Сборка использует nullable reference types, рекомендованные анализаторы и рассматривает
 все предупреждения как ошибки.
+
+Pinned metadata restic хранится в `engines/manifest.json`. Сам бинарник не входит в
+исходный репозиторий: до появления проверенного acquisition step его нельзя подменять
+глобально установленной версией.
 
 ## Принципы
 
