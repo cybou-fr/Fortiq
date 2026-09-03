@@ -11,6 +11,7 @@
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>
 
@@ -20,6 +21,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Fortiq.Recover\Fortiq.Recover.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Application\Fortiq.Application.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Restic\Fortiq.Infrastructure.Restic.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Keys\Fortiq.Infrastructure.Keys.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.PasswordHelper\Fortiq.PasswordHelper.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Receipts\Fortiq.Infrastructure.Receipts.csproj" />
   </ItemGroup>
 
 </Project>

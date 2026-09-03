@@ -10,7 +10,8 @@ public enum ResticOperation
     Backup,
     Snapshots,
     Check,
-    Restore
+    Restore,
+    Unlock
 }
 
 public sealed record ResticProcessRequest(
@@ -33,7 +34,7 @@ public sealed class ResticProcessRunner : IResticProcessRunner
 {
     public const int DefaultOutputLimit = 4 * 1024 * 1024;
     private static readonly HashSet<string> AllowedEnvironmentVariables =
-        new(StringComparer.OrdinalIgnoreCase) { "LOCALAPPDATA", "TEMP", "TMP" };
+        new(StringComparer.OrdinalIgnoreCase) { "LOCALAPPDATA", "SystemRoot", "TEMP", "TMP" };
     private readonly int _outputLimit;
 
     public ResticProcessRunner(int outputLimit = DefaultOutputLimit)
@@ -132,6 +133,7 @@ public sealed class ResticProcessRunner : IResticProcessRunner
         ResticOperation.Snapshots => "snapshots",
         ResticOperation.Check => "check",
         ResticOperation.Restore => "restore",
+        ResticOperation.Unlock => "unlock",
         _ => throw new ArgumentOutOfRangeException(nameof(operation))
     };
 

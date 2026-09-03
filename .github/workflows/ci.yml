@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    # Windows x64 is the first supported platform, and the pinned engine is a win-x64 build.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Acquire pinned repository engine
+        shell: pwsh
+        # The binary is not committed. The script verifies the archive SHA-256 before extracting and
+        # the binary length and SHA-256 afterwards; a mismatch fails the job instead of downgrading
+        # the run to a skipped recovery suite.
+        run: ./scripts/Get-Engine.ps1
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build Fortiq.sln --configuration Release
+
+      - name: Test
+        shell: pwsh
+        env:
+          FORTIQ_TEST_ARTIFACTS: ${{ github.workspace }}/artifacts/receipts
+        run: >
+          dotnet test Fortiq.sln --configuration Release --no-build
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory artifacts/test-results
+
+      - name: Upload receipts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fortiq-evidence
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

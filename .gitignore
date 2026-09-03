@@ -40,3 +40,6 @@ Thumbs.db
 *.log
 *.tmp
 *.bak
+
+# CI evidence produced by test runs
+/artifacts/

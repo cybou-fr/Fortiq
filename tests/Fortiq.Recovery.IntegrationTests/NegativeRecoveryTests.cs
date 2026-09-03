@@ -1,0 +1,188 @@
+using System.Diagnostics;
+using Fortiq.Application;
+
+namespace Fortiq.Recovery.IntegrationTests;
+
+/// <summary>
+/// E2E-003, E2E-004 and E2E-005: a damaged repository, a cancelled backup and a restore that must
+/// stay inside its staging directory. E2E-002 (wrong secret) needs the unlock provider and is not
+/// covered while the P0 engine still runs without a password.
+/// </summary>
+public sealed class NegativeRecoveryTests
+{
+    [SkippableFact]
+    public async Task DamagedRepositoryObjectFailsCheckAndRestore()
+    {
+        using var workspace = await RecoveryWorkspace.CreateAsync("e2e-003", CancellationToken.None);
+        var source = Path.Combine(workspace.Root, "source");
+        var repository = workspace.EnsureDirectory("repository");
+        TestDataset.Create(source);
+
+        var adapter = workspace.RecordingAdapter("state");
+        var descriptor = await adapter.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
+        var backup = await adapter.CreateSnapshotAsync(new CreateSnapshot(descriptor, source, "test-source"), CancellationToken.None);
+
+        DamageLargestPackFile(repository);
+
+        var check = await Assert.ThrowsAsync<InvalidDataException>(
+            () => adapter.CheckAsync(new CheckRepository(descriptor), CancellationToken.None));
+        Assert.DoesNotContain("succeeded", check.Message, StringComparison.OrdinalIgnoreCase);
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => adapter.RestoreAsync(
+                new RestoreSnapshot(descriptor, backup.SnapshotId, workspace.EnsureDirectory("restore"), source),
+                CancellationToken.None));
+
+        // The damaged run is recorded as evidence, and no receipt of it claims success.
+        var damaged = workspace.Receipts()
+            .Where(receipt => receipt.GetProperty("operation").GetString() is "check" or "restore")
+            .ToArray();
+        Assert.Equal(2, damaged.Length);
+        Assert.All(damaged, receipt =>
+        {
+            Assert.Equal("failed", receipt.GetProperty("result").GetString());
+            Assert.NotEmpty(receipt.GetProperty("warnings").EnumerateArray());
+        });
+    }
+
+    [SkippableFact]
+    public async Task CancelledBackupLeavesARepositoryTheNextRunCanReconcile()
+    {
+        using var workspace = await RecoveryWorkspace.CreateAsync("e2e-004", CancellationToken.None);
+        var source = Path.Combine(workspace.Root, "source");
+        var repository = workspace.EnsureDirectory("repository");
+        TestDataset.Create(source);
+        CreateBulkSource(source, files: 400, fileSize: 128 * 1024);
+
+        var cancelledAdapter = workspace.Adapter("state-cancelled");
+        var descriptor = await cancelledAdapter.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
+
+        using var cancellation = new CancellationTokenSource();
+        var backup = cancelledAdapter.CreateSnapshotAsync(
+            new CreateSnapshot(descriptor, source, "test-source"),
+            cancellation.Token);
+        await WaitUntilRepositoryIsLockedAsync(repository, cancellation.Token);
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => backup);
+
+        // A cancelled run must not leave a snapshot behind.
+        var afterCancellation = workspace.Adapter("state-next");
+        await afterCancellation.ReconcileAsync(new ReconcileRepository(descriptor), CancellationToken.None);
+        Assert.Empty(await afterCancellation.ListSnapshotsAsync(new ListSnapshots(descriptor), CancellationToken.None));
+
+        var recovered = await afterCancellation.CreateSnapshotAsync(
+            new CreateSnapshot(descriptor, source, "test-source"),
+            CancellationToken.None);
+        Assert.Equal(64, recovered.SnapshotId.Length);
+
+        var check = await afterCancellation.CheckAsync(new CheckRepository(descriptor), CancellationToken.None);
+        Assert.True(check.IsHealthy);
+    }
+
+    [SkippableFact]
+    public async Task RestoreOfAReparsePointStaysInsideTheStagingDirectory()
+    {
+        using var workspace = await RecoveryWorkspace.CreateAsync("e2e-005", CancellationToken.None);
+        var source = Path.Combine(workspace.Root, "source");
+        var outside = workspace.EnsureDirectory("outside");
+        var repository = workspace.EnsureDirectory("repository");
+        TestDataset.Create(source);
+        File.WriteAllText(Path.Combine(outside, "untouched.txt"), "outside the staging directory\n");
+        Skip.IfNot(TryCreateJunction(Path.Combine(source, "escape"), outside), "Creating a junction is not permitted here.");
+
+        var adapter = workspace.Adapter("state");
+        var descriptor = await adapter.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
+        var backup = await adapter.CreateSnapshotAsync(new CreateSnapshot(descriptor, source, "test-source"), CancellationToken.None);
+
+        var target = workspace.EnsureDirectory("restore");
+
+        // Restic stores the junction as a symlink to the original outside location. Recreating it
+        // needs the symlink privilege, so the restore either fails outright - and must then not be
+        // reported as a success - or succeeds; in both cases the invariants below have to hold.
+        try
+        {
+            await adapter.RestoreAsync(
+                new RestoreSnapshot(descriptor, backup.SnapshotId, target, source),
+                CancellationToken.None);
+        }
+        catch (InvalidDataException)
+        {
+            // No receipt is produced for a restore the engine could not complete.
+        }
+
+        Assert.Equal("untouched.txt", Path.GetFileName(Assert.Single(Directory.GetFiles(outside))));
+        foreach (var entry in Directory.EnumerateFileSystemEntries(target, "*", SearchOption.AllDirectories))
+        {
+            Assert.StartsWith(target + Path.DirectorySeparatorChar, Path.GetFullPath(entry), StringComparison.OrdinalIgnoreCase);
+
+            var link = new FileInfo(entry).LinkTarget;
+            if (link is not null)
+            {
+                var resolved = Path.GetFullPath(link.Replace(@"\\?\", string.Empty, StringComparison.Ordinal));
+                Assert.StartsWith(target + Path.DirectorySeparatorChar, resolved, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    private static void DamageLargestPackFile(string repository)
+    {
+        var pack = new DirectoryInfo(Path.Combine(repository, "data"))
+            .EnumerateFiles("*", SearchOption.AllDirectories)
+            .OrderByDescending(file => file.Length)
+            .First();
+
+        using var stream = new FileStream(pack.FullName, FileMode.Open, FileAccess.Write, FileShare.None);
+        stream.SetLength(stream.Length / 2);
+    }
+
+    private static void CreateBulkSource(string source, int files, int fileSize)
+    {
+        var directory = Path.Combine(source, "bulk");
+        Directory.CreateDirectory(directory);
+        var content = new byte[fileSize];
+        for (var index = 0; index < files; index++)
+        {
+            // Incompressible, distinct content so restic cannot finish the backup instantly.
+            System.Security.Cryptography.RandomNumberGenerator.Fill(content);
+            File.WriteAllBytes(Path.Combine(directory, $"bulk-{index:D4}.bin"), content);
+        }
+    }
+
+    private static async Task WaitUntilRepositoryIsLockedAsync(string repository, CancellationToken cancellationToken)
+    {
+        var locks = Path.Combine(repository, "locks");
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (Directory.Exists(locks) && Directory.EnumerateFiles(locks).Any())
+            {
+                return;
+            }
+
+            await Task.Delay(50, cancellationToken);
+        }
+
+        throw new TimeoutException("The engine never locked the repository.");
+    }
+
+    private static bool TryCreateJunction(string link, string target)
+    {
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            ArgumentList = { "/c", "mklink", "/J", link, target }
+        });
+
+        if (process is null)
+        {
+            return false;
+        }
+
+        process.WaitForExit();
+        return process.ExitCode == 0 && Directory.Exists(link);
+    }
+}

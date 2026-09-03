@@ -1,4 +1,5 @@
 using System.Globalization;
+using Fortiq.Application;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -26,6 +27,8 @@ public sealed record ResticRestoreSummary(ulong TotalFiles, ulong FilesRestored,
 
 public static partial class ResticJsonParser
 {
+    private const int WrongPasswordExitCode = 12;
+
     public static ResticVersionInfo ParseVersion(ResticProcessResult result)
     {
         EnsureSuccessfulExit(result);
@@ -122,12 +125,38 @@ public static partial class ResticJsonParser
             RequireUInt64(root, "bytes_restored"));
     }
 
+    /// <summary>
+    /// Verifies a lock-removal run. Restic 0.19.1 reports success for <c>unlock --json</c> with an
+    /// empty stdout, so a successful exit with no error events is the whole contract.
+    /// </summary>
+    public static void ParseUnlock(ResticProcessResult result)
+    {
+        EnsureSuccessfulExit(result);
+        foreach (var line in NonEmptyLines(result.StandardOutput))
+        {
+            using var message = ParseLine(line);
+            RequireObject(message.RootElement);
+        }
+    }
+
     private static void EnsureSuccessfulExit(ResticProcessResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
         if (result.ExitCode != 0)
         {
-            throw new InvalidDataException($"Restic operation failed with exit code {result.ExitCode}.");
+            var diagnostics = DescribeErrors(result.StandardError);
+
+            // Restic reports a repository it cannot decrypt with exit code 12. It is surfaced as one
+            // unified failure so a caller cannot tell a wrong secret from a missing key, and so no
+            // repository detail travels with the exception.
+            if (result.ExitCode == WrongPasswordExitCode
+                || diagnostics.Contains("wrong password or no key found", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new UnlockFailedException();
+            }
+
+            throw new InvalidDataException(
+                $"Restic operation failed with exit code {result.ExitCode}.{diagnostics}");
         }
 
         foreach (var line in NonEmptyLines(result.StandardError))
@@ -139,6 +168,39 @@ public static partial class ResticJsonParser
                 throw new InvalidDataException("Restic emitted an error event despite a zero exit code.");
             }
         }
+    }
+
+    /// <summary>
+    /// Collects the messages restic itself reported so a failure carries actionable diagnostics.
+    /// Only engine-provided text is included; Fortiq never passes secrets to the engine command line.
+    /// </summary>
+    private static string DescribeErrors(string standardError)
+    {
+        var messages = new List<string>();
+        foreach (var line in NonEmptyLines(standardError))
+        {
+            JsonDocument document;
+            try
+            {
+                document = ParseLine(line);
+            }
+            catch (InvalidDataException)
+            {
+                continue;
+            }
+
+            using (document)
+            {
+                if (document.RootElement.ValueKind == JsonValueKind.Object
+                    && document.RootElement.TryGetProperty("message", out var message)
+                    && message.ValueKind == JsonValueKind.String)
+                {
+                    messages.Add(message.GetString()!);
+                }
+            }
+        }
+
+        return messages.Count == 0 ? string.Empty : " " + string.Join(" | ", messages);
     }
 
     private static JsonDocument RequireTerminalMessage(string jsonLines, string expectedType)
