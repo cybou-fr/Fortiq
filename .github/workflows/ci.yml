@@ -36,10 +36,17 @@ jobs:
         shell: pwsh
         env:
           FORTIQ_TEST_ARTIFACTS: ${{ github.workspace }}/artifacts/receipts
-        run: >
-          dotnet test Fortiq.sln --configuration Release --no-build
-          --logger "trx;LogFileName=test-results.trx"
-          --results-directory artifacts/test-results
+        # One TRX per test assembly, named after it. A single shared file name makes the assemblies
+        # overwrite each other, and the run whose evidence is lost is usually the one that failed.
+        run: |
+          $failed = $false
+          foreach ($project in Get-ChildItem tests -Filter *.csproj -Recurse) {
+            dotnet test $project.FullName --configuration Release --no-build `
+              --logger "trx;LogFileName=$($project.BaseName).trx" `
+              --results-directory artifacts/test-results
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+          }
+          if ($failed) { throw "One or more test assemblies failed." }
 
       - name: Upload receipts and diagnostics
         if: always()

@@ -9,7 +9,7 @@ namespace Fortiq.Infrastructure.Restic;
 /// </summary>
 internal sealed class InsecureNoPasswordCredentialProvider : IEngineCredentialProvider
 {
-    public Task<IEngineCredentialSession> BeginAsync(CancellationToken cancellationToken) =>
+    public Task<IEngineCredentialSession> BeginAsync(Guid operationId, CancellationToken cancellationToken) =>
         Task.FromResult<IEngineCredentialSession>(new Session());
 
     private sealed class Session : IEngineCredentialSession

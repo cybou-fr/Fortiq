@@ -58,7 +58,7 @@ public sealed class EndToEndRecoveryTests
         Assert.Equal(
             ["backup", "check", "initialize", "restore", "snapshots"],
             receipts.Select(receipt => receipt.GetProperty("operation").GetString()!).Order(StringComparer.Ordinal).ToArray());
-        Assert.All(receipts, receipt => Assert.Equal("succeeded", receipt.GetProperty("result").GetString()));
+        Assert.All(receipts, receipt => Assert.Equal("succeeded", receipt.GetProperty("engineResult").GetString()));
         var backupReceipt = receipts.Single(receipt => receipt.GetProperty("operation").GetString() == "backup");
         Assert.Equal(backup.SnapshotId, backupReceipt.GetProperty("snapshotId").GetString());
         Assert.Equal(expected.Count, backupReceipt.GetProperty("metrics").GetProperty("filesProcessed").GetInt64());

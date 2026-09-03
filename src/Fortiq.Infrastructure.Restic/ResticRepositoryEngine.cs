@@ -25,8 +25,9 @@ internal sealed class ResticRepositoryEngine : IBackupRepository
     public async Task<RepositoryDescriptor> InitializeAsync(InitializeRepository command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
+        var operationId = OperationId(command);
         var location = NormalizePath(command.Location);
-        var result = await RunAsync(ResticOperation.Initialize, ["--repo", location, "--json"], cancellationToken);
+        var result = await RunAsync(ResticOperation.Initialize, ["--repo", location, "--json"], operationId, cancellationToken);
         var initialized = ResticJsonParser.ParseInitialized(result);
         return new RepositoryDescriptor(RepositoryId.FromBytes(Convert.FromHexString(initialized.Id)), location);
     }
@@ -34,10 +35,11 @@ internal sealed class ResticRepositoryEngine : IBackupRepository
     public async Task<BackupReceipt> CreateSnapshotAsync(CreateSnapshot command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var operationId = Guid.NewGuid();
+        var operationId = OperationId(command);
         var result = await RunAsync(
             ResticOperation.Backup,
             [NormalizePath(command.SourcePath), "--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
+            operationId,
             cancellationToken);
         var summary = ResticJsonParser.ParseBackup(result);
         return new BackupReceipt(
@@ -54,6 +56,7 @@ internal sealed class ResticRepositoryEngine : IBackupRepository
         var result = await RunAsync(
             ResticOperation.Snapshots,
             ["--repo", NormalizePath(query.Repository.Location), "--json", "--no-cache"],
+            OperationId(query),
             cancellationToken);
         return ResticJsonParser.ParseSnapshots(result)
             .Select(snapshot => new SnapshotDescriptor(snapshot.Id, snapshot.Time, snapshot.Paths.Count == 0 ? string.Empty : snapshot.Paths[0]))
@@ -63,10 +66,11 @@ internal sealed class ResticRepositoryEngine : IBackupRepository
     public async Task<CheckReceipt> CheckAsync(CheckRepository command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var operationId = Guid.NewGuid();
+        var operationId = OperationId(command);
         var result = await RunAsync(
             ResticOperation.Check,
             ["--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
+            operationId,
             cancellationToken);
         var summary = ResticJsonParser.ParseCheck(result);
         return new CheckReceipt(operationId, command.Repository.Id, summary.IsHealthy);
@@ -75,13 +79,20 @@ internal sealed class ResticRepositoryEngine : IBackupRepository
     public async Task<RestoreReceipt> RestoreAsync(RestoreSnapshot command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var operationId = Guid.NewGuid();
+        var operationId = OperationId(command);
         var target = NormalizePath(command.TargetPath);
+
+        // The engine restores into a staging area; the target only ever receives a tree that passed
+        // validation, and it receives it as one rename.
+        using var staging = RestoreStagingArea.Create(target, operationId);
         var result = await RunAsync(
             ResticOperation.Restore,
-            [RestoreSelector(command), "--target", target, "--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
+            [RestoreSelector(command), "--target", staging.Path, "--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
+            operationId,
             cancellationToken);
         var summary = ResticJsonParser.ParseRestore(result);
+        staging.Validate();
+        staging.Promote();
         return new RestoreReceipt(
             operationId,
             command.Repository.Id,
@@ -94,21 +105,35 @@ internal sealed class ResticRepositoryEngine : IBackupRepository
     public async Task ReconcileAsync(ReconcileRepository command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
+        // --remove-all also clears a lock whose owner cannot be proven dead: a killed run can leave
+        // a lock whose PID has already been reused, and the plain stale-lock check then keeps the
+        // repository unusable. Reconciliation is therefore only valid when no other Fortiq
+        // operation is in flight; enforcing that with a run registry is a P1 gate.
         var result = await RunAsync(
             ResticOperation.Unlock,
-            ["--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
+            ["--remove-all", "--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
+            OperationId(command),
             cancellationToken);
         ResticJsonParser.ParseUnlock(result);
     }
 
+    /// <summary>
+    /// The operation ID the caller supplied, or a new one when the caller did not identify the
+    /// operation. Whatever this returns is what the engine invocation, the password handover and
+    /// the returned receipt all use.
+    /// </summary>
+    private static Guid OperationId(IOperationCommand command) =>
+        command.OperationId == Guid.Empty ? Guid.NewGuid() : command.OperationId;
+
     private async Task<ResticProcessResult> RunAsync(
         ResticOperation operation,
         IReadOnlyList<string> arguments,
+        Guid operationId,
         CancellationToken cancellationToken)
     {
         // The credential session is opened per invocation and torn down with it, so a secret is
         // never reusable by a later process.
-        await using var credential = await _credentials.BeginAsync(cancellationToken);
+        await using var credential = await _credentials.BeginAsync(operationId, cancellationToken);
         var result = await _runner.RunAsync(
             _engine,
             new ResticProcessRequest(

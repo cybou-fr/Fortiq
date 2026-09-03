@@ -38,5 +38,10 @@ public interface IEngineCredentialSession : IAsyncDisposable
 
 public interface IEngineCredentialProvider
 {
-    Task<IEngineCredentialSession> BeginAsync(CancellationToken cancellationToken);
+    /// <summary>
+    /// Opens a credential for one engine invocation. The operation ID is the same one the receipt
+    /// and the result carry, so a password handover can be correlated with the operation that
+    /// needed it. It is not a secret and is safe on a command line.
+    /// </summary>
+    Task<IEngineCredentialSession> BeginAsync(Guid operationId, CancellationToken cancellationToken);
 }

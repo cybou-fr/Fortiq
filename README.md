@@ -88,10 +88,23 @@ Negative-сценарии E2E-003 (повреждённый pack), E2E-004 (от
 `unlock` и последующий корректный snapshot) и E2E-005 (reparse point не выводит restore за пределы
 staging directory) выполняются на том же pinned binary. E2E-002 (неправильный secret) выполняется на password helper.
 
+Restore никогда не пишет прямо в target: движок восстанавливает в staging-каталог на том же томе,
+проверяет получившееся дерево (reparse point, symlink или выход за пределы staging — отказ) и только
+затем продвигает его одним rename. Отклонённый или прерванный restore оставляет target нетронутым, а
+непустой target отклоняется до запуска движка.
+
+Один `OperationId` проходит операцию насквозь: команда → процесс движка → operation ID в
+`--password-command` helper → receipt → возвращённый результат. Если вызывающий его не задал, id
+назначается один раз и именно он попадает во все три места.
+
 Каждая операция движка пишет JSON-receipt схемы `fortiq.operation-receipt`: operation ID, repository
 ID, идентичность engine с pinned SHA-256, время начала и конца, result, snapshot ID, source и метрики.
-Failed и cancelled операции тоже оставляют receipt — со статусом `failed`/`cancelled` и диагностикой
-движка в `warnings`; статус `succeeded` не выдаётся авансом. Receipt не нужен для автономного
+Failed и cancelled операции тоже оставляют receipt — с `engineResult` `failed`/`cancelled` и
+диагностикой движка в `warnings`; `succeeded` не выдаётся авансом. `engineResult` описывает только
+то, что сделал движок: отмена вызывающего уже после завершения движка не переписывает результат и не
+отменяет запись evidence — она выполняется собственным токеном. Успешность записи evidence
+фиксируется отдельно от результата движка и отдаётся через `IOperationEvidenceObserver`, поэтому
+потерянный receipt виден, а не проглочен. Receipt не нужен для автономного
 restore. Переменная окружения `FORTIQ_TEST_ARTIFACTS` заставляет тесты сохранить receipts прогона в
 указанный каталог.
 

@@ -32,9 +32,13 @@ internal sealed class TestOnlyPasswordCredentialProvider : IEngineCredentialProv
         _handoverTimeout = handoverTimeout ?? TimeSpan.FromSeconds(30);
     }
 
-    public Task<IEngineCredentialSession> BeginAsync(CancellationToken cancellationToken)
+    public Task<IEngineCredentialSession> BeginAsync(Guid operationId, CancellationToken cancellationToken)
     {
-        var operationId = Guid.NewGuid();
+        if (operationId == Guid.Empty)
+        {
+            throw new ArgumentException("A credential session requires the operation ID it belongs to.", nameof(operationId));
+        }
+
         var server = new TestOnlyPasswordPipeServer(operationId, _lease);
         var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var served = server.ServeOnceAsync(lifetime.Token);

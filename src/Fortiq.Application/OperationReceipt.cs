@@ -2,7 +2,11 @@ namespace Fortiq.Application;
 
 public enum OperationKind { Initialize, Backup, Snapshots, Check, Restore, Reconcile }
 
-public enum OperationResult { Succeeded, Failed, Cancelled }
+/// <summary>What the engine itself did. It is not affected by what the caller did afterwards.</summary>
+public enum EngineResult { Succeeded, Failed, Cancelled }
+
+/// <summary>Whether the evidence for an operation could be persisted.</summary>
+public enum EvidenceWriteResult { Succeeded, Failed }
 
 public sealed record EngineIdentity(string Name, string Version, string Sha256);
 
@@ -20,7 +24,7 @@ public sealed record OperationReceipt(
     EngineIdentity Engine,
     DateTimeOffset StartedAt,
     DateTimeOffset CompletedAt,
-    OperationResult Result,
+    EngineResult EngineResult,
     string? SnapshotId,
     ReceiptSource? Source,
     IReadOnlyDictionary<string, long> Metrics,
@@ -28,6 +32,23 @@ public sealed record OperationReceipt(
 {
     public const string Schema = "fortiq.operation-receipt";
     public const int SchemaVersion = 1;
+}
+
+/// <summary>
+/// The outcome of one operation as a whole: what the engine did, and whether the evidence for it
+/// reached storage. The two are reported separately because a lost receipt does not change what the
+/// engine did, and a successful engine run does not prove its evidence was kept.
+/// </summary>
+public sealed record OperationEvidence(
+    OperationReceipt Receipt,
+    EvidenceWriteResult WriteResult,
+    string? Location,
+    Exception? WriteError);
+
+/// <summary>Receives the evidence of every completed operation, successful or not.</summary>
+public interface IOperationEvidenceObserver
+{
+    void OnEvidence(OperationEvidence evidence);
 }
 
 public interface IOperationReceiptStore

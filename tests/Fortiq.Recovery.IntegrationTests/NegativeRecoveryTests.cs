@@ -40,7 +40,7 @@ public sealed class NegativeRecoveryTests
         Assert.Equal(2, damaged.Length);
         Assert.All(damaged, receipt =>
         {
-            Assert.Equal("failed", receipt.GetProperty("result").GetString());
+            Assert.Equal("failed", receipt.GetProperty("engineResult").GetString());
             Assert.NotEmpty(receipt.GetProperty("warnings").EnumerateArray());
         });
     }
@@ -96,32 +96,49 @@ public sealed class NegativeRecoveryTests
 
         var target = workspace.EnsureDirectory("restore");
 
-        // Restic stores the junction as a symlink to the original outside location. Recreating it
-        // needs the symlink privilege, so the restore either fails outright - and must then not be
-        // reported as a success - or succeeds; in both cases the invariants below have to hold.
-        try
-        {
-            await adapter.RestoreAsync(
+        // Restic stores the junction as a symlink to the original outside location. Whether it can
+        // recreate it depends on the symlink privilege, so the engine may fail on its own or the
+        // staging validation may reject the tree - but the outcome is always a failed restore with
+        // an untouched target.
+        var failure = await Record.ExceptionAsync(
+            () => adapter.RestoreAsync(
                 new RestoreSnapshot(descriptor, backup.SnapshotId, target, source),
-                CancellationToken.None);
-        }
-        catch (InvalidDataException)
-        {
-            // No receipt is produced for a restore the engine could not complete.
-        }
+                CancellationToken.None));
 
+        Assert.True(
+            failure is RestoreRejectedException or InvalidDataException,
+            $"Unexpected restore outcome: {failure?.GetType().Name ?? "success"}");
+
+        // Nothing was written outside, the target received nothing at all, and no staging directory
+        // was left behind next to it.
         Assert.Equal("untouched.txt", Path.GetFileName(Assert.Single(Directory.GetFiles(outside))));
-        foreach (var entry in Directory.EnumerateFileSystemEntries(target, "*", SearchOption.AllDirectories))
-        {
-            Assert.StartsWith(target + Path.DirectorySeparatorChar, Path.GetFullPath(entry), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(target));
+        Assert.Empty(Directory.EnumerateDirectories(workspace.Root, ".fortiq-restore-*"));
+    }
 
-            var link = new FileInfo(entry).LinkTarget;
-            if (link is not null)
-            {
-                var resolved = Path.GetFullPath(link.Replace(@"\\?\", string.Empty, StringComparison.Ordinal));
-                Assert.StartsWith(target + Path.DirectorySeparatorChar, resolved, StringComparison.OrdinalIgnoreCase);
-            }
-        }
+    [SkippableFact]
+    public async Task RestoreRefusesATargetThatAlreadyHasContent()
+    {
+        using var workspace = await RecoveryWorkspace.CreateAsync("e2e-005-target", CancellationToken.None);
+        var source = Path.Combine(workspace.Root, "source");
+        var repository = workspace.EnsureDirectory("repository");
+        TestDataset.Create(source);
+
+        var adapter = workspace.Adapter("state");
+        var descriptor = await adapter.InitializeAsync(new InitializeRepository(repository), CancellationToken.None);
+        var backup = await adapter.CreateSnapshotAsync(new CreateSnapshot(descriptor, source, "test-source"), CancellationToken.None);
+
+        var target = workspace.EnsureDirectory("restore");
+        var existing = Path.Combine(target, "existing.txt");
+        await File.WriteAllTextAsync(existing, "must not be overwritten\n");
+
+        await Assert.ThrowsAsync<RestoreRejectedException>(
+            () => adapter.RestoreAsync(
+                new RestoreSnapshot(descriptor, backup.SnapshotId, target, source),
+                CancellationToken.None));
+
+        Assert.Equal("must not be overwritten\n", await File.ReadAllTextAsync(existing));
+        Assert.Single(Directory.EnumerateFileSystemEntries(target));
     }
 
     private static void DamageLargestPackFile(string repository)

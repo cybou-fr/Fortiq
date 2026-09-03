@@ -17,14 +17,18 @@ public sealed class EngineCredentialTests
         var password = Encoding.ASCII.GetString(encoded);
 
         var provider = new TestOnlyPasswordCredentialProvider(helper, lease);
-        await using var session = await provider.BeginAsync(CancellationToken.None);
+        var operationId = Guid.NewGuid();
+        await using var session = await provider.BeginAsync(operationId, CancellationToken.None);
 
         var arguments = session.EngineArguments;
         Assert.Equal("--password-command", arguments[0]);
         Assert.Equal(2, arguments.Count);
         Assert.Contains(helper, arguments[1], StringComparison.Ordinal);
         Assert.DoesNotContain(password, string.Join(' ', arguments), StringComparison.Ordinal);
-        Assert.True(Guid.TryParseExact(arguments[1].Split(' ')[^1], "D", out var operationId) && operationId != Guid.Empty);
+
+        // The helper is told which operation it serves, so a handover can be correlated with the
+        // receipt and the result of that same operation.
+        Assert.Equal(operationId.ToString("D"), arguments[1].Split(' ')[^1]);
     }
 
     [Fact]
@@ -34,7 +38,7 @@ public sealed class EngineCredentialTests
         using var lease = new TestOnlyKeyLease(new byte[EnginePasswordV1Encoder.EngineUnlockSecretSize]);
         var provider = new TestOnlyPasswordCredentialProvider(helper, lease, TimeSpan.FromMilliseconds(200));
 
-        await using var session = await provider.BeginAsync(CancellationToken.None);
+        await using var session = await provider.BeginAsync(Guid.NewGuid(), CancellationToken.None);
 
         await Assert.ThrowsAsync<UnlockFailedException>(() => session.CompleteAsync(CancellationToken.None));
     }

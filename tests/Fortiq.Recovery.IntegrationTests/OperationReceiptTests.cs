@@ -28,7 +28,7 @@ public sealed class OperationReceiptTests : IDisposable
         Assert.Equal("fortiq.operation-receipt", root.GetProperty("schema").GetString());
         Assert.Equal(1, root.GetProperty("version").GetInt32());
         Assert.Equal("backup", root.GetProperty("operation").GetString());
-        Assert.Equal("succeeded", root.GetProperty("result").GetString());
+        Assert.Equal("succeeded", root.GetProperty("engineResult").GetString());
         Assert.Equal(repository.Id.ToString(), root.GetProperty("repositoryId").GetString());
         Assert.Equal(new string('b', 64), root.GetProperty("snapshotId").GetString());
         Assert.Equal("directory", root.GetProperty("source").GetProperty("kind").GetString());
@@ -52,7 +52,7 @@ public sealed class OperationReceiptTests : IDisposable
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(SingleReceipt()));
         var root = document.RootElement;
         Assert.Equal("check", root.GetProperty("operation").GetString());
-        Assert.Equal("failed", root.GetProperty("result").GetString());
+        Assert.Equal("failed", root.GetProperty("engineResult").GetString());
         Assert.False(root.TryGetProperty("snapshotId", out _));
         Assert.Contains("exit code 1", Assert.Single(root.GetProperty("warnings").EnumerateArray()).GetString());
     }
@@ -67,7 +67,83 @@ public sealed class OperationReceiptTests : IDisposable
             () => recorded.CreateSnapshotAsync(new CreateSnapshot(repository, Path.GetFullPath("source"), "test-source"), CancellationToken.None));
 
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(SingleReceipt()));
-        Assert.Equal("cancelled", document.RootElement.GetProperty("result").GetString());
+        Assert.Equal("cancelled", document.RootElement.GetProperty("engineResult").GetString());
+    }
+
+    [Fact]
+    public async Task TheOperationIdOfTheCallerReachesTheResultAndTheReceipt()
+    {
+        var repository = new RepositoryDescriptor(RepositoryId.Create(), Path.GetFullPath("repository"));
+        var operationId = Guid.NewGuid();
+        var inner = new EchoRepository();
+        var recorded = Decorate(inner);
+
+        var result = await recorded.CreateSnapshotAsync(
+            new CreateSnapshot(repository, Path.GetFullPath("source"), "test-source", operationId),
+            CancellationToken.None);
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(SingleReceipt()));
+        Assert.Equal(operationId, inner.LastCommand!.OperationId);
+        Assert.Equal(operationId, result.OperationId);
+        Assert.Equal(operationId, document.RootElement.GetProperty("operationId").GetGuid());
+    }
+
+    [Fact]
+    public async Task AnOperationWithoutAnIdIsAssignedOneThatIsUsedEverywhere()
+    {
+        var repository = new RepositoryDescriptor(RepositoryId.Create(), Path.GetFullPath("repository"));
+        var inner = new EchoRepository();
+        var recorded = Decorate(inner);
+
+        var result = await recorded.CreateSnapshotAsync(
+            new CreateSnapshot(repository, Path.GetFullPath("source"), "test-source"),
+            CancellationToken.None);
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(SingleReceipt()));
+        Assert.NotEqual(Guid.Empty, inner.LastCommand!.OperationId);
+        Assert.Equal(inner.LastCommand.OperationId, result.OperationId);
+        Assert.Equal(inner.LastCommand.OperationId, document.RootElement.GetProperty("operationId").GetGuid());
+    }
+
+    [Fact]
+    public async Task EvidenceIsWrittenEvenWhenTheCallerCancelsAfterTheEngineFinished()
+    {
+        var repository = new RepositoryDescriptor(RepositoryId.Create(), Path.GetFullPath("repository"));
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        var observer = new RecordingObserver();
+        var recorded = Decorate(new EchoRepository(), observer);
+
+        // The engine already did the work; a cancelled caller token must neither suppress the
+        // evidence nor rewrite what the engine did.
+        var result = await recorded.CreateSnapshotAsync(
+            new CreateSnapshot(repository, Path.GetFullPath("source"), "test-source"),
+            cancellation.Token);
+
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(SingleReceipt()));
+        Assert.Equal("succeeded", document.RootElement.GetProperty("engineResult").GetString());
+        Assert.Equal(result.OperationId, document.RootElement.GetProperty("operationId").GetGuid());
+        Assert.Equal(EvidenceWriteResult.Succeeded, Assert.Single(observer.Evidence).WriteResult);
+    }
+
+    [Fact]
+    public async Task AFailedEvidenceWriteIsReportedSeparatelyFromTheEngineResult()
+    {
+        var repository = new RepositoryDescriptor(RepositoryId.Create(), Path.GetFullPath("repository"));
+        await File.WriteAllTextAsync(_directory, "a file where the receipt directory should be");
+
+        var observer = new RecordingObserver();
+        var recorded = Decorate(new EchoRepository(), observer);
+
+        await recorded.CreateSnapshotAsync(
+            new CreateSnapshot(repository, Path.GetFullPath("source"), "test-source"),
+            CancellationToken.None);
+
+        var evidence = Assert.Single(observer.Evidence);
+        Assert.Equal(EngineResult.Succeeded, evidence.Receipt.EngineResult);
+        Assert.Equal(EvidenceWriteResult.Failed, evidence.WriteResult);
+        Assert.NotNull(evidence.WriteError);
     }
 
     [Fact]
@@ -99,8 +175,46 @@ public sealed class OperationReceiptTests : IDisposable
         }
     }
 
-    private ReceiptRecordingBackupRepository Decorate(IBackupRepository inner) =>
-        new(inner, Engine, new FileSystemOperationReceiptStore(_directory));
+    private ReceiptRecordingBackupRepository Decorate(
+        IBackupRepository inner,
+        IOperationEvidenceObserver? observer = null) =>
+        new(inner, Engine, new FileSystemOperationReceiptStore(_directory), observer);
+
+    /// <summary>An engine stand-in that reports the command it was given back to the test.</summary>
+    private sealed class EchoRepository : IBackupRepository
+    {
+        internal CreateSnapshot? LastCommand { get; private set; }
+
+        public Task<RepositoryDescriptor> InitializeAsync(InitializeRepository command, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<BackupReceipt> CreateSnapshotAsync(CreateSnapshot command, CancellationToken cancellationToken)
+        {
+            LastCommand = command;
+            return Task.FromResult(new BackupReceipt(command.OperationId, command.Repository.Id, new string('d', 64), 1, 2));
+        }
+
+        public Task<IReadOnlyList<SnapshotDescriptor>> ListSnapshotsAsync(ListSnapshots query, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<CheckReceipt> CheckAsync(CheckRepository command, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<RestoreReceipt> RestoreAsync(RestoreSnapshot command, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task ReconcileAsync(ReconcileRepository command, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class RecordingObserver : IOperationEvidenceObserver
+    {
+        private readonly List<OperationEvidence> _evidence = [];
+
+        internal IReadOnlyList<OperationEvidence> Evidence => _evidence;
+
+        public void OnEvidence(OperationEvidence evidence) => _evidence.Add(evidence);
+    }
 
     private string SingleReceipt() => Assert.Single(Directory.GetFiles(_directory, "*.json"));
 
