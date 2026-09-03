@@ -218,11 +218,15 @@ public sealed class StandaloneRecoveryTests
         Skip.IfNot(File.Exists(HelperPath), "The password helper was not built next to the tests.");
 
         var provisioner = new RepositoryProvisioner(RecoveryWorkspace.EngineRootPath, HelperPath);
+
+        // These tests are about the recovery path, so they provision without a device-bound method:
+        // it would leave a TPM key behind and says nothing about recovering on another machine.
         return await provisioner.CreateAsync(
             workspace.EnsureDirectory("repository"),
             KitDirectory(workspace),
             workspace.EnsureDirectory("state-provision"),
-            CancellationToken.None);
+            CancellationToken.None,
+            addDeviceUnlock: false);
     }
 
     /// <summary>Opens the kit the way any later run has to: with the mnemonic and nothing else.</summary>

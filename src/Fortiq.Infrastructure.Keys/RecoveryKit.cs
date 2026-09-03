@@ -77,6 +77,15 @@ public static class RecoveryKitStore
             throw new ArgumentException("All envelopes in a kit must belong to the same repository.", nameof(envelopes));
         }
 
+        // ADR-002: a device-bound envelope is never a recovery path. A kit that offered only a TPM
+        // method would be a kit that a lost machine takes with it.
+        if (envelopes.All(envelope => envelope.ProviderType == EnvelopeProviderType.WindowsTpm))
+        {
+            throw new ArgumentException(
+                "A recovery kit needs an unlock method that survives the loss of the device.",
+                nameof(envelopes));
+        }
+
         Directory.CreateDirectory(directory);
 
         var methods = new List<RecoveryKitUnlockMethod>(envelopes.Count);

@@ -11,7 +11,11 @@ namespace Fortiq.Provisioning;
 /// is the only copy: it is not written into the kit, the repository or any log, and Fortiq cannot
 /// produce it again.
 /// </summary>
-public sealed record ProvisionedRepository(RepositoryDescriptor Repository, RecoveryKit Kit, string RecoveryMnemonic);
+public sealed record ProvisionedRepository(
+    RepositoryDescriptor Repository,
+    RecoveryKit Kit,
+    string RecoveryMnemonic,
+    bool DeviceUnlockAvailable);
 
 /// <summary>
 /// Creates a repository and the recovery kit that can reopen it. This is the step that makes the
@@ -32,11 +36,18 @@ public sealed class RepositoryProvisioner
         _clock = clock ?? TimeProvider.System;
     }
 
+    /// <summary>
+    /// Creates the repository and its kit. When the machine has a platform crypto provider a
+    /// device-bound envelope is added beside the recovery one, so day-to-day work does not need the
+    /// mnemonic - but the mnemonic remains the way back, and the kit refuses to rely on the device
+    /// alone.
+    /// </summary>
     public async Task<ProvisionedRepository> CreateAsync(
         string repositoryLocation,
         string kitDirectory,
         string workingDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool addDeviceUnlock = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryLocation);
         ArgumentException.ThrowIfNullOrWhiteSpace(kitDirectory);
@@ -60,17 +71,39 @@ public sealed class RepositoryProvisioner
         var repository = await adapter.InitializeAsync(new InitializeRepository(repositoryLocation), cancellationToken);
 
         // The kit is written only after the repository exists, so a kit never points at nothing.
-        var envelope = Bip39RecoveryEnvelope.Wrap(repository.Id.ToArray(), mnemonic, lease, clock: _clock);
+        var envelopes = new List<KeyEnvelopeV1>
+        {
+            Bip39RecoveryEnvelope.Wrap(repository.Id.ToArray(), mnemonic, lease, clock: _clock)
+        };
+
+        var deviceUnlock = addDeviceUnlock && WindowsTpmEnvelope.IsAvailable;
+        if (deviceUnlock && OperatingSystem.IsWindows())
+        {
+            envelopes.Add(WindowsTpmEnvelope.Wrap(
+                repository.Id.ToArray(),
+                lease,
+                DeviceKeyName(repository.Id),
+                machineKey: false,
+                _clock));
+        }
+
         var kit = await RecoveryKitStore.WriteAsync(
             kitDirectory,
             repository.Location,
             new RecoveryKitEngine(engine.Name, engine.Version, engine.Sha256),
-            [envelope],
+            envelopes,
             _clock,
             cancellationToken);
 
-        return new ProvisionedRepository(repository, kit, mnemonic);
+        return new ProvisionedRepository(repository, kit, mnemonic, deviceUnlock);
     }
+
+    /// <summary>
+    /// The device key is named after the repository it unlocks, so one machine can hold a key per
+    /// repository and a later run can find the right one.
+    /// </summary>
+    public static string DeviceKeyName(RepositoryId repositoryId) =>
+        $"fortiq/{repositoryId.ToString().ToLowerInvariant()}/engine-unlock";
 
     private async Task<VerifiedEngine> VerifyEngineAsync(CancellationToken cancellationToken)
     {
