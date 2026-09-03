@@ -51,7 +51,13 @@ public sealed class ResticProcessRunner : IResticProcessRunner
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentNullException.ThrowIfNull(request);
 
-        using var process = new Process { StartInfo = CreateStartInfo(engine, request) };
+        var startInfo = CreateStartInfo(engine, request);
+
+        // Checked as late as possible: the verified handle keeps the file itself from being
+        // replaced, and this rejects a path that has come to mean a different file.
+        engine.EnsureUnchangedForExecution();
+
+        using var process = new Process { StartInfo = startInfo };
         if (!process.Start())
         {
             throw new InvalidOperationException("Failed to start repository engine.");

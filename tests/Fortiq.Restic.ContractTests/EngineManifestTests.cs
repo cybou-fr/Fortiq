@@ -19,7 +19,7 @@ public sealed class EngineManifestTests : IDisposable
         var bytes = "verified-engine"u8.ToArray();
         var entry = await CreateEntryAsync(bytes);
 
-        var verified = await EngineBinaryVerifier.VerifyAsync(_root, entry, CancellationToken.None);
+        using var verified = await EngineBinaryVerifier.VerifyAsync(_root, entry, CancellationToken.None);
 
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), verified.Sha256);
         Assert.True(Path.IsPathFullyQualified(verified.AbsolutePath));

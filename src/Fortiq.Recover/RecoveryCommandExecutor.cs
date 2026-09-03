@@ -25,7 +25,7 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(material);
 
-        var engine = await VerifyEngineAsync(command.EngineRoot, token);
+        using var engine = await VerifyEngineAsync(command.EngineRoot, token);
         if (!command.RequiresUnlock)
         {
             return Inspect(command, engine);

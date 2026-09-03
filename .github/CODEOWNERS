@@ -1,0 +1,26 @@
+# Security-critical paths. A change to any of them needs review by an owner, which is only enforced
+# once branch protection on main requires review from Code Owners.
+#
+# Replace @fortiq/security with the actual team or account before enabling protection: an owner that
+# does not exist silently blocks nothing.
+
+# Key material, envelopes and the password handover.
+/src/Fortiq.Infrastructure.Keys/            @fortiq/security
+/src/Fortiq.PasswordHelper/                 @fortiq/security
+/src/Fortiq.Application/EngineCredentials.cs @fortiq/security
+
+# Engine identity, process invocation and the restore staging boundary.
+/src/Fortiq.Infrastructure.Restic/EngineBinaryVerifier.cs   @fortiq/security
+/src/Fortiq.Infrastructure.Restic/EngineManifest.cs         @fortiq/security
+/src/Fortiq.Infrastructure.Restic/ResticProcessRunner.cs    @fortiq/security
+/src/Fortiq.Infrastructure.Restic/RestoreStagingArea.cs     @fortiq/security
+
+# The recovery tool: the only path that must survive the rest of the product.
+/src/Fortiq.Recover/                        @fortiq/security
+
+# What the build trusts and what it downloads.
+/.github/workflows/                         @fortiq/security
+/scripts/                                   @fortiq/security
+/engines/manifest.json                      @fortiq/security
+/Directory.Packages.props                   @fortiq/security
+/global.json                                @fortiq/security

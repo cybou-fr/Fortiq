@@ -80,6 +80,7 @@ internal sealed class RecoveryWorkspace : IDisposable
 
     public void Dispose()
     {
+        Engine.Dispose();
         PreserveReceipts();
         TestDataset.MakeWritable(Root);
         try
