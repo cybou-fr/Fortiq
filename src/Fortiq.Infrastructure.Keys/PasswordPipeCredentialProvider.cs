@@ -1,4 +1,5 @@
 using Fortiq.Application;
+using Fortiq.Platform.Windows;
 
 namespace Fortiq.Infrastructure.Keys;
 
@@ -8,32 +9,45 @@ namespace Fortiq.Infrastructure.Keys;
 /// pinned helper path and a non-secret operation ID.
 /// </summary>
 /// <remarks>
-/// Known limitation, tracked as the production password broker gate: the pipe is restricted to the
-/// current user and the handover is a one-shot challenge-response, but the server does not yet
-/// verify the connecting client's PID and service identity, and the installer-defined SDDL is not
-/// applied. Until that lands, the handover is only as strong as the isolation between processes
-/// running as the same user.
+/// Before the password is written the broker resolves the connected client's process, requires its
+/// image to be the very helper file this provider pinned open, and requires it to run as the
+/// expected account. An installer-defined SDDL can be supplied to describe who may open the pipe at
+/// all; without one the operating system restricts it to the current user.
 /// </remarks>
-public sealed class PasswordPipeCredentialProvider : IEngineCredentialProvider
+public sealed class PasswordPipeCredentialProvider : IEngineCredentialProvider, IDisposable
 {
-    private readonly string _helperPath;
+    private readonly PasswordBrokerOptions _options;
+    private readonly PinnedFile _helper;
     private readonly IKeyLease _lease;
     private readonly TimeSpan _handoverTimeout;
 
     public PasswordPipeCredentialProvider(string helperPath, IKeyLease lease, TimeSpan? handoverTimeout = null)
+        : this(new PasswordBrokerOptions(helperPath), lease, handoverTimeout)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(helperPath);
-        ArgumentNullException.ThrowIfNull(lease);
+    }
 
-        _helperPath = Path.GetFullPath(helperPath);
-        if (!File.Exists(_helperPath))
+    public PasswordPipeCredentialProvider(PasswordBrokerOptions options, IKeyLease lease, TimeSpan? handoverTimeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(lease);
+        ArgumentException.ThrowIfNullOrWhiteSpace(options.HelperPath);
+
+        var helperPath = Path.GetFullPath(options.HelperPath);
+        if (!File.Exists(helperPath))
         {
-            throw new FileNotFoundException("Password helper is missing.", _helperPath);
+            throw new FileNotFoundException("Password helper is missing.", helperPath);
         }
 
+        // The helper is pinned for the lifetime of the provider: the file that is approved to
+        // receive the password cannot be replaced, and every connecting client is compared against
+        // this exact file rather than against a path.
+        _helper = PinnedFile.Open(helperPath);
+        _options = options with { HelperPath = helperPath };
         _lease = lease;
         _handoverTimeout = handoverTimeout ?? TimeSpan.FromSeconds(30);
     }
+
+    public void Dispose() => _helper.Dispose();
 
     public Task<IEngineCredentialSession> BeginAsync(Guid operationId, CancellationToken cancellationToken)
     {
@@ -42,11 +56,11 @@ public sealed class PasswordPipeCredentialProvider : IEngineCredentialProvider
             throw new ArgumentException("A credential session requires the operation ID it belongs to.", nameof(operationId));
         }
 
-        var server = new PasswordPipeServer(operationId, _lease);
+        var server = new PasswordPipeServer(operationId, _lease, _helper, _options);
         var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var served = server.ServeOnceAsync(lifetime.Token);
         return Task.FromResult<IEngineCredentialSession>(
-            new Session(_helperPath, operationId, served, lifetime, _handoverTimeout));
+            new Session(_options.HelperPath, operationId, served, lifetime, _handoverTimeout));
     }
 
     private sealed class Session : IEngineCredentialSession

@@ -21,6 +21,13 @@ is an open gate, not a description of the current state.
 - **Pinned actions.** Every GitHub Action is referenced by commit SHA with the human-readable tag in a
   comment. A tag can be moved to different code at any time; a SHA cannot.
 - **Least-privilege CI token.** The workflow declares `permissions: contents: read`.
+- **The password goes to one approved process.** Before the engine password is written, the broker
+  resolves the connecting client's process, requires its image to be the very helper file the broker
+  pinned open, and requires it to run as the expected account. The process check runs at connection
+  time, before the challenge is offered; the account check runs after the first read, because Windows
+  only permits impersonation once data has been read, and still before any part of the password is
+  written. An installer-defined SDDL can be supplied to control who may open the pipe at all;
+  without one the operating system restricts it to the current user.
 - **Secrets never travel as arguments.** The engine password reaches restic over a one-shot named
   pipe; the command line carries only the pinned helper path and a non-secret operation ID. The
   recovery tool reads the mnemonic from standard input and rejects every option that would carry a
@@ -49,10 +56,19 @@ These require GitHub configuration or release tooling that this repository canno
 
 ## Password broker
 
-The password handover uses a `CurrentUserOnly` named pipe and a one-shot challenge-response. It does
-**not** yet verify the connecting client's PID and service identity, and it does not apply an
-installer-defined SDDL. Until it does, the handover is only as strong as the isolation between
-processes running as the same user. This is called out on `PasswordPipeCredentialProvider` itself.
+The handover is a one-shot challenge-response over a pipe that exists for a single operation, and it
+is now bound to a specific client: the pinned helper image, running as the expected account.
+
+Residual limitations, stated plainly:
+
+- The client is identified by its process ID, which the broker resolves into a held process handle
+  before reading the image path. That prevents the ID being reused underneath the check, but the
+  identification still starts from an ID rather than from a handle the operating system hands over.
+- The helper image is compared by file identity against a file the broker holds open, so it cannot be
+  replaced. Nothing yet verifies who published that file: Authenticode signing of Fortiq binaries
+  remains an open gate above.
+- The SDDL is honoured but not authored here. An installer that supplies a permissive descriptor
+  weakens the pipe, and nothing in this repository validates the descriptor it is given.
 
 ## Reporting
 

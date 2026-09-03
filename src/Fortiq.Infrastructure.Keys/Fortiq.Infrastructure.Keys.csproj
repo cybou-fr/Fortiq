@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Fortiq.Application\Fortiq.Application.csproj" />
+    <ProjectReference Include="..\Fortiq.Platform.Windows\Fortiq.Platform.Windows.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

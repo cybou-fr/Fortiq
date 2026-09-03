@@ -76,10 +76,13 @@ Test-only key lease хранит собственную копию EUS, отзы
 буфер при `Dispose`. `EnginePasswordV1` кодируется напрямую в предоставленный mutable
 буфер без создания immutable secret-string.
 
-P0 password helper использует одноразовый `CurrentUserOnly` Named Pipe, получает через
-аргументы только operation ID и пишет password с единственным завершающим newline.
-Challenge-response проверяет целостность protocol round-trip, но не заменяет обязательную
-P1-проверку client PID/service identity и installer-defined SDDL.
+Password broker выдаёт engine password ровно один раз и только одному процессу. До записи пароля
+брокер резолвит процесс подключившегося клиента, требует, чтобы его образ был **тем самым** файлом
+helper, который брокер держит открытым, и чтобы он выполнялся под ожидаемым аккаунтом. Проверка
+процесса выполняется в момент подключения, до выдачи challenge; проверка аккаунта — после первого
+чтения (Windows разрешает impersonation только после него) и всё равно до записи любой части пароля.
+Installer может задать SDDL канала; без него ОС ограничивает канал текущим пользователем. Оставшиеся
+ограничения перечислены в [SECURITY.md](SECURITY.md).
 
 E2E-001 выполняется на pinned restic: dataset builder создаёт пустой, текстовый, бинарный,
 Unicode-, длинный и read-only файлы, backup и restore выполняются в разных working directory,

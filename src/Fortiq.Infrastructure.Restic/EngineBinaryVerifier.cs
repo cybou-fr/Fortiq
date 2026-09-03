@@ -1,11 +1,7 @@
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using Microsoft.Win32.SafeHandles;
+using Fortiq.Platform.Windows;
 
 namespace Fortiq.Infrastructure.Restic;
-
-/// <summary>Identifies a file by the object it is, not by the path that led to it.</summary>
-internal readonly record struct FileIdentity(uint VolumeSerialNumber, ulong FileIndex);
 
 /// <summary>
 /// An engine binary that was verified against the manifest, together with the open handle that keeps
@@ -14,8 +10,7 @@ internal readonly record struct FileIdentity(uint VolumeSerialNumber, ulong File
 /// </summary>
 public sealed class VerifiedEngine : IDisposable
 {
-    private readonly FileStream? _pin;
-    private readonly FileIdentity? _identity;
+    private readonly PinnedFile? _pin;
 
     internal VerifiedEngine(
         string name,
@@ -23,8 +18,7 @@ public sealed class VerifiedEngine : IDisposable
         string rid,
         string absolutePath,
         string sha256,
-        FileStream? pin = null,
-        FileIdentity? identity = null)
+        PinnedFile? pin = null)
     {
         Name = name;
         Version = version;
@@ -32,7 +26,6 @@ public sealed class VerifiedEngine : IDisposable
         AbsolutePath = absolutePath;
         Sha256 = sha256;
         _pin = pin;
-        _identity = identity;
     }
 
     public string Name { get; }
@@ -53,13 +46,7 @@ public sealed class VerifiedEngine : IDisposable
     /// </summary>
     internal void EnsureUnchangedForExecution()
     {
-        if (_identity is not { } verified)
-        {
-            return;
-        }
-
-        using var current = new FileStream(AbsolutePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (ReadIdentity(current) != verified)
+        if (_pin is not null && !_pin.IsSameFileAs(AbsolutePath))
         {
             throw new InvalidDataException(
                 "The engine binary at the verified path is no longer the file that was verified.");
@@ -67,45 +54,6 @@ public sealed class VerifiedEngine : IDisposable
     }
 
     public void Dispose() => _pin?.Dispose();
-
-    /// <summary>
-    /// Reads the file's volume and index. Where the platform does not expose them the result is
-    /// null, and the execution-time identity check is skipped rather than faked.
-    /// </summary>
-    internal static FileIdentity? ReadIdentity(FileStream stream)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return null;
-        }
-
-        return GetFileInformationByHandle(stream.SafeFileHandle, out var information)
-            ? new FileIdentity(
-                information.VolumeSerialNumber,
-                ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow)
-            : throw new IOException("Failed to read the identity of the engine binary.");
-    }
-
-    // DllImport rather than LibraryImport: the generated marshalling code requires unsafe blocks,
-    // and this project has no other reason to allow them.
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandle(SafeFileHandle file, out ByHandleFileInformation information);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ByHandleFileInformation
-    {
-        public uint FileAttributes;
-        public long CreationTime;
-        public long LastAccessTime;
-        public long LastWriteTime;
-        public uint VolumeSerialNumber;
-        public uint FileSizeHigh;
-        public uint FileSizeLow;
-        public uint NumberOfLinks;
-        public uint FileIndexHigh;
-        public uint FileIndexLow;
-    }
 }
 
 public static class EngineBinaryVerifier
@@ -139,9 +87,9 @@ public static class EngineBinaryVerifier
         }
 
         // The handle is opened once and kept: it is what the hash is computed from, and holding it
-        // with FileShare.Read denies writes and deletes for as long as the engine is in use, so the
-        // binary cannot be swapped between this verification and its execution.
-        var pin = new FileStream(binaryPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        // denies writes and deletes for as long as the engine is in use, so the binary cannot be
+        // swapped between this verification and its execution.
+        var pin = PinnedFile.Open(binaryPath);
         try
         {
             if (pin.Length != entry.BinaryLength)
@@ -149,7 +97,7 @@ public static class EngineBinaryVerifier
                 throw new InvalidDataException("Engine binary length does not match the manifest.");
             }
 
-            var digest = await SHA256.HashDataAsync(pin, cancellationToken);
+            var digest = await SHA256.HashDataAsync(pin.Content, cancellationToken);
             var actualHash = Convert.ToHexStringLower(digest);
 
             if (!CryptographicOperations.FixedTimeEquals(
@@ -159,14 +107,7 @@ public static class EngineBinaryVerifier
                 throw new InvalidDataException("Engine binary SHA-256 does not match the manifest.");
             }
 
-            return new VerifiedEngine(
-                entry.Name,
-                entry.Version,
-                entry.Rid,
-                binaryPath,
-                actualHash,
-                pin,
-                VerifiedEngine.ReadIdentity(pin));
+            return new VerifiedEngine(entry.Name, entry.Version, entry.Rid, binaryPath, actualHash, pin);
         }
         catch
         {
