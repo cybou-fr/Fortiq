@@ -8,15 +8,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Fortiq asks the storage what it will refuse; the engine moves the data itself. -->
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.102.4" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.11" />
     <PackageVersion Include="System.Formats.Cbor" Version="10.0.0" />
   </ItemGroup>
 
   <ItemGroup Label="Test infrastructure">
-    <!-- Used only to set up and inspect the local S3 server the storage tests run against. No
-         product code talks to an S3 API. -->
-    <PackageVersion Include="AWSSDK.S3" Version="4.0.102.4" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="Xunit.SkippableFact" Version="1.5.23" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />

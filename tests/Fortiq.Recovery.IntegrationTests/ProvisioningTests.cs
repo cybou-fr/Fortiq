@@ -1,3 +1,4 @@
+using Fortiq.Application;
 using Fortiq.Domain;
 using Fortiq.Infrastructure.Keys;
 using Fortiq.Provisioning;
@@ -20,7 +21,8 @@ public sealed class ProvisioningTests
                 [],
                 "instructions"),
             mnemonic,
-            DeviceUnlockAvailable: false);
+            DeviceUnlockAvailable: false,
+            StorageProtection.None);
 
         // A result object like this one reaches log lines, exception messages and debugger output.
         var printed = provisioned.ToString();

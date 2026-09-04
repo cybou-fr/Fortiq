@@ -23,7 +23,8 @@ public sealed record RecoveryKit(
     RecoveryKitEngine Engine,
     DateTimeOffset CreatedAt,
     IReadOnlyList<RecoveryKitUnlockMethod> UnlockMethods,
-    string Instructions)
+    string Instructions,
+    RecoveryKitStorageProtection? StorageProtection = null)
 {
     public const string Schema = "fortiq.recovery-kit";
     public const int SchemaVersion = 1;
@@ -31,6 +32,14 @@ public sealed record RecoveryKit(
 }
 
 public sealed record RecoveryKitEngine(string Name, string Version, string Sha256);
+
+/// <summary>
+/// What the storage promised when the repository was created, as the storage itself stated it. It is
+/// recorded because it is what makes the difference between a backup that is merely encrypted and one
+/// that survives whoever holds the credentials - and because storage can be changed later, so a kit
+/// says what was true then rather than what is true now.
+/// </summary>
+public sealed record RecoveryKitStorageProtection(bool Immutable, string Mode, int? RetentionDays);
 
 /// <summary>An opened kit: the manifest plus the envelopes it points at, already verified.</summary>
 public sealed record OpenedRecoveryKit(RecoveryKit Manifest, IReadOnlyList<KeyEnvelopeV1> Envelopes);
@@ -61,7 +70,8 @@ public static class RecoveryKitStore
         RecoveryKitEngine engine,
         IReadOnlyList<KeyEnvelopeV1> envelopes,
         TimeProvider? clock,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        RecoveryKitStorageProtection? storageProtection = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         ArgumentNullException.ThrowIfNull(engine);
@@ -111,7 +121,8 @@ public static class RecoveryKitStore
             methods,
             "Restore with: Fortiq.Recover restore --kit <this directory> --repository <repository> "
             + "--engine-root <engines> --snapshot <id> --target <empty directory>. "
-            + "The recovery mnemonic is typed on standard input and is not stored in this kit.");
+            + "The recovery mnemonic is typed on standard input and is not stored in this kit.",
+            storageProtection);
 
         var document = new ManifestDocument(
             RecoveryKit.Schema,
@@ -121,7 +132,8 @@ public static class RecoveryKitStore
             kit.Engine,
             kit.CreatedAt,
             kit.UnlockMethods,
-            kit.Instructions);
+            kit.Instructions,
+            kit.StorageProtection);
 
         await File.WriteAllTextAsync(
             Path.Combine(directory, RecoveryKit.ManifestFileName),
@@ -190,7 +202,8 @@ public static class RecoveryKitStore
             document.Engine,
             document.CreatedAt,
             document.UnlockMethods,
-            document.Instructions);
+            document.Instructions,
+            document.StorageProtection);
 
         return new OpenedRecoveryKit(kit, envelopes);
     }
@@ -203,5 +216,6 @@ public static class RecoveryKitStore
         RecoveryKitEngine Engine,
         DateTimeOffset CreatedAt,
         IReadOnlyList<RecoveryKitUnlockMethod> UnlockMethods,
-        string Instructions);
+        string Instructions,
+        RecoveryKitStorageProtection? StorageProtection = null);
 }

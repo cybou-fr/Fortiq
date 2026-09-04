@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Fortiq.Infrastructure.Keys\Fortiq.Infrastructure.Keys.csproj" />
     <ProjectReference Include="..\Fortiq.Infrastructure.Restic\Fortiq.Infrastructure.Restic.csproj" />
     <ProjectReference Include="..\Fortiq.PasswordHelper\Fortiq.PasswordHelper.csproj" />
+    <ProjectReference Include="..\Fortiq.Infrastructure.ObjectStorage\Fortiq.Infrastructure.ObjectStorage.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

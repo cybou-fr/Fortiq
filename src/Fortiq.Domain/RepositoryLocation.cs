@@ -7,6 +7,9 @@ public enum RepositoryLocationKind
     ObjectStorage
 }
 
+/// <summary>Where an object storage repository actually is: an endpoint, a bucket, and a prefix.</summary>
+public sealed record ObjectStorageAddress(Uri Endpoint, string Bucket, string Prefix);
+
 /// <summary>
 /// A repository location, normalised for what it is. A local path is made absolute; an object
 /// storage URL is left exactly as written, because it is not a path and treating it as one turns
@@ -32,6 +35,38 @@ public static class RepositoryLocation
         RepositoryLocationKind.LocalDirectory => Path.GetFullPath(location),
         _ => Require(location)
     };
+
+    /// <summary>
+    /// Breaks an object storage location into the parts a storage client needs. The engine is given
+    /// the location as written; anything that has to talk to the storage itself needs this.
+    /// </summary>
+    public static ObjectStorageAddress ParseObjectStorage(string location)
+    {
+        if (!IsObjectStorage(location))
+        {
+            throw new ArgumentException("This location is not in object storage.", nameof(location));
+        }
+
+        var remainder = Require(location)[ObjectStoragePrefix.Length..];
+        var scheme = remainder.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ? "http"
+            : remainder.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? "https"
+            : null;
+
+        // Without an explicit scheme the host is reached over HTTPS: an endpoint that has to be
+        // guessed is guessed as the protected one.
+        var authorityAndPath = scheme is null ? remainder : remainder[(remainder.IndexOf("://", StringComparison.Ordinal) + 3)..];
+        var segments = authorityAndPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        if (segments.Length < 2)
+        {
+            throw new ArgumentException("An object storage location must name a host and a bucket.", nameof(location));
+        }
+
+        return new ObjectStorageAddress(
+            new Uri($"{scheme ?? "https"}://{segments[0]}"),
+            segments[1],
+            string.Join('/', segments.Skip(2)));
+    }
 
     /// <summary>
     /// Checks that an object storage location is one this build can hand to the engine, and says so

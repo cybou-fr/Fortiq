@@ -84,10 +84,13 @@ internal sealed class ProvisioningIntent : IAsyncDisposable
     /// Removes what a failed run created. Both directories were empty or absent when the run began,
     /// so emptying them undoes exactly this run's work and nothing else.
     /// </summary>
-    internal static void RollBack(string repositoryPath, string kitPath)
+    internal static void RollBack(string? repositoryPath, string kitPath)
     {
         Clear(kitPath);
-        Clear(repositoryPath);
+        if (repositoryPath is not null)
+        {
+            Clear(repositoryPath);
+        }
     }
 
     public ValueTask DisposeAsync()

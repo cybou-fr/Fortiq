@@ -15,7 +15,8 @@ public sealed record ProvisionedRepository(
     RepositoryDescriptor Repository,
     RecoveryKit Kit,
     string RecoveryMnemonic,
-    bool DeviceUnlockAvailable)
+    bool DeviceUnlockAvailable,
+    StorageProtection StorageProtection)
 {
     /// <summary>
     /// Keeps the mnemonic out of the generated <c>ToString</c>. A record prints every property by
@@ -28,7 +29,8 @@ public sealed record ProvisionedRepository(
         builder.Append("Repository = ").Append(Repository.Id)
             .Append(", Kit = ").Append(Kit.RepositoryId)
             .Append(", RecoveryMnemonic = [redacted]")
-            .Append(", DeviceUnlockAvailable = ").Append(DeviceUnlockAvailable);
+            .Append(", DeviceUnlockAvailable = ").Append(DeviceUnlockAvailable)
+            .Append(", StorageProtection = ").Append(StorageProtection);
         return true;
     }
 }
@@ -49,13 +51,22 @@ public sealed class RepositoryProvisioner
     private readonly string _engineRoot;
     private readonly string _helperPath;
     private readonly TimeProvider _clock;
+    private readonly IObjectStorageCredentialProvider _storage;
+    private readonly IStorageProtectionInspector? _protection;
 
-    public RepositoryProvisioner(string engineRoot, string? passwordHelperPath = null, TimeProvider? clock = null)
+    public RepositoryProvisioner(
+        string engineRoot,
+        string? passwordHelperPath = null,
+        TimeProvider? clock = null,
+        IObjectStorageCredentialProvider? storage = null,
+        IStorageProtectionInspector? protection = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(engineRoot);
         _engineRoot = Path.GetFullPath(engineRoot);
         _helperPath = passwordHelperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
         _clock = clock ?? TimeProvider.System;
+        _storage = storage ?? new NoObjectStorageCredentials();
+        _protection = protection;
     }
 
     /// <summary>Test seam: runs immediately after the repository exists and before the kit is written.</summary>
@@ -72,14 +83,30 @@ public sealed class RepositoryProvisioner
         string kitDirectory,
         string workingDirectory,
         CancellationToken cancellationToken,
-        bool addDeviceUnlock = true)
+        bool addDeviceUnlock = true,
+        bool requireImmutableStorage = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryLocation);
         ArgumentException.ThrowIfNullOrWhiteSpace(kitDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
-        var repositoryPath = Path.GetFullPath(repositoryLocation);
+        var repositoryPath = RepositoryLocation.Normalize(repositoryLocation);
+        var inObjectStorage = RepositoryLocation.IsObjectStorage(repositoryPath);
         var kitPath = Path.GetFullPath(kitDirectory);
+
+        // Asked before anything is created: storage that will not keep what is written to it is a
+        // reason not to start, rather than something to discover once a repository exists.
+        var protection = _protection is null
+            ? StorageProtection.None
+            : await _protection.InspectAsync(repositoryPath, cancellationToken);
+
+        if (requireImmutableStorage && !protection.Immutable)
+        {
+            throw new StorageNotImmutableException(
+                _protection is null
+                    ? "Immutable storage was required, but nothing was supplied that can ask the storage what it protects."
+                    : "Immutable storage was required, and this storage does not keep what is written to it.");
+        }
 
         if (Directory.Exists(kitPath) && Directory.EnumerateFileSystemEntries(kitPath).Any())
         {
@@ -89,7 +116,9 @@ public sealed class RepositoryProvisioner
 
         // Rollback is only ever undoing this run's own work, so an existing repository with content
         // is refused rather than adopted.
-        if (Directory.Exists(repositoryPath) && Directory.EnumerateFileSystemEntries(repositoryPath).Any())
+        if (!inObjectStorage
+            && Directory.Exists(repositoryPath)
+            && Directory.EnumerateFileSystemEntries(repositoryPath).Any())
         {
             throw new InvalidOperationException("The repository directory must be empty.");
         }
@@ -107,7 +136,7 @@ public sealed class RepositoryProvisioner
             CryptographicOperations.ZeroMemory(engineUnlockSecret);
 
             using var credentials = new PasswordPipeCredentialProvider(_helperPath, lease);
-            var adapter = ResticEngineFactory.Create(engine, credentials, workingDirectory);
+            var adapter = ResticEngineFactory.Create(engine, credentials, workingDirectory, _storage);
             var repository = await adapter.InitializeAsync(new InitializeRepository(repositoryPath), cancellationToken);
 
             if (AfterInitialize is not null)
@@ -137,12 +166,16 @@ public sealed class RepositoryProvisioner
                 new RecoveryKitEngine(engine.Name, engine.Version, engine.Sha256),
                 envelopes,
                 _clock,
-                cancellationToken);
+                cancellationToken,
+                new RecoveryKitStorageProtection(
+                    protection.Immutable,
+                    protection.Mode.ToString().ToLowerInvariant(),
+                    protection.DefaultRetention is { } retention ? (int)Math.Round(retention.TotalDays) : null));
 
             await ProveTheKitOpensTheRepositoryAsync(engine, kitPath, repository, mnemonic, workingDirectory, cancellationToken);
 
             await intent.CompleteAsync(cancellationToken);
-            return new ProvisionedRepository(repository, kit, mnemonic, deviceUnlock);
+            return new ProvisionedRepository(repository, kit, mnemonic, deviceUnlock, protection);
         }
         catch
         {
@@ -153,7 +186,10 @@ public sealed class RepositoryProvisioner
                 WindowsTpmEnvelope.DeleteKey(deviceEnvelope);
             }
 
-            ProvisioningIntent.RollBack(repositoryPath, kitPath);
+            // A repository in object storage cannot be rolled back from here, and in a locked bucket
+            // it cannot be removed at all - by design. The intent record names it, so an operator
+            // learns what was left behind instead of being told it was cleaned up.
+            ProvisioningIntent.RollBack(inObjectStorage ? null : repositoryPath, kitPath);
 
             // The intent is removed last: while it exists, an interrupted run is still recognisable.
             await intent.DisposeAsync();
@@ -205,7 +241,7 @@ public sealed class RepositoryProvisioner
 
         using var lease = Bip39RecoveryEnvelope.Unwrap(recovery, repository.Id.ToArray(), mnemonic);
         using var credentials = new PasswordPipeCredentialProvider(_helperPath, lease);
-        var adapter = ResticEngineFactory.Create(engine, credentials, workingDirectory);
+        var adapter = ResticEngineFactory.Create(engine, credentials, workingDirectory, _storage);
 
         // Listing is the cheapest operation that still requires the engine to accept the password
         // the kit produced.
