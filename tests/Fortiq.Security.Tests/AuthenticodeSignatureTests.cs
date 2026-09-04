@@ -61,11 +61,18 @@ public sealed class AuthenticodeSignatureTests
                 AuthenticodeSignature.Verify(copy) == SignatureStatus.Trusted,
                 "The signature of this sample does not travel with a copy of it.");
 
-            using (var stream = new FileStream(copy, FileMode.Open, FileAccess.Write))
+            // Flip the byte rather than write a fixed value: writing a zero over a byte that was
+            // already zero changes nothing, and a file that was never modified stays trusted.
+            var before = Hash(copy);
+            using (var stream = new FileStream(copy, FileMode.Open, FileAccess.ReadWrite))
             {
                 stream.Position = stream.Length / 2;
-                stream.WriteByte(0x00);
+                var existing = stream.ReadByte();
+                stream.Position = stream.Length / 2;
+                stream.WriteByte((byte)(existing ^ 0xFF));
             }
+
+            Assert.NotEqual(before, Hash(copy));
 
             // Whether the result is "broken" or "absent" depends on how the file was signed: a
             // catalog entry is matched by hash, so changing the bytes makes the file unknown rather
@@ -76,6 +83,12 @@ public sealed class AuthenticodeSignatureTests
         {
             File.Delete(copy);
         }
+    }
+
+    private static string Hash(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(stream));
     }
 
     /// <summary>A file this machine reports as trusted, if it has one.</summary>
