@@ -134,11 +134,14 @@ public static class KeyEnvelopeCodec
             throw new InvalidDataException("Envelope suite identifier has an invalid length.");
         }
 
+        var providerType = KeyEnvelopeV1.ParseProvider(Text(fields, ProviderTypeKey));
+        EnvelopeSuites.RequireConsistent(suite, providerType);
+
         return new KeyEnvelopeV1
         {
             EnvelopeId = Bytes(fields, EnvelopeIdKey, KeyEnvelopeV1.EnvelopeIdSize, KeyEnvelopeV1.EnvelopeIdSize),
             RepositoryId = Bytes(fields, RepositoryIdKey, KeyEnvelopeV1.RepositoryIdSize, KeyEnvelopeV1.RepositoryIdSize),
-            ProviderType = KeyEnvelopeV1.ParseProvider(Text(fields, ProviderTypeKey)),
+            ProviderType = providerType,
             Suite = suite,
             ProviderParameters = (IReadOnlyDictionary<string, byte[]>)Require(fields, ProviderParametersKey),
             WrappedSecret = Bytes(fields, WrappedSecretKey, 1, MaximumWrappedSecretSize),

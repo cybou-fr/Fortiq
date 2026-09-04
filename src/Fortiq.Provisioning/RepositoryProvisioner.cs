@@ -15,7 +15,23 @@ public sealed record ProvisionedRepository(
     RepositoryDescriptor Repository,
     RecoveryKit Kit,
     string RecoveryMnemonic,
-    bool DeviceUnlockAvailable);
+    bool DeviceUnlockAvailable)
+{
+    /// <summary>
+    /// Keeps the mnemonic out of the generated <c>ToString</c>. A record prints every property by
+    /// default, and a result object like this one ends up in log lines, exception messages and
+    /// debugger output; the recovery material must not travel with it.
+    /// </summary>
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        builder.Append("Repository = ").Append(Repository.Id)
+            .Append(", Kit = ").Append(Kit.RepositoryId)
+            .Append(", RecoveryMnemonic = [redacted]")
+            .Append(", DeviceUnlockAvailable = ").Append(DeviceUnlockAvailable);
+        return true;
+    }
+}
 
 /// <summary>
 /// Creates a repository and the recovery kit that can reopen it. This is the step that makes the

@@ -27,6 +27,7 @@ internal static class EnvelopeCipher
         TimeProvider? clock)
     {
         ArgumentNullException.ThrowIfNull(engineUnlockSecret);
+        EnvelopeSuites.RequireConsistent(suite, providerType);
         if (repositoryId.Length != KeyEnvelopeV1.RepositoryIdSize)
         {
             throw new ArgumentException("Repository ID must contain exactly 32 bytes.", nameof(repositoryId));

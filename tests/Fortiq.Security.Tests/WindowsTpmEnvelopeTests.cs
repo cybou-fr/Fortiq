@@ -138,30 +138,33 @@ public sealed class WindowsTpmEnvelopeTests
     [Fact]
     public async Task AKitCannotOfferTheDeviceAsItsOnlyWayBack()
     {
-        Skip.IfNot(WindowsTpmEnvelope.IsAvailable, "This machine has no platform crypto provider.");
+        // The policy is about the kit, not about the hardware, so this uses a device-typed envelope
+        // that needs no TPM: the rule has to hold on every machine that can build a kit.
         var directory = Path.Combine(Path.GetTempPath(), "fortiq-tpm-kit-" + Guid.NewGuid().ToString("N"));
-        var envelope = Wrap(out _);
+        var engine = new RecoveryKitEngine("restic", "0.19.1", new string('a', 64));
+        using var lease = new BufferKeyLease(EngineUnlockSecret);
+        var deviceEnvelope = EnvelopeCipher.Wrap(
+            WindowsTpmEnvelope.SuiteId,
+            EnvelopeProviderType.WindowsTpm,
+            RandomNumberGenerator.GetBytes(32),
+            RepositoryId,
+            lease,
+            providerParameters: null,
+            clock: null);
+
         try
         {
             var failure = await Assert.ThrowsAsync<ArgumentException>(
-                () => RecoveryKitStore.WriteAsync(
-                    directory,
-                    "C:/repository",
-                    new RecoveryKitEngine("restic", "0.19.1", new string('a', 64)),
-                    [envelope],
-                    clock: null,
-                    CancellationToken.None));
-
+                () => RecoveryKitStore.WriteAsync(directory, "C:/repository", engine, [deviceEnvelope], null, CancellationToken.None));
             Assert.Contains("survives the loss of the device", failure.Message, StringComparison.Ordinal);
 
             // With a recovery method beside it, the same envelope is welcome.
-            using var lease = new BufferKeyLease(EngineUnlockSecret);
             var kit = await RecoveryKitStore.WriteAsync(
                 directory,
                 "C:/repository",
-                new RecoveryKitEngine("restic", "0.19.1", new string('a', 64)),
-                [envelope, Bip39RecoveryEnvelope.Wrap(RepositoryId, Bip39Mnemonic.Create(), lease)],
-                clock: null,
+                engine,
+                [deviceEnvelope, Bip39RecoveryEnvelope.Wrap(RepositoryId, Bip39Mnemonic.Create(), lease)],
+                null,
                 CancellationToken.None);
 
             Assert.Equal(2, kit.UnlockMethods.Count);
@@ -169,7 +172,6 @@ public sealed class WindowsTpmEnvelopeTests
         }
         finally
         {
-            WindowsTpmEnvelope.DeleteKey(envelope);
             if (Directory.Exists(directory))
             {
                 Directory.Delete(directory, recursive: true);
