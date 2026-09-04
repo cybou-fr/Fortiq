@@ -1,5 +1,26 @@
 namespace Fortiq.Monitoring;
 
+/// <summary>
+/// What the storage said when it was last asked, which is a different fact from what it promised
+/// when the repository was created.
+/// </summary>
+/// <remarks>
+/// The distinction is the point. Reporting the protection recorded at provisioning time as though it
+/// were current means a bucket whose retention was lifted last week still shows as immutable - and
+/// lifting that retention is precisely the first move of somebody preparing to delete the backups.
+/// </remarks>
+public enum StorageProtectionStatus
+{
+    /// <summary>Nobody has asked the storage. Not a claim in either direction.</summary>
+    Unknown,
+
+    /// <summary>The storage was asked and keeps what is written to it.</summary>
+    Immutable,
+
+    /// <summary>The storage was asked and promises nothing.</summary>
+    NotImmutable
+}
+
 /// <summary>What is known about a repository, as facts rather than conclusions.</summary>
 public sealed record RepositoryFacts(
     string RepositoryId,
@@ -8,8 +29,11 @@ public sealed record RepositoryFacts(
     DateTimeOffset? LastHealthyCheckAt,
     DateTimeOffset? LastProvenRestoreAt,
     bool KitPresent,
+    /// <summary>What the kit recorded the storage promising when the repository was created.</summary>
     bool StorageImmutable,
-    string? LastFailure = null);
+    string? LastFailure = null,
+    /// <summary>What the storage says today. Defaults to unknown: nothing is claimed unasked.</summary>
+    StorageProtectionStatus StorageProtectionNow = StorageProtectionStatus.Unknown);
 
 /// <summary>How old each kind of evidence may be before it stops counting.</summary>
 public sealed record HealthThresholds(
@@ -128,11 +152,39 @@ public static class HealthAssessor
                 $"The last proven restore was at {facts.LastProvenRestoreAt:O}."));
         }
 
-        if (!facts.StorageImmutable)
+        // Storage protection is judged on what the storage says now, and only falls back to what it
+        // promised at provisioning when nobody could ask. A guarantee recorded months ago is not
+        // evidence about today.
+        switch (facts.StorageProtectionNow)
         {
-            findings.Add(new HealthFinding(
-                "storage-not-immutable",
-                "The storage holding this repository does not keep what is written to it."));
+            case StorageProtectionStatus.NotImmutable when facts.StorageImmutable:
+                findings.Add(new HealthFinding(
+                    "storage-protection-lost",
+                    "This repository was created on storage that kept what was written to it, and that "
+                    + "storage no longer does. Removing retention is the first step towards deleting the backups."));
+                break;
+
+            case StorageProtectionStatus.NotImmutable:
+                findings.Add(new HealthFinding(
+                    "storage-not-immutable",
+                    "The storage holding this repository does not keep what is written to it."));
+                break;
+
+            case StorageProtectionStatus.Unknown when facts.StorageImmutable:
+                findings.Add(new HealthFinding(
+                    "storage-protection-unknown",
+                    "The storage could not be asked what it protects. It promised to keep what was "
+                    + "written to it when this repository was created; whether it still does is unverified."));
+                break;
+
+            case StorageProtectionStatus.Unknown:
+                findings.Add(new HealthFinding(
+                    "storage-not-immutable",
+                    "The storage holding this repository does not keep what is written to it."));
+                break;
+
+            default:
+                break;
         }
 
         // The verdict is settled before anomalies are added. An unusual backup is not a reason to

@@ -1,3 +1,4 @@
+using Fortiq.Infrastructure.ObjectStorage;
 using Fortiq.Operations;
 using Fortiq.Application;
 using Fortiq.Scheduling;
@@ -71,7 +72,9 @@ public static class Program
             provider.GetRequiredService<IScheduleStore>(),
             paths.Receipts,
             paths.HealthReport,
-            paths.HealthMetrics));
+            paths.HealthMetrics,
+            protection: new S3StorageProtectionInspector(
+                provider.GetRequiredService<IObjectStorageCredentialProvider>())));
         builder.Services.AddHostedService<SchedulerWorker>();
 
         await builder.Build().RunAsync();

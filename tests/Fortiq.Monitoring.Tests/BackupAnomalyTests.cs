@@ -129,7 +129,8 @@ public sealed class BackupAnomalyTests
             LastHealthyCheckAt: Now.AddDays(-1),
             LastProvenRestoreAt: Now.AddDays(-2),
             KitPresent: true,
-            StorageImmutable: true);
+            StorageImmutable: true,
+            StorageProtectionNow: StorageProtectionStatus.Immutable);
 
         var anomalies = BackupAnomalyDetector.Inspect(
         [

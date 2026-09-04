@@ -1,3 +1,4 @@
+using Fortiq.Application;
 using Fortiq.Infrastructure.Keys;
 using Fortiq.Monitoring;
 using Fortiq.Scheduling;
@@ -21,19 +22,22 @@ public sealed class HealthPublisher
     private readonly string _reportPath;
     private readonly string _metricsPath;
     private readonly TimeProvider _clock;
+    private readonly IStorageProtectionInspector? _protection;
 
     public HealthPublisher(
         IScheduleStore schedules,
         string receiptDirectory,
         string reportPath,
         string metricsPath,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        IStorageProtectionInspector? protection = null)
     {
         _schedules = schedules ?? throw new ArgumentNullException(nameof(schedules));
         _receiptDirectory = receiptDirectory ?? throw new ArgumentNullException(nameof(receiptDirectory));
         _reportPath = reportPath ?? throw new ArgumentNullException(nameof(reportPath));
         _metricsPath = metricsPath ?? throw new ArgumentNullException(nameof(metricsPath));
         _clock = clock ?? TimeProvider.System;
+        _protection = protection;
     }
 
     public async Task<HealthReport> PublishAsync(CancellationToken cancellationToken)
@@ -59,7 +63,8 @@ public sealed class HealthPublisher
                     seen?.LastProvenRestoreAt,
                     KitPresent: kit is not null,
                     StorageImmutable: kit?.Manifest.StorageProtection?.Immutable ?? false,
-                    state.LastFailure ?? seen?.LastFailure),
+                    state.LastFailure ?? seen?.LastFailure,
+                    await InspectAsync(schedule.RepositoryLocation, cancellationToken)),
                 now,
                 thresholds: null,
                 // Compared against this repository's own history, which is why it is read from the
@@ -71,6 +76,31 @@ public sealed class HealthPublisher
         await HealthPublication.WriteJsonAsync(report, _reportPath, cancellationToken);
         await HealthPublication.WritePrometheusAsync(report, _metricsPath, cancellationToken);
         return report;
+    }
+
+    /// <summary>
+    /// Asks the storage what it protects now. Without an inspector, or when the storage cannot be
+    /// reached, the answer is unknown - which is reported as unknown rather than resolved to either
+    /// claim. A monitoring path that turns "could not ask" into "not protected" cries wolf every time
+    /// the network blinks; one that turns it into "protected" is worse, because it goes quiet exactly
+    /// when somebody has taken the protection away.
+    /// </summary>
+    private async Task<StorageProtectionStatus> InspectAsync(string location, CancellationToken cancellationToken)
+    {
+        if (_protection is null)
+        {
+            return StorageProtectionStatus.Unknown;
+        }
+
+        try
+        {
+            var protection = await _protection.InspectAsync(location, cancellationToken);
+            return protection.Immutable ? StorageProtectionStatus.Immutable : StorageProtectionStatus.NotImmutable;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            return StorageProtectionStatus.Unknown;
+        }
     }
 
     private static async Task<OpenedRecoveryKit?> ReadKitAsync(string directory, CancellationToken cancellationToken)

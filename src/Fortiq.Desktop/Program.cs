@@ -45,7 +45,12 @@ public sealed class FortiqApplication : Avalonia.Application
                     runDirectory: paths.Runs,
                     receiptDirectory: paths.Receipts,
                     storage: storage),
-                new HealthPublisher(schedules, paths.Receipts, paths.HealthReport, paths.HealthMetrics));
+                new HealthPublisher(
+                    schedules,
+                    paths.Receipts,
+                    paths.HealthReport,
+                    paths.HealthMetrics,
+                    protection: new S3StorageProtectionInspector(storage)));
 
             desktop.MainWindow = new MainWindow(
                 new RepositoriesViewModel(new HealthFileSource(paths.HealthReport), prove),

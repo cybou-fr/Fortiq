@@ -77,7 +77,15 @@ public sealed class RepositoriesViewModelTests
     [Fact]
     public async Task ARepositoryWithNoBackupHasNothingToProve()
     {
-        var facts = new RepositoryFacts("a", "documents", null, null, null, KitPresent: true, StorageImmutable: true);
+        var facts = new RepositoryFacts(
+            "a",
+            "documents",
+            null,
+            null,
+            null,
+            KitPresent: true,
+            StorageImmutable: true,
+            StorageProtectionNow: StorageProtectionStatus.Immutable);
         var model = await ScreenAsync(HealthAssessor.Assess(facts, Now));
 
         Assert.False(Assert.Single(model.Repositories).CanProveRecovery);
@@ -99,7 +107,8 @@ public sealed class RepositoriesViewModelTests
             LastHealthyCheckAt: verdict == HealthVerdict.Recoverable ? Now.AddDays(-1) : null,
             LastProvenRestoreAt: verdict == HealthVerdict.Recoverable ? Now.AddDays(-2) : null,
             KitPresent: code != "kit-missing",
-            StorageImmutable: true);
+            StorageImmutable: true,
+            StorageProtectionNow: StorageProtectionStatus.Immutable);
 
         return HealthAssessor.Assess(facts, Now);
     }

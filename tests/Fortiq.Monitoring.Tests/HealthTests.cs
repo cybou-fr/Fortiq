@@ -74,7 +74,12 @@ public sealed class HealthTests : IDisposable
     [Fact]
     public void StorageThatKeepsNothingIsReportedWithoutBeingCalledARiskToday()
     {
-        var health = HealthAssessor.Assess(Facts() with { StorageImmutable = false }, Now);
+        // Both halves say the same thing: it promised nothing then and promises nothing now. The
+        // verdict follows what the storage says today, so the provisioning-time value alone no
+        // longer decides anything.
+        var health = HealthAssessor.Assess(
+            Facts() with { StorageImmutable = false, StorageProtectionNow = StorageProtectionStatus.NotImmutable },
+            Now);
 
         // It is a weakness rather than an outage: the data is there today, and nothing protects it
         // from whoever holds the credentials.
@@ -180,7 +185,8 @@ public sealed class HealthTests : IDisposable
         LastHealthyCheckAt: Now.AddDays(-2),
         LastProvenRestoreAt: Now.AddDays(-7),
         KitPresent: true,
-        StorageImmutable: true);
+        StorageImmutable: true,
+        StorageProtectionNow: StorageProtectionStatus.Immutable);
 
     private async Task WriteReceiptAsync(string operation, string result, DateTimeOffset completedAt, string? warning = null)
     {

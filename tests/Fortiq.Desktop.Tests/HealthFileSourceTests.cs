@@ -17,7 +17,15 @@ public sealed class HealthFileSourceTests : IDisposable
     public async Task TheScreenReadsWhatTheServiceWrote()
     {
         var now = DateTimeOffset.UtcNow;
-        var facts = new RepositoryFacts("a", "documents", now.AddHours(-1), null, null, KitPresent: true, StorageImmutable: true);
+        var facts = new RepositoryFacts(
+            "a",
+            "documents",
+            now.AddHours(-1),
+            null,
+            null,
+            KitPresent: true,
+            StorageImmutable: true,
+            StorageProtectionNow: StorageProtectionStatus.Immutable);
         var report = new HealthReport(now, [HealthAssessor.Assess(facts, now)]);
 
         var path = Path.Combine(_directory, "health.json");
