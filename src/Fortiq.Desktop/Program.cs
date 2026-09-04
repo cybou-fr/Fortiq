@@ -103,22 +103,32 @@ public sealed class HealthFileSource : IHealthSource
 
     public HealthFileSource(string path) => _path = path ?? throw new ArgumentNullException(nameof(path));
 
-    public async Task<HealthReport> ReadAsync(CancellationToken cancellationToken)
+    public async Task<HealthReadResult> ReadAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(_path))
         {
-            throw new FileNotFoundException(
-                $"No health report at {_path}. The Fortiq service writes one after each pass.",
-                _path);
+            return new HealthReadResult(HealthStoreState.NotInitialized);
         }
+        try
+        {
+            var document = JsonSerializer.Deserialize<ReportDocument>(
+                await File.ReadAllTextAsync(_path, cancellationToken),
+                Options) ?? throw new InvalidDataException("The health report is empty.");
 
-        var document = JsonSerializer.Deserialize<ReportDocument>(
-            await File.ReadAllTextAsync(_path, cancellationToken),
-            Options) ?? throw new InvalidDataException("The health report is empty.");
+            if (document.Schema != HealthReport.Schema || document.Version != HealthReport.SchemaVersion)
+            {
+                throw new InvalidDataException("Unsupported health report schema or version.");
+            }
 
-        return document.Schema == HealthReport.Schema && document.Version == HealthReport.SchemaVersion
-            ? new HealthReport(document.ProducedAt, document.Repositories)
-            : throw new InvalidDataException("Unsupported health report schema or version.");
+            var report = new HealthReport(document.ProducedAt, document.Repositories);
+            return new HealthReadResult(
+                report.Repositories.Count == 0 ? HealthStoreState.Empty : HealthStoreState.Active,
+                report);
+        }
+        catch (Exception error) when (error is JsonException or InvalidDataException)
+        {
+            return new HealthReadResult(HealthStoreState.Corrupt, Detail: error.Message);
+        }
     }
 
     private sealed record ReportDocument(

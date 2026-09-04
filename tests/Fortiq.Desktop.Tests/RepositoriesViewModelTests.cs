@@ -40,8 +40,9 @@ public sealed class RepositoriesViewModelTests
         await model.RefreshAsync(CancellationToken.None);
 
         // An empty list would read as "nothing is wrong", which is the opposite of what it means.
-        Assert.NotNull(model.Failure);
-        Assert.Equal("No health report has been produced yet.", model.Headline);
+        Assert.Null(model.Failure);
+        Assert.Equal(HealthStoreState.NotInitialized, model.State);
+        Assert.Equal("Protect what matters before you need it.", model.Headline);
     }
 
     [Fact]
@@ -105,22 +106,22 @@ public sealed class RepositoriesViewModelTests
 
     private sealed class FixedHealth(params RepositoryHealth[] repositories) : IHealthSource
     {
-        public Task<HealthReport> ReadAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(new HealthReport(Now, repositories));
+        public Task<HealthReadResult> ReadAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new HealthReadResult(HealthStoreState.Active, new HealthReport(Now, repositories)));
     }
 
     private sealed class SwitchingHealth(params RepositoryHealth[] reports) : IHealthSource
     {
         private int _call;
 
-        public Task<HealthReport> ReadAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(new HealthReport(Now, [reports[Math.Min(_call++, reports.Length - 1)]]));
+        public Task<HealthReadResult> ReadAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new HealthReadResult(HealthStoreState.Active, new HealthReport(Now, [reports[Math.Min(_call++, reports.Length - 1)]])));
     }
 
     private sealed class MissingHealth : IHealthSource
     {
-        public Task<HealthReport> ReadAsync(CancellationToken cancellationToken) =>
-            Task.FromException<HealthReport>(new FileNotFoundException("health.json was not found."));
+        public Task<HealthReadResult> ReadAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new HealthReadResult(HealthStoreState.NotInitialized));
     }
 
     private sealed class FakeProof(bool succeeds) : IProveRecovery

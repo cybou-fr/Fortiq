@@ -8,8 +8,18 @@ namespace Fortiq.Desktop.ViewModels;
 /// <summary>Reads the health report the service publishes. The desktop asks the files, not the service.</summary>
 public interface IHealthSource
 {
-    Task<HealthReport> ReadAsync(CancellationToken cancellationToken);
+    Task<HealthReadResult> ReadAsync(CancellationToken cancellationToken);
 }
+
+public enum HealthStoreState
+{
+    NotInitialized,
+    Empty,
+    Active,
+    Corrupt
+}
+
+public sealed record HealthReadResult(HealthStoreState State, HealthReport? Report = null, string? Detail = null);
 
 /// <summary>
 /// Proves that a repository can be restored, by restoring from it. This is the action that turns a
@@ -61,6 +71,7 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
     private string? _failure;
     private bool _busy;
     private DateTimeOffset? _reportProducedAt;
+    private HealthStoreState _state = HealthStoreState.NotInitialized;
 
     public RepositoriesViewModel(IHealthSource health, IProveRecovery prove)
     {
@@ -78,19 +89,25 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
 
     public DateTimeOffset? ReportProducedAt { get => _reportProducedAt; private set => Set(ref _reportProducedAt, value); }
 
+    public HealthStoreState State { get => _state; private set => Set(ref _state, value); }
+
     /// <summary>
     /// The one line to show at the top. When there is no report at all it says so rather than showing
     /// an empty list, which would read as "nothing is wrong".
     /// </summary>
-    public string Headline => ReportProducedAt is null
-        ? "No health report has been produced yet."
-        : Repositories.Count == 0
-            ? "No repositories are configured."
+    public string Headline => State switch
+    {
+        HealthStoreState.NotInitialized => "Protect what matters before you need it.",
+        HealthStoreState.Empty => "No protected sources yet.",
+        HealthStoreState.Corrupt => "Protection status is temporarily unavailable.",
+        _ => Repositories.Count == 0
+            ? "No protected sources yet."
             : Repositories.Any(row => row.Health.Verdict == HealthVerdict.AtRisk)
                 ? "Something may not be recoverable today."
                 : Repositories.Any(row => row.Health.Verdict == HealthVerdict.Unproven)
                     ? "Everything is backed up; recovery has not been proven for all of it."
-                    : "Everything is backed up, checked and proven to restore.";
+                    : "Your data is recoverable."
+    };
 
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
@@ -98,19 +115,22 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
         Failure = null;
         try
         {
-            var report = await _health.ReadAsync(cancellationToken);
+            var result = await _health.ReadAsync(cancellationToken);
+            State = result.State;
             Repositories.Clear();
-            foreach (var repository in report.Repositories)
+            foreach (var repository in result.Report?.Repositories ?? [])
             {
                 Repositories.Add(new RepositoryRowViewModel(repository));
             }
 
-            ReportProducedAt = report.ProducedAt;
+            ReportProducedAt = result.Report?.ProducedAt;
+            Failure = result.State == HealthStoreState.Corrupt ? result.Detail : null;
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
             // A health screen that hides its own failure is the worst kind: it looks calm.
             Failure = error.Message;
+            State = HealthStoreState.Corrupt;
             Repositories.Clear();
             ReportProducedAt = null;
         }

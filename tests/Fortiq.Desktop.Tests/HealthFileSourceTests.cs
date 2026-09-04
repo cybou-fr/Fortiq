@@ -25,7 +25,8 @@ public sealed class HealthFileSourceTests : IDisposable
 
         var read = await new HealthFileSource(path).ReadAsync(CancellationToken.None);
 
-        var repository = Assert.Single(read.Repositories);
+        Assert.Equal(HealthStoreState.Active, read.State);
+        var repository = Assert.Single(read.Report!.Repositories);
         Assert.Equal(HealthVerdict.Unproven, repository.Verdict);
         Assert.Equal("documents", repository.ScheduleId);
         Assert.Equal(facts.LastBackupAt, repository.Facts.LastBackupAt);
@@ -33,14 +34,14 @@ public sealed class HealthFileSourceTests : IDisposable
     }
 
     [Fact]
-    public async Task AMissingReportSaysWhereItWasLookedFor()
+    public async Task AMissingReportIsAFirstRunState()
     {
         var path = Path.Combine(_directory, "absent.json");
 
-        var error = await Assert.ThrowsAsync<FileNotFoundException>(
-            () => new HealthFileSource(path).ReadAsync(CancellationToken.None));
+        var read = await new HealthFileSource(path).ReadAsync(CancellationToken.None);
 
-        Assert.Contains(path, error.Message, StringComparison.Ordinal);
+        Assert.Equal(HealthStoreState.NotInitialized, read.State);
+        Assert.Null(read.Report);
     }
 
     [Fact]
@@ -51,8 +52,10 @@ public sealed class HealthFileSourceTests : IDisposable
             path,
             """{"schema":"something.else","version":1,"producedAt":"2026-09-04T00:00:00+00:00","repositories":[]}""");
 
-        await Assert.ThrowsAsync<InvalidDataException>(
-            () => new HealthFileSource(path).ReadAsync(CancellationToken.None));
+        var read = await new HealthFileSource(path).ReadAsync(CancellationToken.None);
+
+        Assert.Equal(HealthStoreState.Corrupt, read.State);
+        Assert.Contains("Unsupported", read.Detail, StringComparison.Ordinal);
     }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
