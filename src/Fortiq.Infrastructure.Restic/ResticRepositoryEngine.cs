@@ -8,17 +8,20 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
     private readonly VerifiedEngine _engine;
     private readonly IResticProcessRunner _runner;
     private readonly IEngineCredentialProvider _credentials;
+    private readonly IObjectStorageCredentialProvider _storage;
     private readonly string _workingDirectory;
 
     internal ResticRepositoryEngine(
         VerifiedEngine engine,
         IResticProcessRunner runner,
         IEngineCredentialProvider credentials,
-        string workingDirectory)
+        string workingDirectory,
+        IObjectStorageCredentialProvider? storage = null)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
+        _storage = storage ?? new NoObjectStorageCredentials();
         _workingDirectory = Path.GetFullPath(workingDirectory);
     }
 
@@ -26,8 +29,8 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
     {
         ArgumentNullException.ThrowIfNull(command);
         var operationId = OperationId(command);
-        var location = NormalizePath(command.Location);
-        var result = await RunAsync(ResticOperation.Initialize, ["--repo", location, "--json"], operationId, cancellationToken);
+        var location = RepositoryLocation.Normalize(command.Location);
+        var result = await RunAsync(ResticOperation.Initialize, ["--repo", location, "--json"], operationId, cancellationToken, location);
         var initialized = ResticJsonParser.ParseInitialized(result);
         return new RepositoryDescriptor(RepositoryId.FromBytes(Convert.FromHexString(initialized.Id)), location);
     }
@@ -42,7 +45,7 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
             // The stable source identity is written into the repository, so a recovery on a clean
             // machine can tell what a snapshot is without any local Fortiq state.
             "--tag", ResticSnapshotMetadata.TagArgument(command.SourceStableId, command.Consistency),
-            "--repo", NormalizePath(command.Repository.Location),
+            "--repo", RepositoryLocation.Normalize(command.Repository.Location),
             "--json",
             "--no-cache"
         ];
@@ -60,7 +63,8 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
             ResticOperation.Backup,
             arguments,
             operationId,
-            cancellationToken);
+            cancellationToken,
+            command.Repository.Location);
         var summary = ResticJsonParser.ParseBackup(result);
         return new BackupReceipt(
             operationId,
@@ -75,9 +79,10 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
         ArgumentNullException.ThrowIfNull(query);
         var result = await RunAsync(
             ResticOperation.Snapshots,
-            ["--repo", NormalizePath(query.Repository.Location), "--json", "--no-cache"],
+            ["--repo", RepositoryLocation.Normalize(query.Repository.Location), "--json", "--no-cache"],
             OperationId(query),
-            cancellationToken);
+            cancellationToken,
+            query.Repository.Location);
         return ResticJsonParser.ParseSnapshots(result)
             .Select(snapshot => new SnapshotDescriptor(
                 snapshot.Id,
@@ -99,9 +104,10 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
         var operationId = OperationId(command);
         var result = await RunAsync(
             ResticOperation.Check,
-            ["--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
+            ["--repo", RepositoryLocation.Normalize(command.Repository.Location), "--json", "--no-cache"],
             operationId,
-            cancellationToken);
+            cancellationToken,
+            command.Repository.Location);
         var summary = ResticJsonParser.ParseCheck(result);
         return new CheckReceipt(operationId, command.Repository.Id, summary.IsHealthy);
     }
@@ -117,9 +123,10 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
         using var staging = RestoreStagingArea.Create(target);
         var result = await RunAsync(
             ResticOperation.Restore,
-            [RestoreSelector(command), "--target", staging.Path, "--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
+            [RestoreSelector(command), "--target", staging.Path, "--repo", RepositoryLocation.Normalize(command.Repository.Location), "--json", "--no-cache"],
             operationId,
-            cancellationToken);
+            cancellationToken,
+            command.Repository.Location);
         var summary = ResticJsonParser.ParseRestore(result);
         staging.Promote();
         return new RestoreReceipt(
@@ -136,9 +143,10 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
         ArgumentNullException.ThrowIfNull(repository);
         var result = await RunAsync(
             ResticOperation.CatConfig,
-            ["config", "--repo", NormalizePath(repository.Location), "--json", "--no-cache"],
+            ["config", "--repo", RepositoryLocation.Normalize(repository.Location), "--json", "--no-cache"],
             Guid.NewGuid(),
-            cancellationToken);
+            cancellationToken,
+            repository.Location);
         return RepositoryId.FromBytes(Convert.FromHexString(ResticJsonParser.ParseConfig(result).Id));
     }
 
@@ -151,9 +159,10 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
         // operation is in flight; enforcing that with a run registry is a P1 gate.
         var result = await RunAsync(
             ResticOperation.Unlock,
-            ["--remove-all", "--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
+            ["--remove-all", "--repo", RepositoryLocation.Normalize(command.Repository.Location), "--json", "--no-cache"],
             OperationId(command),
-            cancellationToken);
+            cancellationToken,
+            command.Repository.Location);
         ResticJsonParser.ParseUnlock(result);
     }
 
@@ -169,18 +178,35 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
         ResticOperation operation,
         IReadOnlyList<string> arguments,
         Guid operationId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? repositoryLocation = null)
     {
         // The credential session is opened per invocation and torn down with it, so a secret is
         // never reusable by a later process.
         await using var credential = await _credentials.BeginAsync(operationId, cancellationToken);
+        var environment = CreateEngineEnvironment();
+
+        if (repositoryLocation is not null
+            && RepositoryLocation.IsObjectStorage(repositoryLocation)
+            && await _storage.ForRepositoryAsync(repositoryLocation, cancellationToken) is { } storage)
+        {
+            // Storage identity reaches the engine the only way the engine accepts it, in the
+            // environment of that one process, which is cleared of everything else.
+            environment["AWS_ACCESS_KEY_ID"] = storage.AccessKeyId;
+            environment["AWS_SECRET_ACCESS_KEY"] = storage.SecretAccessKey;
+            if (storage.Region is { Length: > 0 } region)
+            {
+                environment["AWS_DEFAULT_REGION"] = region;
+            }
+        }
+
         var result = await _runner.RunAsync(
             _engine,
             new ResticProcessRequest(
                 operation,
                 [.. arguments, .. credential.EngineArguments],
                 _workingDirectory,
-                CreateEngineEnvironment()),
+                environment),
             cancellationToken);
 
         await credential.CompleteAsync(cancellationToken);

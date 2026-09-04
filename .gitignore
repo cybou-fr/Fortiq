@@ -43,3 +43,6 @@ Thumbs.db
 
 # CI evidence produced by test runs
 /artifacts/
+
+# Test-only tools acquired by scripts/Get-TestStorage.ps1
+/tools/

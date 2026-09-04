@@ -35,7 +35,13 @@ public sealed class ResticProcessRunner : IResticProcessRunner
 {
     public const int DefaultOutputLimit = 4 * 1024 * 1024;
     private static readonly HashSet<string> AllowedEnvironmentVariables =
-        new(StringComparer.OrdinalIgnoreCase) { "LOCALAPPDATA", "SystemRoot", "TEMP", "TMP" };
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "LOCALAPPDATA", "SystemRoot", "TEMP", "TMP",
+            // Object storage identity. It is not the repository encryption secret, and the engine
+            // has no other way to receive it; the repository is encrypted before anything is sent.
+            "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION"
+        };
     private readonly int _outputLimit;
 
     public ResticProcessRunner(int outputLimit = DefaultOutputLimit)

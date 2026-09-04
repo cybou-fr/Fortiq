@@ -11,6 +11,7 @@ public static class ResticEngineFactory
     public static IRepositoryEngine Create(
         VerifiedEngine engine,
         IEngineCredentialProvider credentials,
-        string workingDirectory) =>
-        new ResticRepositoryEngine(engine, new ResticProcessRunner(), credentials, workingDirectory);
+        string workingDirectory,
+        IObjectStorageCredentialProvider? storage = null) =>
+        new ResticRepositoryEngine(engine, new ResticProcessRunner(), credentials, workingDirectory, storage);
 }

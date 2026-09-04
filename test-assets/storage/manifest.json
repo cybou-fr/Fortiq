@@ -1,0 +1,16 @@
+{
+  "schema": "fortiq.test-storage-manifest",
+  "version": 1,
+  "note": "A local S3 server used only by tests. It is never shipped, and nothing in the product depends on it.",
+  "servers": [
+    {
+      "name": "minio",
+      "release": "RELEASE.2025-09-07T16-13-09Z",
+      "rid": "win-x64",
+      "relativePath": "minio/RELEASE.2025-09-07T16-13-09Z/minio.exe",
+      "sha256": "af709e6ba68488404e85acdd22a3030d0f5e56a108d4b27d744f18ceb50861b4",
+      "sourceUrl": "https://dl.min.io/server/minio/release/windows-amd64/minio.exe",
+      "license": "AGPL-3.0"
+    }
+  ]
+}

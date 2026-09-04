@@ -46,12 +46,19 @@ internal sealed class RecoveryWorkspace : IDisposable
     }
 
     /// <summary>An adapter with its own Fortiq working directory, as a separate run would have.</summary>
-    internal ResticRepositoryEngine Adapter(string stateDirectory, IEngineCredentialProvider? credentials = null) =>
+    internal ResticRepositoryEngine Adapter(
+        string stateDirectory,
+        IEngineCredentialProvider? credentials = null,
+        IObjectStorageCredentialProvider? storage = null) =>
         new(
             Engine,
             new ResticProcessRunner(),
             credentials ?? new InsecureNoPasswordCredentialProvider(),
-            EnsureDirectory(stateDirectory));
+            EnsureDirectory(stateDirectory),
+            storage);
+
+    /// <summary>The checkout this test run belongs to.</summary>
+    public static string RepositoryRootPath => FindRepositoryRoot();
 
     /// <summary>The engine root of the repository checkout, with its manifest and pinned binary.</summary>
     public static string EngineRootPath => Path.Combine(FindRepositoryRoot(), "engines");
