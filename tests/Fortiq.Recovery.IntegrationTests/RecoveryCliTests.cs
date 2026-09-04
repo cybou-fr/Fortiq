@@ -17,6 +17,17 @@ public sealed class RecoveryCliTests
         Assert.True(Path.IsPathFullyQualified(command.Kit!));
     }
 
+    [Fact]
+    public void ObjectStorageRepositoryIsNotRewrittenAsALocalPath()
+    {
+        const string repository = "s3:http://127.0.0.1:9000/backups/workstation";
+
+        var command = RecoveryCli.Parse(
+            ["snapshots", "--repository", repository, "--engine-root", "engines", "--kit", "kit"]);
+
+        Assert.Equal(repository, command.Repository);
+    }
+
     [Theory]
     [InlineData("--password")]
     [InlineData("--secret")]

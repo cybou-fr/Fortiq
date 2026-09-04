@@ -2,6 +2,8 @@ using System.Text.Json;
 using Fortiq.Application;
 using Fortiq.Infrastructure.Keys;
 
+using Fortiq.Domain;
+
 namespace Fortiq.Recover;
 
 public enum RecoveryOperation { Inspect, Snapshots, Check, Restore }
@@ -116,7 +118,7 @@ public static class RecoveryCli
             }
         }
 
-        var repository = RequiredPath(options, "--repository");
+        var repository = RequiredRepository(options, "--repository");
         var engineRoot = RequiredPath(options, "--engine-root");
         options.TryGetValue("--kit", out var kit);
         options.TryGetValue("--snapshot", out var snapshot);
@@ -151,5 +153,10 @@ public static class RecoveryCli
     private static string RequiredPath(Dictionary<string, string> options, string name) =>
         options.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
             ? Path.GetFullPath(value)
+            : throw new ArgumentException($"Missing {name}.", nameof(options));
+
+    private static string RequiredRepository(Dictionary<string, string> options, string name) =>
+        options.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? RepositoryLocation.Normalize(value)
             : throw new ArgumentException($"Missing {name}.", nameof(options));
 }

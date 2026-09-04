@@ -28,7 +28,7 @@ Fortiq is under active development. Current code enforces verified security inva
 - **Windows Platform Consistency**: Volume Shadow Copy Service (VSS) integration (`--use-fs-snapshot`) for point-in-time filesystem captures, alongside USN Change Journal inspection.
 - **Scheduling & Windows Service**: Robust recurrence engine (`Fortiq.Scheduling`) resolving wall-clock timezones, DST shifts, and missed-run coalescing. Unattended background execution hosted in `Fortiq.Service` authenticated via TPM device keys.
 - **Verifiable Health Observability**: `Fortiq.Monitoring` evaluates whether repositories are *proven recoverable* (distinguishing `Recoverable`, `Unproven`, and `AtRisk`). Publishes status to `health.json` and Prometheus textfile (`fortiq.prom`).
-- **Modern Desktop UI**: Cross-platform Avalonia UI application (`Fortiq.Desktop`) with MVVM architecture, Protection Setup Wizard with mnemonic challenge verification, and inline restore-proof test adapter (`ProveRecoveryAdapter`).
+- **Modern Desktop UI & Visual System**: Cross-platform Avalonia UI application (`Fortiq.Desktop`) with Fluent v2 Dark Slate styling, native Windows folder dialogs, resilient zero-state onboarding, Protection Setup Wizard with 4x6 mnemonic card grid and challenge verification, and inline restore-proof test adapter (`ProveRecoveryAdapter`).
 - **Embedded GUI Installer & Component Lifecycle**: Integrated self-inspection, prerequisite verification (TPM 2.0, VSS, .NET 10), and in-app atomic component updates with rollback protection.
 - **Isolated Password Broker**: One-time ephemeral Named Pipe broker (`Fortiq.PasswordHelper`) verifying client PID, open binary handle identity, account security context, and optional Authenticode digital signatures.
 
@@ -104,6 +104,7 @@ Architecture specifications and Architecture Decision Records (ADRs) are maintai
 | **19. Observability & Health** | Evidence-driven health publication (`health.json` and Prometheus textfile `fortiq.prom`) |
 | **20. Local Catalog** | File-system-based run tracking, atomic `.run` registrations, and crash-resilient locks |
 | **21. Embedded Installer & Lifecycle** | System detection, prerequisite discovery, UAC elevation, service SID provisioning, and TUF-aligned component updates |
-| **Architecture Decision Records (ADRs)** | Formal records ADR-001 through ADR-014 documenting key decisions (Engine, Envelopes, IPC, VSS, S3, Ledger, Installer, etc.) |
+| **22. Desktop UI & Visual System** | Fluent v2 Dark Slate design system, native Windows folder pickers, resilient zero-state lifecycle, and mnemonic card grid |
+| **Architecture Decision Records (ADRs)** | Formal records ADR-001 through ADR-015 documenting key decisions (Engine, Envelopes, IPC, VSS, S3, Ledger, Installer, UI Design, etc.) |
 
 Security and supply chain requirements are detailed in [SECURITY.md](SECURITY.md).
