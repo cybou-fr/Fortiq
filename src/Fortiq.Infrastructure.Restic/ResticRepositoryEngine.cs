@@ -36,17 +36,29 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
     {
         ArgumentNullException.ThrowIfNull(command);
         var operationId = OperationId(command);
+        List<string> arguments =
+        [
+            NormalizePath(command.SourcePath),
+            // The stable source identity is written into the repository, so a recovery on a clean
+            // machine can tell what a snapshot is without any local Fortiq state.
+            "--tag", ResticSnapshotMetadata.TagArgument(command.SourceStableId, command.Consistency),
+            "--repo", NormalizePath(command.Repository.Location),
+            "--json",
+            "--no-cache"
+        ];
+
+        if (command.Consistency == SourceConsistency.FileSystemSnapshot)
+        {
+            // The engine takes the volume snapshot itself, which keeps the paths recorded in the
+            // repository the source's own paths rather than a shadow copy's. Without backup
+            // privileges it fails here, and a failed snapshot must not become a live backup wearing
+            // a snapshot's label.
+            arguments.Add("--use-fs-snapshot");
+        }
+
         var result = await RunAsync(
             ResticOperation.Backup,
-            [
-                NormalizePath(command.SourcePath),
-                // The stable source identity is written into the repository, so a recovery on a
-                // clean machine can tell what a snapshot is without any local Fortiq state.
-                "--tag", ResticSnapshotMetadata.TagArgument(command.SourceStableId),
-                "--repo", NormalizePath(command.Repository.Location),
-                "--json",
-                "--no-cache"
-            ],
+            arguments,
             operationId,
             cancellationToken);
         var summary = ResticJsonParser.ParseBackup(result);
@@ -71,7 +83,13 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
                 snapshot.Id,
                 snapshot.Time,
                 ResticSnapshotMetadata.ReadSourceStableId(snapshot.Tags),
-                snapshot.Paths.Count == 0 ? string.Empty : snapshot.Paths[0]))
+                snapshot.Paths.Count == 0 ? string.Empty : snapshot.Paths[0],
+                ResticSnapshotMetadata.ReadConsistency(snapshot.Tags) switch
+                {
+                    SourceConsistency.FileSystemSnapshot => true,
+                    SourceConsistency.Live => false,
+                    _ => null
+                }))
             .ToArray();
     }
 

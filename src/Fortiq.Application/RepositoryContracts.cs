@@ -15,10 +15,27 @@ public interface IOperationCommand
 
 public sealed record InitializeRepository(string Location, Guid OperationId = default) : IOperationCommand;
 
+/// <summary>How the source is read while it is being backed up.</summary>
+public enum SourceConsistency
+{
+    /// <summary>
+    /// Read from the live filesystem. A file that changes while it is read is backed up as whatever
+    /// was there at the time, which is honest but not a point in time.
+    /// </summary>
+    Live,
+
+    /// <summary>
+    /// Read from a filesystem snapshot, so the whole source is one point in time. Creating one needs
+    /// backup privileges; without them the backup fails rather than quietly falling back to live.
+    /// </summary>
+    FileSystemSnapshot
+}
+
 public sealed record CreateSnapshot(
     RepositoryDescriptor Repository,
     string SourcePath,
     string SourceStableId,
+    SourceConsistency Consistency = SourceConsistency.Live,
     Guid OperationId = default) : IOperationCommand;
 
 public sealed record ListSnapshots(RepositoryDescriptor Repository, Guid OperationId = default) : IOperationCommand;

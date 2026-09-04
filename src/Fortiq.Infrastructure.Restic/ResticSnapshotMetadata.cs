@@ -1,3 +1,4 @@
+using Fortiq.Application;
 using Fortiq.Domain;
 
 namespace Fortiq.Infrastructure.Restic;
@@ -13,13 +14,48 @@ internal static class ResticSnapshotMetadata
     internal const string SchemaTag = "fortiq.v1";
 
     private const string SourcePrefix = "fortiq.source=";
+    private const string ConsistencyPrefix = "fortiq.consistency=";
 
     /// <summary>
     /// Builds the value of a single <c>--tag</c> argument. Restic splits that value on commas, which
     /// is why a source identifier may not contain one.
     /// </summary>
-    internal static string TagArgument(string sourceStableId) =>
-        $"{SchemaTag},{SourcePrefix}{SourceIdentifier.Require(sourceStableId, nameof(sourceStableId))}";
+    internal static string TagArgument(string sourceStableId, SourceConsistency consistency) =>
+        $"{SchemaTag},{SourcePrefix}{SourceIdentifier.Require(sourceStableId, nameof(sourceStableId))}"
+        + $",{ConsistencyPrefix}{Name(consistency)}";
+
+    /// <summary>
+    /// How the source was read, as recorded in the repository. A snapshot that says nothing about it
+    /// was written before Fortiq recorded this, and is reported as unknown rather than as live.
+    /// </summary>
+    internal static SourceConsistency? ReadConsistency(IReadOnlyList<string> tags)
+    {
+        if (!tags.Contains(SchemaTag, StringComparer.Ordinal))
+        {
+            return null;
+        }
+
+        var values = tags
+            .Where(tag => tag.StartsWith(ConsistencyPrefix, StringComparison.Ordinal))
+            .Select(tag => tag[ConsistencyPrefix.Length..])
+            .ToArray();
+
+        return values.Length == 1 ? Parse(values[0]) : null;
+    }
+
+    private static string Name(SourceConsistency consistency) => consistency switch
+    {
+        SourceConsistency.Live => "live",
+        SourceConsistency.FileSystemSnapshot => "snapshot",
+        _ => throw new ArgumentOutOfRangeException(nameof(consistency))
+    };
+
+    private static SourceConsistency? Parse(string value) => value switch
+    {
+        "live" => SourceConsistency.Live,
+        "snapshot" => SourceConsistency.FileSystemSnapshot,
+        _ => null
+    };
 
     /// <summary>
     /// Reads the stable source identity back. A snapshot without Fortiq metadata, or with a value

@@ -68,7 +68,10 @@ public sealed class ReceiptRecordingBackupRepository : IBackupRepository
                 ["filesProcessed"] = ToMetric(receipt.FilesProcessed),
                 ["bytesProcessed"] = ToMetric(receipt.BytesProcessed)
             },
-            new ReceiptSource("directory", identified.SourceStableId),
+            new ReceiptSource(
+                "directory",
+                identified.SourceStableId,
+                identified.Consistency == SourceConsistency.FileSystemSnapshot ? "snapshot" : "live"),
             identified.Repository.Id.ToString(),
             cancellationToken);
     }

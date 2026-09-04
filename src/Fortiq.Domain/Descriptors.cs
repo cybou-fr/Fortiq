@@ -11,7 +11,8 @@ public sealed record SnapshotDescriptor(
     string Id,
     DateTimeOffset CreatedAt,
     string? SourceStableId,
-    string SourcePath);
+    string SourcePath,
+    bool? PointInTime = null);
 
 public sealed record BackupReceipt(
     Guid OperationId,

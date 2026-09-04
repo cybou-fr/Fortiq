@@ -10,7 +10,11 @@ public enum EvidenceWriteResult { Succeeded, Failed }
 
 public sealed record EngineIdentity(string Name, string Version, string Sha256);
 
-public sealed record ReceiptSource(string Kind, string StableId);
+/// <summary>
+/// The source an operation acted on, and how it was read. Consistency is part of the evidence: a
+/// live backup and a point-in-time one are different facts about the same directory.
+/// </summary>
+public sealed record ReceiptSource(string Kind, string StableId, string? Consistency = null);
 
 /// <summary>
 /// The machine-readable record of one engine operation, as defined by

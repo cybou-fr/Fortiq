@@ -27,7 +27,40 @@ public sealed class SourceMetadataTests
         var arguments = runner.LastRequest!.Arguments;
         var tagIndex = arguments.ToList().IndexOf("--tag");
         Assert.True(tagIndex >= 0, "The backup did not tag the snapshot.");
-        Assert.Equal("fortiq.v1,fortiq.source=workstation:documents", arguments[tagIndex + 1]);
+        Assert.Equal("fortiq.v1,fortiq.source=workstation:documents,fortiq.consistency=live", arguments[tagIndex + 1]);
+        Assert.DoesNotContain("--use-fs-snapshot", arguments);
+    }
+
+    [Fact]
+    public async Task ASnapshotBackupAsksTheEngineForOneAndRecordsThatItDid()
+    {
+        var runner = new RecordingRunner(new ResticProcessResult(
+            0,
+            """{"message_type":"summary","snapshot_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","total_files_processed":1,"total_bytes_processed":1,"backup_start":"2026-09-03T18:54:00.6+02:00","backup_end":"2026-09-03T18:54:01.3+02:00"}""",
+            string.Empty));
+        var adapter = CreateAdapter(runner);
+        var repository = new RepositoryDescriptor(RepositoryId.Create(), Path.GetFullPath("repository"));
+
+        await adapter.CreateSnapshotAsync(
+            new CreateSnapshot(repository, Path.GetFullPath("source"), "test-source", SourceConsistency.FileSystemSnapshot),
+            CancellationToken.None);
+
+        var arguments = runner.LastRequest!.Arguments;
+        Assert.Contains("--use-fs-snapshot", arguments);
+        Assert.Contains("fortiq.consistency=snapshot", arguments[arguments.ToList().IndexOf("--tag") + 1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ASnapshotThatRecordsNothingAboutConsistencyIsNotReportedAsLive()
+    {
+        // Silence is not a claim: a snapshot written before Fortiq recorded this says nothing, and
+        // reporting it as live would be inventing a fact.
+        Assert.Null(ResticSnapshotMetadata.ReadConsistency(["fortiq.v1", "fortiq.source=a"]));
+        Assert.Equal(SourceConsistency.Live, ResticSnapshotMetadata.ReadConsistency(["fortiq.v1", "fortiq.consistency=live"]));
+        Assert.Equal(
+            SourceConsistency.FileSystemSnapshot,
+            ResticSnapshotMetadata.ReadConsistency(["fortiq.v1", "fortiq.consistency=snapshot"]));
+        Assert.Null(ResticSnapshotMetadata.ReadConsistency(["fortiq.v1", "fortiq.consistency=live", "fortiq.consistency=snapshot"]));
     }
 
     [Theory]

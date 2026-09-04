@@ -152,7 +152,10 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
                     createdAt = snapshot.CreatedAt,
                     // Read from the repository's own metadata; null means the snapshot carries none.
                     source = snapshot.SourceStableId,
-                    path = snapshot.SourcePath
+                    path = snapshot.SourcePath,
+                    // Null where the snapshot records nothing about it, which is not the same as
+                    // recording that it was live.
+                    pointInTime = snapshot.PointInTime
                 })
                 .ToArray()
         };

@@ -79,7 +79,7 @@ public sealed class OperationReceiptTests : IDisposable
         var recorded = Decorate(inner);
 
         var result = await recorded.CreateSnapshotAsync(
-            new CreateSnapshot(repository, Path.GetFullPath("source"), "test-source", operationId),
+            new CreateSnapshot(repository, Path.GetFullPath("source"), "test-source", OperationId: operationId),
             CancellationToken.None);
 
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(SingleReceipt()));
