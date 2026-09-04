@@ -1,0 +1,173 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using Fortiq.Monitoring;
+
+namespace Fortiq.Desktop.ViewModels;
+
+/// <summary>Reads the health report the service publishes. The desktop asks the files, not the service.</summary>
+public interface IHealthSource
+{
+    Task<HealthReport> ReadAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Proves that a repository can be restored, by restoring from it. This is the action that turns a
+/// repository from "backed up" into "known to come back", and nothing else can.
+/// </summary>
+public interface IProveRecovery
+{
+    Task<bool> ProveAsync(string repositoryId, CancellationToken cancellationToken);
+}
+
+/// <summary>One repository as the person sees it.</summary>
+public sealed class RepositoryRowViewModel
+{
+    public RepositoryRowViewModel(RepositoryHealth health)
+    {
+        ArgumentNullException.ThrowIfNull(health);
+        Health = health;
+    }
+
+    public RepositoryHealth Health { get; }
+
+    public string Title => Health.ScheduleId ?? Health.RepositoryId;
+
+    /// <summary>
+    /// What Fortiq is willing to say, in the words a person needs. "Backed up" is never offered on
+    /// its own: it is the claim that misleads.
+    /// </summary>
+    public string Summary => Health.Verdict switch
+    {
+        HealthVerdict.Recoverable => "Recoverable: checked and restored recently.",
+        HealthVerdict.Unproven => "Backed up, but recovery has not been proven.",
+        _ => "At risk: this may not be recoverable today."
+    };
+
+    public string Detail => Health.Findings.Count == 0
+        ? "Nothing outstanding."
+        : string.Join(Environment.NewLine, Health.Findings.Select(finding => finding.Detail));
+
+    /// <summary>Only a repository that exists and is not already proven has anything to prove.</summary>
+    public bool CanProveRecovery => Health.Facts.LastBackupAt is not null;
+}
+
+/// <summary>The main screen: what exists, whether it can be recovered, and what to do about it.</summary>
+public sealed class RepositoriesViewModel : INotifyPropertyChanged
+{
+    private readonly IHealthSource _health;
+    private readonly IProveRecovery _prove;
+
+    private string? _failure;
+    private bool _busy;
+    private DateTimeOffset? _reportProducedAt;
+
+    public RepositoriesViewModel(IHealthSource health, IProveRecovery prove)
+    {
+        _health = health ?? throw new ArgumentNullException(nameof(health));
+        _prove = prove ?? throw new ArgumentNullException(nameof(prove));
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public ObservableCollection<RepositoryRowViewModel> Repositories { get; } = [];
+
+    public string? Failure { get => _failure; private set => Set(ref _failure, value); }
+
+    public bool Busy { get => _busy; private set => Set(ref _busy, value); }
+
+    public DateTimeOffset? ReportProducedAt { get => _reportProducedAt; private set => Set(ref _reportProducedAt, value); }
+
+    /// <summary>
+    /// The one line to show at the top. When there is no report at all it says so rather than showing
+    /// an empty list, which would read as "nothing is wrong".
+    /// </summary>
+    public string Headline => ReportProducedAt is null
+        ? "No health report has been produced yet."
+        : Repositories.Count == 0
+            ? "No repositories are configured."
+            : Repositories.Any(row => row.Health.Verdict == HealthVerdict.AtRisk)
+                ? "Something may not be recoverable today."
+                : Repositories.Any(row => row.Health.Verdict == HealthVerdict.Unproven)
+                    ? "Everything is backed up; recovery has not been proven for all of it."
+                    : "Everything is backed up, checked and proven to restore.";
+
+    public async Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        Busy = true;
+        Failure = null;
+        try
+        {
+            var report = await _health.ReadAsync(cancellationToken);
+            Repositories.Clear();
+            foreach (var repository in report.Repositories)
+            {
+                Repositories.Add(new RepositoryRowViewModel(repository));
+            }
+
+            ReportProducedAt = report.ProducedAt;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            // A health screen that hides its own failure is the worst kind: it looks calm.
+            Failure = error.Message;
+            Repositories.Clear();
+            ReportProducedAt = null;
+        }
+        finally
+        {
+            Busy = false;
+            OnPropertyChanged(nameof(Headline));
+        }
+    }
+
+    public async Task ProveRecoveryAsync(RepositoryRowViewModel repository, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        if (Busy || !repository.CanProveRecovery)
+        {
+            return;
+        }
+
+        Busy = true;
+        Failure = null;
+        string? outcome = null;
+        try
+        {
+            if (!await _prove.ProveAsync(repository.Health.RepositoryId, cancellationToken))
+            {
+                outcome = "The restore did not produce what the snapshot says it should.";
+            }
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            outcome = error.Message;
+        }
+        finally
+        {
+            Busy = false;
+        }
+
+        // The refresh comes first so the screen shows the new state, and the outcome is put back
+        // afterwards: a failed proof that vanished on refresh would leave someone believing it worked.
+        await RefreshAsync(cancellationToken);
+        if (outcome is not null)
+        {
+            Failure = outcome;
+        }
+    }
+
+    private void Set<T>(ref T field, T value, [CallerMemberName] string? property = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return;
+        }
+
+        field = value;
+        OnPropertyChanged(property);
+    }
+
+    private void OnPropertyChanged([CallerMemberName] string? property = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
+}
