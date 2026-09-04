@@ -32,6 +32,10 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
         }
 
         var kit = await RecoveryKitStore.ReadAsync(command.Kit!, token);
+
+        // The kit has to describe this engine before it is used to open anything.
+        var engineAgreement = RecoveryKitPolicy.CompareEngine(kit.Manifest, engine.Name, engine.Version, engine.Sha256);
+
         var envelope = kit.Envelopes.SingleOrDefault(candidate => candidate.Suite == Bip39RecoveryEnvelope.SuiteId)
             ?? throw new InvalidDataException("The recovery kit holds no unlock method this tool supports.");
         var mnemonic = await material.ReadMnemonicAsync(token);
@@ -51,11 +55,16 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
                 new PasswordPipeCredentialProvider(_helperPath, lease),
                 workspace.FullName);
 
+            // The repository states its own identity once it is open; the kit has to be the kit for
+            // that repository, not merely for whatever sits at that path.
+            var actual = await adapter.ReadRepositoryIdAsync(repository, token);
+            RecoveryKitPolicy.RequireSameRepository(kit.Manifest, actual.ToArray());
+
             return command.Operation switch
             {
-                RecoveryOperation.Snapshots => await SnapshotsAsync(adapter, repository, token),
-                RecoveryOperation.Check => await CheckAsync(adapter, repository, token),
-                RecoveryOperation.Restore => await RestoreAsync(adapter, repository, command, token),
+                RecoveryOperation.Snapshots => await SnapshotsAsync(adapter, repository, engineAgreement, token),
+                RecoveryOperation.Check => await CheckAsync(adapter, repository, engineAgreement, token),
+                RecoveryOperation.Restore => await RestoreAsync(adapter, repository, command, engineAgreement, token),
                 _ => throw new InvalidDataException("Unsupported recovery operation.")
             };
         }
@@ -112,7 +121,11 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
         };
     }
 
-    private static async Task<object> SnapshotsAsync(IBackupRepository adapter, RepositoryDescriptor repository, CancellationToken token)
+    private static async Task<object> SnapshotsAsync(
+        IBackupRepository adapter,
+        RepositoryDescriptor repository,
+        EngineAgreement engineAgreement,
+        CancellationToken token)
     {
         var snapshots = await adapter.ListSnapshotsAsync(new ListSnapshots(repository), token);
         return new
@@ -120,6 +133,7 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
             schema = "fortiq.recovery-snapshots",
             version = 1,
             repositoryId = repository.Id.ToString(),
+            engineAgreement = engineAgreement.ToString(),
             snapshots = snapshots
                 .Select(snapshot => new
                 {
@@ -133,7 +147,11 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
         };
     }
 
-    private static async Task<object> CheckAsync(IBackupRepository adapter, RepositoryDescriptor repository, CancellationToken token)
+    private static async Task<object> CheckAsync(
+        IBackupRepository adapter,
+        RepositoryDescriptor repository,
+        EngineAgreement engineAgreement,
+        CancellationToken token)
     {
         var receipt = await adapter.CheckAsync(new CheckRepository(repository), token);
         return new
@@ -142,6 +160,7 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
             version = 1,
             operationId = receipt.OperationId,
             repositoryId = repository.Id.ToString(),
+            engineAgreement = engineAgreement.ToString(),
             healthy = receipt.IsHealthy
         };
     }
@@ -150,6 +169,7 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
         IBackupRepository adapter,
         RepositoryDescriptor repository,
         RecoveryCommand command,
+        EngineAgreement engineAgreement,
         CancellationToken token)
     {
         var receipt = await adapter.RestoreAsync(
@@ -162,6 +182,7 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
             version = 1,
             operationId = receipt.OperationId,
             repositoryId = repository.Id.ToString(),
+            engineAgreement = engineAgreement.ToString(),
             snapshotId = receipt.SnapshotId,
             target = receipt.TargetPath,
             filesRestored = receipt.FilesRestored,
@@ -184,7 +205,13 @@ public sealed class ConsoleRecoveryMaterialReader : IRecoveryMaterialReader
 
     public async Task<string> ReadMnemonicAsync(CancellationToken token)
     {
-        await _prompt.WriteLineAsync("Enter the recovery mnemonic and press Enter:");
+        // Only a person needs the prompt. When input is piped, the caller is a program, and the
+        // error stream should carry nothing but the failure it may have to act on.
+        if (!Console.IsInputRedirected)
+        {
+            await _prompt.WriteLineAsync("Enter the recovery mnemonic and press Enter:");
+        }
+
         var line = await _input.ReadLineAsync(token);
         if (string.IsNullOrWhiteSpace(line))
         {

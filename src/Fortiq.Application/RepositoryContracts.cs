@@ -43,6 +43,15 @@ public sealed record RestoreSnapshot(
     string? SourcePath = null,
     Guid OperationId = default) : IOperationCommand;
 
+/// <summary>
+/// Reads the identity the repository states about itself. A path is not an identity: two paths can
+/// hold different repositories, and the same repository can be reached by several paths.
+/// </summary>
+public interface IRepositoryIdentityReader
+{
+    Task<RepositoryId> ReadRepositoryIdAsync(RepositoryDescriptor repository, CancellationToken cancellationToken);
+}
+
 public interface IBackupRepository
 {
     Task<RepositoryDescriptor> InitializeAsync(
@@ -69,3 +78,6 @@ public interface IBackupRepository
         ReconcileRepository command,
         CancellationToken cancellationToken);
 }
+
+/// <summary>Everything a repository engine offers, as one composition root returns it.</summary>
+public interface IRepositoryEngine : IBackupRepository, IRepositoryIdentityReader;

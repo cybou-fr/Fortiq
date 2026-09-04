@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Fortiq.Application;
+using Fortiq.Infrastructure.Keys;
 
 namespace Fortiq.Recover;
 
@@ -38,6 +39,7 @@ public static class RecoveryCli
     public const int ExitUsage = 64;
     public const int ExitDataError = 69;
     public const int ExitUnlockFailed = 77;
+    public const int ExitKitMismatch = 78;
 
     private static readonly JsonSerializerOptions OutputJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -70,6 +72,12 @@ public static class RecoveryCli
             // repository or snapshot detail leaks through the exit path.
             await error.WriteLineAsync("UnlockFailed");
             return ExitUnlockFailed;
+        }
+        catch (RecoveryKitMismatchException failure)
+        {
+            // Distinct from a failed unlock: the kit and the target disagree about what they are.
+            await error.WriteLineAsync(failure.Message);
+            return ExitKitMismatch;
         }
         catch (Exception failure) when (failure is IOException or InvalidDataException or FormatException or RestoreRejectedException)
         {

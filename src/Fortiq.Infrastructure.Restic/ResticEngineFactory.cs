@@ -8,7 +8,7 @@ namespace Fortiq.Infrastructure.Restic;
 /// </summary>
 public static class ResticEngineFactory
 {
-    public static IBackupRepository Create(
+    public static IRepositoryEngine Create(
         VerifiedEngine engine,
         IEngineCredentialProvider credentials,
         string workingDirectory) =>

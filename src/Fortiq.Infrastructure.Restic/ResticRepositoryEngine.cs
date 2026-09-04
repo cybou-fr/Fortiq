@@ -3,7 +3,7 @@ using Fortiq.Domain;
 
 namespace Fortiq.Infrastructure.Restic;
 
-internal sealed class ResticRepositoryEngine : IBackupRepository
+internal sealed class ResticRepositoryEngine : IRepositoryEngine
 {
     private readonly VerifiedEngine _engine;
     private readonly IResticProcessRunner _runner;
@@ -112,6 +112,17 @@ internal sealed class ResticRepositoryEngine : IBackupRepository
             target,
             summary.FilesRestored,
             summary.BytesRestored);
+    }
+
+    public async Task<RepositoryId> ReadRepositoryIdAsync(RepositoryDescriptor repository, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        var result = await RunAsync(
+            ResticOperation.CatConfig,
+            ["config", "--repo", NormalizePath(repository.Location), "--json", "--no-cache"],
+            Guid.NewGuid(),
+            cancellationToken);
+        return RepositoryId.FromBytes(Convert.FromHexString(ResticJsonParser.ParseConfig(result).Id));
     }
 
     public async Task ReconcileAsync(ReconcileRepository command, CancellationToken cancellationToken)

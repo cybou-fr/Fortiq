@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Fortiq.Application;
 using Fortiq.Infrastructure.Keys;
@@ -14,7 +13,6 @@ namespace Fortiq.Recovery.IntegrationTests;
 /// </summary>
 public sealed class StandaloneRecoveryTests
 {
-    private static string RecoverPath => Path.Combine(AppContext.BaseDirectory, "Fortiq.Recover.exe");
     private static string HelperPath => Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
 
     [SkippableFact]
@@ -239,38 +237,7 @@ public sealed class StandaloneRecoveryTests
             provisioned.RecoveryMnemonic);
     }
 
-    private static async Task<ProcessResult> RunRecoverAsync(string[] arguments, string? mnemonic)
-    {
-        Skip.IfNot(File.Exists(RecoverPath), "The recovery tool was not built next to the tests.");
+    private static Task<RecoveryToolResult> RunRecoverAsync(string[] arguments, string? mnemonic) =>
+        RecoveryTool.RunAsync(arguments, mnemonic);
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = RecoverPath,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start the recovery tool.");
-        if (mnemonic is not null)
-        {
-            await process.StandardInput.WriteLineAsync(mnemonic);
-        }
-
-        process.StandardInput.Close();
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        return new ProcessResult(process.ExitCode, await stdout, await stderr);
-    }
-
-    private sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError);
 }

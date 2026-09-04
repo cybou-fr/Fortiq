@@ -29,6 +29,8 @@ public sealed record ResticCheckSummary(long ErrorCount, IReadOnlyList<string> B
     public bool IsHealthy => ErrorCount == 0 && BrokenPacks.Count == 0 && !SuggestRepairIndex;
 }
 
+public sealed record ResticRepositoryConfig(string Id, int Version);
+
 public sealed record ResticRestoreSummary(ulong TotalFiles, ulong FilesRestored, ulong FilesSkipped, ulong TotalBytes, ulong BytesRestored);
 
 public static partial class ResticJsonParser
@@ -118,6 +120,18 @@ public static partial class ResticJsonParser
         }
 
         return parsed;
+    }
+
+    /// <summary>
+    /// The repository's own identity, as the repository states it. This is what a kit has to be
+    /// checked against: a path is not an identity.
+    /// </summary>
+    public static ResticRepositoryConfig ParseConfig(ResticProcessResult result)
+    {
+        EnsureSuccessfulExit(result);
+        using var document = ParseSingleDocument(result.StandardOutput);
+        var root = RequireObject(document.RootElement);
+        return new ResticRepositoryConfig(RequireIdentifier(root, "id"), (int)RequireInt64(root, "version"));
     }
 
     public static ResticRestoreSummary ParseRestore(ResticProcessResult result)
