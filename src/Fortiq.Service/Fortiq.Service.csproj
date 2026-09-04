@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Fortiq.Scheduling\Fortiq.Scheduling.csproj" />
+    <ProjectReference Include="..\Fortiq.Monitoring\Fortiq.Monitoring.csproj" />
     <ProjectReference Include="..\Fortiq.Infrastructure.Keys\Fortiq.Infrastructure.Keys.csproj" />
     <ProjectReference Include="..\Fortiq.Infrastructure.Restic\Fortiq.Infrastructure.Restic.csproj" />
     <ProjectReference Include="..\Fortiq.Infrastructure.Runs\Fortiq.Infrastructure.Runs.csproj" />

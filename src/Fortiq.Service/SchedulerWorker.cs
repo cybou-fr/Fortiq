@@ -1,3 +1,4 @@
+using Fortiq.Monitoring;
 using Fortiq.Scheduling;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -25,17 +26,20 @@ public sealed partial class SchedulerWorker : BackgroundService
     private readonly SchedulerOptions _options;
     private readonly ILogger<SchedulerWorker> _logger;
     private readonly TimeProvider _clock;
+    private readonly HealthPublisher? _health;
 
     public SchedulerWorker(
         ScheduledBackupRunner runner,
         SchedulerOptions options,
         ILogger<SchedulerWorker> logger,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        HealthPublisher? health = null)
     {
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clock = clock ?? TimeProvider.System;
+        _health = health;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -85,6 +89,44 @@ public sealed partial class SchedulerWorker : BackgroundService
             // - and that must not end the service.
             PassFailed(_logger, error);
         }
+
+        await PublishHealthAsync(stoppingToken);
+    }
+
+    /// <summary>
+    /// Publishes health after every pass, including a pass that failed. A monitoring path that only
+    /// reports when things go well is worse than none: it goes quiet exactly when it matters.
+    /// </summary>
+    private async Task PublishHealthAsync(CancellationToken stoppingToken)
+    {
+        if (_health is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var report = await _health.PublishAsync(stoppingToken);
+            if (report.Worst != HealthVerdict.Recoverable)
+            {
+                foreach (var repository in report.Repositories.Where(entry => entry.Verdict != HealthVerdict.Recoverable))
+                {
+                    HealthConcern(
+                        _logger,
+                        repository.ScheduleId ?? repository.RepositoryId,
+                        repository.Verdict.ToString(),
+                        string.Join("; ", repository.Findings.Select(finding => finding.Code)));
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception error)
+        {
+            HealthPublicationFailed(_logger, error);
+        }
     }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Information, Message = "Fortiq scheduler started; polling every {interval}.")]
@@ -101,4 +143,10 @@ public sealed partial class SchedulerWorker : BackgroundService
 
     [LoggerMessage(EventId = 5, Level = LogLevel.Error, Message = "A scheduling pass failed.")]
     private static partial void PassFailed(ILogger logger, Exception error);
+
+    [LoggerMessage(EventId = 6, Level = LogLevel.Warning, Message = "{schedule} is {verdict}: {findings}")]
+    private static partial void HealthConcern(ILogger logger, string schedule, string verdict, string findings);
+
+    [LoggerMessage(EventId = 7, Level = LogLevel.Error, Message = "Publishing the health report failed.")]
+    private static partial void HealthPublicationFailed(ILogger logger, Exception error);
 }

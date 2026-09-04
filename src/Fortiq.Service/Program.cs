@@ -43,6 +43,14 @@ public static class Program
         builder.Services.AddSingleton(provider => new ScheduledBackupRunner(
             provider.GetRequiredService<IScheduleStore>(),
             provider.GetRequiredService<IScheduledBackup>()));
+
+        // Health is published to files rather than served: a monitoring path that depends on this
+        // service being reachable reports health right up until it cannot report at all.
+        builder.Services.AddSingleton(provider => new HealthPublisher(
+            provider.GetRequiredService<IScheduleStore>(),
+            Path.Combine(stateDirectory, "work", "receipts"),
+            Path.Combine(stateDirectory, "health", "health.json"),
+            Path.Combine(stateDirectory, "health", "fortiq.prom")));
         builder.Services.AddHostedService<SchedulerWorker>();
 
         await builder.Build().RunAsync();

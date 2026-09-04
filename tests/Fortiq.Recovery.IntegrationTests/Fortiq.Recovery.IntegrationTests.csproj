@@ -31,6 +31,7 @@
     <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Runs\Fortiq.Infrastructure.Runs.csproj" />
     <ProjectReference Include="..\..\src\Fortiq.Service\Fortiq.Service.csproj" />
     <ProjectReference Include="..\..\src\Fortiq.Scheduling\Fortiq.Scheduling.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Monitoring\Fortiq.Monitoring.csproj" />
   </ItemGroup>
 
 </Project>
