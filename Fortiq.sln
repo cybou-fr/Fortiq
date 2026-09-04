@@ -39,6 +39,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fortiq.Scheduling", "src\Fo
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fortiq.Scheduling.Tests", "tests\Fortiq.Scheduling.Tests\Fortiq.Scheduling.Tests.csproj", "{59275E1F-562D-493B-A83D-E20CC2DA18B9}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fortiq.Service", "src\Fortiq.Service\Fortiq.Service.csproj", "{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -241,6 +243,18 @@ Global
 		{59275E1F-562D-493B-A83D-E20CC2DA18B9}.Release|x64.Build.0 = Release|Any CPU
 		{59275E1F-562D-493B-A83D-E20CC2DA18B9}.Release|x86.ActiveCfg = Release|Any CPU
 		{59275E1F-562D-493B-A83D-E20CC2DA18B9}.Release|x86.Build.0 = Release|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Debug|x64.Build.0 = Debug|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Debug|x86.Build.0 = Debug|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Release|x64.ActiveCfg = Release|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Release|x64.Build.0 = Release|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Release|x86.ActiveCfg = Release|Any CPU
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -262,5 +276,6 @@ Global
 		{F1B55876-94F9-424B-B58E-585305FF9D73} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{934AB185-13D2-42FC-9DA7-6E81543DED78} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{59275E1F-562D-493B-A83D-E20CC2DA18B9} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{7C0F59E2-5D60-4991-8BC3-2E4F0DE9C9F8} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

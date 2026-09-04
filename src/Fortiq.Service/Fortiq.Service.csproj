@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Fortiq.Scheduling\Fortiq.Scheduling.csproj" />
+    <ProjectReference Include="..\Fortiq.Infrastructure.Keys\Fortiq.Infrastructure.Keys.csproj" />
+    <ProjectReference Include="..\Fortiq.Infrastructure.Restic\Fortiq.Infrastructure.Restic.csproj" />
+    <ProjectReference Include="..\Fortiq.Infrastructure.Runs\Fortiq.Infrastructure.Runs.csproj" />
+    <ProjectReference Include="..\Fortiq.Infrastructure.Receipts\Fortiq.Infrastructure.Receipts.csproj" />
+    <ProjectReference Include="..\Fortiq.PasswordHelper\Fortiq.PasswordHelper.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
