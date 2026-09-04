@@ -44,7 +44,16 @@ public sealed class ScheduledBackupRunner
     public async Task<IReadOnlyList<ScheduleRunOutcome>> RunDueAsync(CancellationToken cancellationToken)
     {
         var outcomes = new List<ScheduleRunOutcome>();
-        foreach (var schedule in await _store.ReadSchedulesAsync(cancellationToken))
+        var schedules = await _store.ReadSchedulesAsync(cancellationToken);
+        if (_store is IScheduleIssueSource issueSource)
+        {
+            outcomes.AddRange(issueSource.LastReadIssues.Select(issue => new ScheduleRunOutcome(
+                $"invalid:{issue.FileName}",
+                DueVerdict.Disabled,
+                Failure: issue.Failure)));
+        }
+
+        foreach (var schedule in schedules)
         {
             cancellationToken.ThrowIfCancellationRequested();
 

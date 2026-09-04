@@ -4,6 +4,8 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
 using Fortiq.Desktop.ViewModels;
+using Fortiq.Application;
+using Fortiq.Infrastructure.ObjectStorage;
 using Fortiq.Monitoring;
 using Fortiq.Operations;
 using Fortiq.Provisioning;
@@ -25,9 +27,13 @@ public sealed class FortiqApplication : Avalonia.Application
                     "Fortiq");
 
             var engineRoot = ResolveEngineRoot();
+            IObjectStorageCredentialProvider storage = new EnvironmentObjectStorageCredentialProvider();
 
             var protect = new ProtectRepositoryAdapter(
-                new RepositoryProvisioner(engineRoot),
+                new RepositoryProvisioner(
+                    engineRoot,
+                    storage: storage,
+                    protection: new S3StorageProtectionInspector(storage)),
                 stateDirectory);
 
             var reportPath = Path.Combine(stateDirectory, "health", "health.json");
@@ -36,7 +42,7 @@ public sealed class FortiqApplication : Avalonia.Application
 
             var prove = new ProveRecoveryAdapter(
                 schedules,
-                new ProvenRestore(engineRoot, stateDirectory, receiptDirectory: receipts),
+                new ProvenRestore(engineRoot, stateDirectory, receiptDirectory: receipts, storage: storage),
                 new HealthPublisher(
                     schedules,
                     receipts,

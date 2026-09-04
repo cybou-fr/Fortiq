@@ -17,8 +17,18 @@ public enum RetentionMode
 /// What the storage holding a repository will refuse to do. This is the difference between a backup
 /// that is encrypted and a backup that survives whoever holds the credentials.
 /// </summary>
-public sealed record StorageProtection(bool Immutable, RetentionMode Mode, TimeSpan? DefaultRetention)
+public sealed record StorageProtection(
+    bool Immutable,
+    RetentionMode Mode,
+    TimeSpan? DefaultRetention,
+    bool ObjectLockCapable = false)
 {
+    /// <summary>Whether newly written objects receive a positive retention period by default.</summary>
+    public bool DefaultRetentionActive =>
+        Mode is RetentionMode.Governance or RetentionMode.Compliance
+        && DefaultRetention is { } duration
+        && duration > TimeSpan.Zero;
+
     /// <summary>Storage that promises nothing, which is what a plain directory or bucket is.</summary>
     public static StorageProtection None { get; } = new(false, RetentionMode.None, null);
 }

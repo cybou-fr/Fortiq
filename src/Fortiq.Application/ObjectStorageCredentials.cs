@@ -38,3 +38,34 @@ public sealed class NoObjectStorageCredentials : IObjectStorageCredentialProvide
     public Task<ObjectStorageCredentials?> ForRepositoryAsync(string repositoryLocation, CancellationToken cancellationToken) =>
         Task.FromResult<ObjectStorageCredentials?>(null);
 }
+
+/// <summary>
+/// Reads the standard AWS process environment explicitly. The engine process does not inherit the
+/// ambient environment; these values are copied into its allow-listed, per-invocation environment
+/// only when the target repository is object storage.
+/// </summary>
+public sealed class EnvironmentObjectStorageCredentialProvider : IObjectStorageCredentialProvider
+{
+    public Task<ObjectStorageCredentials?> ForRepositoryAsync(
+        string repositoryLocation,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Fortiq.Domain.RepositoryLocation.IsObjectStorage(repositoryLocation))
+        {
+            return Task.FromResult<ObjectStorageCredentials?>(null);
+        }
+
+        var accessKey = Environment.GetEnvironmentVariable("AWS_ACCESS_KEY_ID");
+        var secretKey = Environment.GetEnvironmentVariable("AWS_SECRET_ACCESS_KEY");
+        if (string.IsNullOrWhiteSpace(accessKey) || string.IsNullOrWhiteSpace(secretKey))
+        {
+            return Task.FromResult<ObjectStorageCredentials?>(null);
+        }
+
+        return Task.FromResult<ObjectStorageCredentials?>(new ObjectStorageCredentials(
+            accessKey,
+            secretKey,
+            Environment.GetEnvironmentVariable("AWS_DEFAULT_REGION")));
+    }
+}

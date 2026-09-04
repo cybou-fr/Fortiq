@@ -12,7 +12,10 @@ public static class RecoveryTool
 {
     public static string Path => System.IO.Path.Combine(AppContext.BaseDirectory, "Fortiq.Recover.exe");
 
-    public static async Task<RecoveryToolResult> RunAsync(string[] arguments, string? mnemonic)
+    public static async Task<RecoveryToolResult> RunAsync(
+        string[] arguments,
+        string? mnemonic,
+        Fortiq.Application.ObjectStorageCredentials? storage = null)
     {
         Skip.IfNot(File.Exists(Path), "The recovery tool was not built next to the tests.");
 
@@ -29,6 +32,16 @@ public static class RecoveryTool
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
+        }
+
+        if (storage is not null)
+        {
+            startInfo.Environment["AWS_ACCESS_KEY_ID"] = storage.AccessKeyId;
+            startInfo.Environment["AWS_SECRET_ACCESS_KEY"] = storage.SecretAccessKey;
+            if (storage.Region is { Length: > 0 } region)
+            {
+                startInfo.Environment["AWS_DEFAULT_REGION"] = region;
+            }
         }
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start the recovery tool.");

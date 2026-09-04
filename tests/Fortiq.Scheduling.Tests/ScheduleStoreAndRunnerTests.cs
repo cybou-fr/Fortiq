@@ -41,7 +41,7 @@ public sealed class ScheduleStoreAndRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task ARecurrenceThisBuildDoesNotKnowIsRefusedRatherThanApproximated()
+    public async Task ARecurrenceThisBuildDoesNotKnowIsIsolatedAndReported()
     {
         await WriteScheduleAsync("odd", """
             {
@@ -57,8 +57,55 @@ public sealed class ScheduleStoreAndRunnerTests : IDisposable
             """);
 
         // A schedule file decides what runs and when; guessing the nearest known kind would run
-        // something nobody asked for.
-        await Assert.ThrowsAsync<InvalidDataException>(() => Store().ReadSchedulesAsync(CancellationToken.None));
+        // something nobody asked for. It is skipped without taking unrelated schedules down.
+        var store = Store();
+        Assert.Empty(await store.ReadSchedulesAsync(CancellationToken.None));
+        var issue = Assert.Single(store.LastReadIssues);
+        Assert.Equal("odd.json", issue.FileName);
+        Assert.Contains("everyFullMoon", issue.Failure, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AMalformedScheduleDoesNotStopAValidScheduleFromRunning()
+    {
+        var clock = new FakeClock(new DateTimeOffset(2026, 9, 4, 12, 0, 0, TimeSpan.Zero));
+        await WriteScheduleAsync("a-broken", "{ not json");
+        await WriteIntervalScheduleAsync("b-healthy", TimeSpan.FromHours(6));
+        var store = Store();
+        await store.WriteStateAsync(
+            new ScheduleState("b-healthy", LastSuccessAt: clock.GetUtcNow().AddHours(-7)),
+            CancellationToken.None);
+
+        var backup = new RecordingBackup(new string('d', 64));
+        var outcomes = await new ScheduledBackupRunner(store, backup, clock).RunDueAsync(CancellationToken.None);
+
+        Assert.Contains(outcomes, outcome => outcome.ScheduleId == "invalid:a-broken.json" && outcome.Failure is not null);
+        Assert.Contains(outcomes, outcome => outcome.ScheduleId == "b-healthy" && outcome.SnapshotId is not null);
+        Assert.Equal("b-healthy", Assert.Single(backup.Ran).Id);
+    }
+
+    [Fact]
+    public async Task DuplicateScheduleIdsAreNotRunTwice()
+    {
+        await WriteIntervalScheduleAsync("a-first", TimeSpan.FromHours(6));
+        await WriteScheduleAsync("b-duplicate", $$"""
+            {
+              "schema": "fortiq.backup-schedule",
+              "version": 1,
+              "id": "a-first",
+              "repository": "C:/other-repository",
+              "kit": "C:/other-kit",
+              "source": "C:/other-source",
+              "sourceStableId": "workstation:other",
+              "recurrence": { "kind": "interval", "period": "{{TimeSpan.FromHours(6)}}" }
+            }
+            """);
+
+        var store = Store();
+        var schedule = Assert.Single(await store.ReadSchedulesAsync(CancellationToken.None));
+
+        Assert.Equal("a-first", schedule.Id);
+        Assert.Contains("duplicated", Assert.Single(store.LastReadIssues).Failure, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

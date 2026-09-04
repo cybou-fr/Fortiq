@@ -129,6 +129,17 @@ public sealed class ObjectStorageServer : IAsyncDisposable
         return bucket;
     }
 
+    /// <summary>Creates a lock-capable bucket whose new objects receive no retention by default.</summary>
+    public async Task<string> CreateLockCapableBucketWithoutRetentionAsync(CancellationToken cancellationToken)
+    {
+        var bucket = "fortiq-" + Guid.NewGuid().ToString("N")[..12];
+        using var client = CreateClient();
+        await client.PutBucketAsync(
+            new PutBucketRequest { BucketName = bucket, ObjectLockEnabledForBucket = true },
+            cancellationToken);
+        return bucket;
+    }
+
     public async Task<string> CreatePlainBucketAsync(CancellationToken cancellationToken)
     {
         var bucket = "fortiq-" + Guid.NewGuid().ToString("N")[..12];

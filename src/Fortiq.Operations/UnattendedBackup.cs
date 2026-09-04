@@ -47,13 +47,15 @@ public sealed class UnattendedBackup : IScheduledBackup
     private readonly string _workingDirectory;
     private readonly string _runDirectory;
     private readonly string _receiptDirectory;
+    private readonly IObjectStorageCredentialProvider _storage;
 
     public UnattendedBackup(
         string engineRoot,
         string workingDirectory,
         string? passwordHelperPath = null,
         string? runDirectory = null,
-        string? receiptDirectory = null)
+        string? receiptDirectory = null,
+        IObjectStorageCredentialProvider? storage = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(engineRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
@@ -63,6 +65,7 @@ public sealed class UnattendedBackup : IScheduledBackup
         _helperPath = passwordHelperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
         _runDirectory = runDirectory ?? FortiqRunDirectory.Default();
         _receiptDirectory = receiptDirectory ?? Path.Combine(_workingDirectory, "receipts");
+        _storage = storage ?? new NoObjectStorageCredentials();
     }
 
     [SupportedOSPlatform("windows")]
@@ -87,7 +90,7 @@ public sealed class UnattendedBackup : IScheduledBackup
         var working = Path.Combine(_workingDirectory, "engine", schedule.Id);
         Directory.CreateDirectory(working);
 
-        var restic = ResticEngineFactory.Create(engine, credentials, working);
+        var restic = ResticEngineFactory.Create(engine, credentials, working, _storage);
         var repository = new RepositoryDescriptor(repositoryId, schedule.RepositoryLocation);
 
         // The repository states its own identity, and it has to be the one the kit describes.

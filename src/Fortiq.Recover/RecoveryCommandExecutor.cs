@@ -15,11 +15,16 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
 {
     private readonly string _helperPath;
     private readonly string _runDirectory;
+    private readonly IObjectStorageCredentialProvider _storage;
 
-    public RecoveryCommandExecutor(string? passwordHelperPath = null, string? runDirectory = null)
+    public RecoveryCommandExecutor(
+        string? passwordHelperPath = null,
+        string? runDirectory = null,
+        IObjectStorageCredentialProvider? storage = null)
     {
         _helperPath = passwordHelperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
         _runDirectory = runDirectory ?? FortiqRunDirectory.Default();
+        _storage = storage ?? new NoObjectStorageCredentials();
     }
 
     public async Task<object> ExecuteAsync(
@@ -58,7 +63,8 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
             var restic = ResticEngineFactory.Create(
                 engine,
                 new PasswordPipeCredentialProvider(_helperPath, lease),
-                workspace.FullName);
+                workspace.FullName,
+                _storage);
 
             // Recovery runs in its own process, so it registers its work like any other run: a
             // reconciliation elsewhere must not clear locks while a restore is in flight.

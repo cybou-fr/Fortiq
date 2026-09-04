@@ -7,13 +7,13 @@ using Fortiq.Provisioning;
 namespace Fortiq.Desktop;
 
 /// <summary>
-/// Turns the wizard's three answers into a repository, a recovery kit and a nightly schedule.
+/// Turns the wizard's three answers into a repository, a recovery kit and, when possible, a nightly schedule.
 /// </summary>
 /// <remarks>
-/// The schedule is written as part of the same action deliberately. A repository that exists but is
-/// backing nothing up is the failure this product is about: it looks protected and is not. If the
-/// schedule cannot be written the whole step is reported as failed, so nobody is told they are
-/// protected on the strength of an empty repository.
+/// Once provisioning returns, the recovery mnemonic cannot be reproduced. A later schedule failure
+/// therefore returns a degraded success: the UI must show the mnemonic and explicitly say that
+/// unattended backup was not configured. Throwing at that point would strand a repository whose
+/// only disaster secret never reached the person who created it.
 /// </remarks>
 public sealed class ProtectRepositoryAdapter : IProtectRepository
 {
@@ -45,7 +45,19 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
             cancellationToken);
 
         var id = provisioned.Repository.Id.ToString();
-        await WriteScheduleAsync(Path.Combine(_stateDirectory, "schedules"), id, request, _nightly, cancellationToken);
+        try
+        {
+            await WriteScheduleAsync(Path.Combine(_stateDirectory, "schedules"), id, request, _nightly, cancellationToken);
+        }
+        catch (Exception error)
+        {
+            return new ProtectedRepositoryResult(
+                id,
+                provisioned.RecoveryMnemonic,
+                provisioned.DeviceUnlockAvailable,
+                BackupScheduled: false,
+                SchedulingFailure: $"The repository and recovery kit were created, but nightly backup scheduling failed: {error.Message}");
+        }
 
         return new ProtectedRepositoryResult(id, provisioned.RecoveryMnemonic, provisioned.DeviceUnlockAvailable);
     }

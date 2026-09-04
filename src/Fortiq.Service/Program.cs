@@ -1,4 +1,5 @@
 using Fortiq.Operations;
+using Fortiq.Application;
 using Fortiq.Scheduling;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -38,9 +39,13 @@ public static class Program
             : SchedulerOptions.Default.PollInterval;
 
         builder.Services.AddSingleton(new SchedulerOptions(pollInterval));
+        builder.Services.AddSingleton<IObjectStorageCredentialProvider, EnvironmentObjectStorageCredentialProvider>();
         builder.Services.AddSingleton<IScheduleStore>(new FileSystemScheduleStore(stateDirectory));
-        builder.Services.AddSingleton<IScheduledBackup>(
-            new UnattendedBackup(engineRoot, Path.Combine(stateDirectory, "work")));
+        builder.Services.AddSingleton<IScheduledBackup>(provider =>
+            new UnattendedBackup(
+                engineRoot,
+                Path.Combine(stateDirectory, "work"),
+                storage: provider.GetRequiredService<IObjectStorageCredentialProvider>()));
         builder.Services.AddSingleton(provider => new ScheduledBackupRunner(
             provider.GetRequiredService<IScheduleStore>(),
             provider.GetRequiredService<IScheduledBackup>()));

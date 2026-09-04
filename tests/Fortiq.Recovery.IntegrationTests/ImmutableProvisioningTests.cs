@@ -3,6 +3,7 @@ using Fortiq.Domain;
 using Fortiq.Infrastructure.Keys;
 using Fortiq.Infrastructure.ObjectStorage;
 using Fortiq.Provisioning;
+using System.Text.Json;
 
 namespace Fortiq.Recovery.IntegrationTests;
 
@@ -35,6 +36,8 @@ public sealed class ImmutableProvisioningTests
             requireImmutableStorage: true);
 
         Assert.True(provisioned.StorageProtection.Immutable);
+        Assert.True(provisioned.StorageProtection.ObjectLockCapable);
+        Assert.True(provisioned.StorageProtection.DefaultRetentionActive);
         Assert.Equal(RetentionMode.Compliance, provisioned.StorageProtection.Mode);
         Assert.Equal(TimeSpan.FromDays(30), provisioned.StorageProtection.DefaultRetention);
 
@@ -76,6 +79,72 @@ public sealed class ImmutableProvisioningTests
         Assert.Equal(0, objects.KeyCount);
         Assert.False(Directory.Exists(Path.Combine(workspace.Root, "kit")));
         Assert.False(File.Exists(Path.Combine(state, "provisioning-intent.json")));
+    }
+
+    [SkippableFact]
+    public async Task ObjectLockCapabilityWithoutDefaultRetentionIsNotCalledImmutable()
+    {
+        Skip.IfNot(File.Exists(HelperPath), "The password helper was not built next to the tests.");
+        using var workspace = await RecoveryWorkspace.CreateAsync("object-lock-capability-only", CancellationToken.None);
+        await using var storage = await ObjectStorageServer.StartAsync(CancellationToken.None);
+
+        var bucket = await storage.CreateLockCapableBucketWithoutRetentionAsync(CancellationToken.None);
+        var credentials = new FixedStorageCredentials(storage.Credentials);
+        var inspector = new S3StorageProtectionInspector(credentials);
+
+        var protection = await inspector.InspectAsync(storage.RepositoryLocationFor(bucket), CancellationToken.None);
+
+        Assert.True(protection.ObjectLockCapable);
+        Assert.False(protection.DefaultRetentionActive);
+        Assert.False(protection.Immutable);
+        Assert.Equal(RetentionMode.None, protection.Mode);
+        Assert.Null(protection.DefaultRetention);
+
+        await Assert.ThrowsAsync<StorageNotImmutableException>(() => Provisioner(credentials).CreateAsync(
+            storage.RepositoryLocationFor(bucket),
+            Path.Combine(workspace.Root, "kit"),
+            workspace.EnsureDirectory("state"),
+            CancellationToken.None,
+            addDeviceUnlock: false,
+            requireImmutableStorage: true));
+    }
+
+    [SkippableFact]
+    public async Task AFailedRemoteProvisioningKeepsAnIntentNamingTheOrphanRepository()
+    {
+        Skip.IfNot(File.Exists(HelperPath), "The password helper was not built next to the tests.");
+        using var workspace = await RecoveryWorkspace.CreateAsync("remote-provisioning-intent", CancellationToken.None);
+        await using var storage = await ObjectStorageServer.StartAsync(CancellationToken.None);
+
+        var bucket = await storage.CreatePlainBucketAsync(CancellationToken.None);
+        var repository = storage.RepositoryLocationFor(bucket);
+        var state = workspace.EnsureDirectory("state");
+        var provisioner = Provisioner(new FixedStorageCredentials(storage.Credentials));
+        provisioner.AfterInitialize = _ => throw new IOException("the recovery kit disk went away");
+
+        await Assert.ThrowsAsync<IOException>(() => provisioner.CreateAsync(
+            repository,
+            Path.Combine(workspace.Root, "kit"),
+            state,
+            CancellationToken.None,
+            addDeviceUnlock: false));
+
+        var intentPath = Path.Combine(state, "provisioning-intent.json");
+        Assert.True(File.Exists(intentPath));
+        using var intent = JsonDocument.Parse(await File.ReadAllTextAsync(intentPath));
+        Assert.Equal(repository, intent.RootElement.GetProperty("repositoryPath").GetString());
+        Assert.Equal("remoteCleanupRequired", intent.RootElement.GetProperty("state").GetString());
+
+        using var client = storage.CreateClient();
+        var objects = await client.ListObjectsV2Async(
+            new Amazon.S3.Model.ListObjectsV2Request { BucketName = bucket },
+            CancellationToken.None);
+        Assert.True(objects.KeyCount > 0);
+
+        var cleanup = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => RepositoryProvisioner.CleanUpInterruptedAsync(state, CancellationToken.None));
+        Assert.Contains(repository, cleanup.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(intentPath));
     }
 
     [SkippableFact]

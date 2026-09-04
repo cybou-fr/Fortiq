@@ -187,12 +187,29 @@ public sealed class RepositoryProvisioner
             }
 
             // A repository in object storage cannot be rolled back from here, and in a locked bucket
-            // it cannot be removed at all - by design. The intent record names it, so an operator
-            // learns what was left behind instead of being told it was cleaned up.
+            // it cannot be removed at all - by design. Keep a durable intent that names the orphan
+            // instead of deleting the only local evidence that manual cleanup is required.
             ProvisioningIntent.RollBack(inObjectStorage ? null : repositoryPath, kitPath);
 
-            // The intent is removed last: while it exists, an interrupted run is still recognisable.
-            await intent.DisposeAsync();
+            if (inObjectStorage)
+            {
+                try
+                {
+                    await intent.MarkRemoteCleanupRequiredAsync(CancellationToken.None);
+                }
+                catch (Exception intentError) when (intentError is IOException or UnauthorizedAccessException)
+                {
+                    // The original in-progress intent is already durable and still names the remote
+                    // repository. Preserve the provisioning failure rather than replacing it with a
+                    // secondary failure while updating the more specific state.
+                }
+            }
+            else
+            {
+                // Local rollback completed, so no operator action remains.
+                await intent.CompleteAsync(CancellationToken.None);
+            }
+
             throw;
         }
     }
@@ -209,6 +226,13 @@ public sealed class RepositoryProvisioner
         if (intent is null)
         {
             return false;
+        }
+
+        if (RepositoryLocation.IsObjectStorage(intent.RepositoryPath))
+        {
+            throw new InvalidOperationException(
+                $"The unfinished provisioning run left an object-storage repository at '{intent.RepositoryPath}'. " +
+                "Fortiq cannot safely remove remote repository objects automatically; inspect and clean it up manually before removing the intent.");
         }
 
         ProvisioningIntent.RollBack(intent.RepositoryPath, intent.KitPath);

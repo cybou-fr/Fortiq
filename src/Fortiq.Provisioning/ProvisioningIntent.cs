@@ -8,22 +8,25 @@ namespace Fortiq.Provisioning;
 /// been proven to open the repository. Its only purpose is to make an interrupted run recognisable:
 /// a repository whose kit was never finished must not be mistaken for a working one.
 /// </summary>
-internal sealed class ProvisioningIntent : IAsyncDisposable
+internal sealed class ProvisioningIntent
 {
     private const string FileName = "provisioning-intent.json";
 
     private readonly string _path;
 
-    private ProvisioningIntent(string path, string repositoryPath, string kitPath)
+    private ProvisioningIntent(string path, string repositoryPath, string kitPath, ProvisioningIntentState state)
     {
         _path = path;
         RepositoryPath = repositoryPath;
         KitPath = kitPath;
+        State = state;
     }
 
     internal string RepositoryPath { get; }
 
     internal string KitPath { get; }
+
+    internal ProvisioningIntentState State { get; private set; }
 
     internal static async Task<ProvisioningIntent> BeginAsync(
         string workingDirectory,
@@ -39,9 +42,15 @@ internal sealed class ProvisioningIntent : IAsyncDisposable
                 "This working directory holds an unfinished provisioning run; clean it up before starting another.");
         }
 
-        var document = new IntentDocument(Schema, Version, repositoryPath, kitPath, DateTimeOffset.UtcNow);
+        var document = new IntentDocument(
+            Schema,
+            Version,
+            repositoryPath,
+            kitPath,
+            DateTimeOffset.UtcNow,
+            ProvisioningIntentState.InProgress);
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(document, Options), cancellationToken);
-        return new ProvisioningIntent(path, repositoryPath, kitPath);
+        return new ProvisioningIntent(path, repositoryPath, kitPath, ProvisioningIntentState.InProgress);
     }
 
     internal static async Task<ProvisioningIntent?> ReadAsync(string workingDirectory, CancellationToken cancellationToken)
@@ -61,7 +70,23 @@ internal sealed class ProvisioningIntent : IAsyncDisposable
             throw new InvalidDataException("Unsupported provisioning intent schema or version.");
         }
 
-        return new ProvisioningIntent(path, document.RepositoryPath, document.KitPath);
+        return new ProvisioningIntent(
+            path,
+            document.RepositoryPath,
+            document.KitPath,
+            document.State ?? ProvisioningIntentState.InProgress);
+    }
+
+    internal async Task MarkRemoteCleanupRequiredAsync(CancellationToken cancellationToken)
+    {
+        var existing = JsonSerializer.Deserialize<IntentDocument>(
+            await File.ReadAllTextAsync(_path, cancellationToken),
+            Options) ?? throw new InvalidDataException("The provisioning intent is empty.");
+        var updated = existing with { State = ProvisioningIntentState.RemoteCleanupRequired };
+        var temporary = _path + ".partial";
+        await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(updated, Options), cancellationToken);
+        File.Move(temporary, _path, overwrite: true);
+        State = ProvisioningIntentState.RemoteCleanupRequired;
     }
 
     internal Task CompleteAsync(CancellationToken cancellationToken)
@@ -93,16 +118,6 @@ internal sealed class ProvisioningIntent : IAsyncDisposable
         }
     }
 
-    public ValueTask DisposeAsync()
-    {
-        if (File.Exists(_path))
-        {
-            File.Delete(_path);
-        }
-
-        return ValueTask.CompletedTask;
-    }
-
     private static void Clear(string directory)
     {
         if (!Directory.Exists(directory))
@@ -128,7 +143,8 @@ internal sealed class ProvisioningIntent : IAsyncDisposable
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
     private sealed record IntentDocument(
@@ -136,5 +152,12 @@ internal sealed class ProvisioningIntent : IAsyncDisposable
         int Version,
         string RepositoryPath,
         string KitPath,
-        DateTimeOffset StartedAt);
+        DateTimeOffset StartedAt,
+        ProvisioningIntentState? State = null);
+}
+
+internal enum ProvisioningIntentState
+{
+    InProgress,
+    RemoteCleanupRequired
 }

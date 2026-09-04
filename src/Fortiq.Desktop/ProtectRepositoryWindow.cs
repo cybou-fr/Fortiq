@@ -45,6 +45,7 @@ public sealed class ProtectRepositoryWindow : Window
             {
                 case nameof(ProtectRepositoryViewModel.Step):
                 case nameof(ProtectRepositoryViewModel.Failure):
+                case nameof(ProtectRepositoryViewModel.SchedulingFailure):
                     Render();
                     break;
                 case nameof(ProtectRepositoryViewModel.CanCreate):
@@ -111,6 +112,10 @@ public sealed class ProtectRepositoryWindow : Window
 
         Add(Heading("Write these words down, on paper"));
         Add(Note("This is the only way back into the backups. Fortiq cannot show it again and cannot produce it for you later."));
+        if (!_model.BackupScheduled)
+        {
+            Add(Warning(_model.SchedulingFailure ?? "Nightly backup scheduling failed. The repository and recovery kit still exist."));
+        }
         Add(new SelectableTextBlock
         {
             Text = _model.RecoveryMnemonic,
@@ -149,10 +154,17 @@ public sealed class ProtectRepositoryWindow : Window
         var close = new Button { Content = "Close", HorizontalAlignment = HorizontalAlignment.Left };
         close.Click += (_, _) => Close();
 
-        Add(Heading("Protected"));
-        Add(Note(_model.DeviceUnlockAvailable
-            ? "Backups will run nightly and unlock on this machine on their own. The words you wrote down are the way back from anywhere else."
-            : "Backups will run nightly. This machine has no device unlock, so the words you wrote down are the only way in — including for scheduled runs."));
+        Add(Heading(_model.BackupScheduled ? "Protected" : "Repository created — scheduling needs attention"));
+        if (_model.BackupScheduled)
+        {
+            Add(Note(_model.DeviceUnlockAvailable
+                ? "Backups will run nightly and unlock on this machine on their own. The words you wrote down are the way back from anywhere else."
+                : "Backups will run nightly. This machine has no device unlock, so the words you wrote down are the only way in — including for scheduled runs."));
+        }
+        else
+        {
+            Add(Warning(_model.SchedulingFailure ?? "Nightly backup scheduling failed. Configure it before relying on this repository."));
+        }
         Add(Note("Nothing is proven recoverable until a restore has happened. The main window says so until it has."));
         Add(close);
     }
@@ -164,6 +176,9 @@ public sealed class ProtectRepositoryWindow : Window
 
     private static TextBlock Note(string text) =>
         new() { Text = text, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
+
+    private static TextBlock Warning(string text) =>
+        new() { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes.OrangeRed };
 
     private static StackPanel Field(string label, string value, Action<string> set)
     {

@@ -209,6 +209,59 @@ public sealed class StandaloneRecoveryTests
         Assert.Contains("does not match the hash", result.StandardError, StringComparison.Ordinal);
     }
 
+    [SkippableFact]
+    public async Task ASeparateRecoveryProcessRestoresFromS3WithExplicitStorageCredentials()
+    {
+        Skip.IfNot(File.Exists(HelperPath), "The password helper was not built next to the tests.");
+        using var workspace = await RecoveryWorkspace.CreateAsync("standalone-s3-recovery", CancellationToken.None);
+        await using var storageServer = await ObjectStorageServer.StartAsync(CancellationToken.None);
+        var storage = new FixedStorageCredentials(storageServer.Credentials);
+        var bucket = await storageServer.CreatePlainBucketAsync(CancellationToken.None);
+        var source = Path.Combine(workspace.Root, "source");
+        var expected = TestDataset.Create(source);
+        var kitDirectory = KitDirectory(workspace);
+
+        var provisioned = await new RepositoryProvisioner(
+            RecoveryWorkspace.EngineRootPath,
+            HelperPath,
+            storage: storage).CreateAsync(
+                storageServer.RepositoryLocationFor(bucket),
+                kitDirectory,
+                workspace.EnsureDirectory("state-provision"),
+                CancellationToken.None,
+                addDeviceUnlock: false);
+
+        using var lease = UnlockKit(workspace, provisioned);
+        var adapter = workspace.Adapter(
+            "state-backup",
+            new PasswordPipeCredentialProvider(HelperPath, lease),
+            storage);
+        var backup = await adapter.CreateSnapshotAsync(
+            new CreateSnapshot(provisioned.Repository, source, "test-source"),
+            CancellationToken.None);
+        var target = Path.Combine(workspace.Root, "restored-s3");
+
+        var restored = await RecoveryTool.RunAsync(
+            [
+                "restore",
+                "--repository", provisioned.Repository.Location,
+                "--engine-root", RecoveryWorkspace.EngineRootPath,
+                "--kit", kitDirectory,
+                "--snapshot", backup.SnapshotId,
+                "--target", target,
+                "--source", source
+            ],
+            provisioned.RecoveryMnemonic,
+            storageServer.Credentials);
+
+        Assert.Equal(0, restored.ExitCode);
+        foreach (var entry in expected)
+        {
+            var file = Path.Combine(target, entry.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+            Assert.Equal(entry.Sha256, TestDataset.HashFile(file));
+        }
+    }
+
     private static string KitDirectory(RecoveryWorkspace workspace) => Path.Combine(workspace.Root, "kit");
 
     private static async Task<ProvisionedRepository> ProvisionAsync(RecoveryWorkspace workspace)
@@ -239,5 +292,11 @@ public sealed class StandaloneRecoveryTests
 
     private static Task<RecoveryToolResult> RunRecoverAsync(string[] arguments, string? mnemonic) =>
         RecoveryTool.RunAsync(arguments, mnemonic);
+
+    private sealed class FixedStorageCredentials(ObjectStorageCredentials credentials) : IObjectStorageCredentialProvider
+    {
+        public Task<ObjectStorageCredentials?> ForRepositoryAsync(string repositoryLocation, CancellationToken cancellationToken) =>
+            Task.FromResult<ObjectStorageCredentials?>(credentials);
+    }
 
 }

@@ -6,7 +6,26 @@ namespace Fortiq.Desktop.ViewModels;
 /// <summary>What creating a protected repository needs, and what it produced.</summary>
 public sealed record ProtectRepositoryRequest(string RepositoryLocation, string KitDirectory, string SourcePath);
 
-public sealed record ProtectedRepositoryResult(string RepositoryId, string RecoveryMnemonic, bool DeviceUnlockAvailable);
+public sealed record ProtectedRepositoryResult(
+    string RepositoryId,
+    string RecoveryMnemonic,
+    bool DeviceUnlockAvailable,
+    bool BackupScheduled = true,
+    string? SchedulingFailure = null)
+{
+    // The result crosses the desktop boundary while it still contains the only displayable copy of
+    // the disaster secret. Keep an accidental log or debugger rendering from disclosing it.
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        builder.Append("RepositoryId = ").Append(RepositoryId)
+            .Append(", RecoveryMnemonic = [redacted]")
+            .Append(", DeviceUnlockAvailable = ").Append(DeviceUnlockAvailable)
+            .Append(", BackupScheduled = ").Append(BackupScheduled)
+            .Append(", SchedulingFailure = ").Append(SchedulingFailure);
+        return true;
+    }
+}
 
 /// <summary>Creates the repository. The desktop knows nothing about engines, kits or keys.</summary>
 public interface IProtectRepository
@@ -87,6 +106,15 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
 
     public bool DeviceUnlockAvailable { get; private set; }
 
+    /// <summary>Whether the service schedule was committed after the repository and kit.</summary>
+    public bool BackupScheduled { get; private set; }
+
+    /// <summary>
+    /// An actionable warning when recovery material is safe but unattended backup setup failed.
+    /// This is separate from <see cref="Failure"/> because it must survive mnemonic confirmation.
+    /// </summary>
+    public string? SchedulingFailure { get; private set; }
+
     public bool CanCreate =>
         !Busy
         && Step == ProtectStep.Describe
@@ -111,9 +139,13 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
 
             RepositoryId = result.RepositoryId;
             DeviceUnlockAvailable = result.DeviceUnlockAvailable;
+            BackupScheduled = result.BackupScheduled;
+            SchedulingFailure = result.SchedulingFailure;
             _mnemonic = result.RecoveryMnemonic;
             Step = ProtectStep.WriteDownRecoveryMaterial;
             OnPropertyChanged(nameof(RecoveryMnemonic));
+            OnPropertyChanged(nameof(BackupScheduled));
+            OnPropertyChanged(nameof(SchedulingFailure));
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {

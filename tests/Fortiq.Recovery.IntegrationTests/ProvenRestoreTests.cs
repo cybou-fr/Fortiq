@@ -133,6 +133,68 @@ public sealed class ProvenRestoreTests
         Assert.Contains("no snapshots", error.Message, StringComparison.Ordinal);
     }
 
+    [SkippableFact]
+    public async Task S3CredentialsReachBothScheduledBackupAndProvenRestore()
+    {
+        Skip.IfNot(WindowsTpmEnvelope.IsAvailable, "This machine has no platform crypto provider.");
+        Skip.IfNot(File.Exists(HelperPath), "The password helper was not built next to the tests.");
+
+        using var workspace = await RecoveryWorkspace.CreateAsync("s3-unattended-proof", CancellationToken.None);
+        await using var storageServer = await ObjectStorageServer.StartAsync(CancellationToken.None);
+        var storage = new FixedStorageCredentials(storageServer.Credentials);
+        var bucket = await storageServer.CreatePlainBucketAsync(CancellationToken.None);
+        var source = Path.Combine(workspace.Root, "source");
+        TestDataset.Create(source);
+        var kitDirectory = Path.Combine(workspace.Root, "kit");
+
+        var provisioned = await new RepositoryProvisioner(
+            RecoveryWorkspace.EngineRootPath,
+            HelperPath,
+            storage: storage).CreateAsync(
+                storageServer.RepositoryLocationFor(bucket),
+                kitDirectory,
+                workspace.EnsureDirectory("state-provision"),
+                CancellationToken.None);
+
+        var kit = await RecoveryKitStore.ReadAsync(kitDirectory, CancellationToken.None);
+        var device = kit.Envelopes.Single(envelope => envelope.Suite == WindowsTpmEnvelope.SuiteId);
+        try
+        {
+            var schedule = new BackupSchedule(
+                "s3-documents",
+                provisioned.Repository.Location,
+                kitDirectory,
+                source,
+                "workstation:s3-documents",
+                new EveryInterval(TimeSpan.FromHours(6)));
+
+            var backup = await new UnattendedBackup(
+                RecoveryWorkspace.EngineRootPath,
+                workspace.EnsureDirectory("backup-work"),
+                HelperPath,
+                workspace.EnsureDirectory("runs"),
+                workspace.EnsureDirectory("receipts"),
+                storage).RunAsync(schedule, CancellationToken.None);
+            Assert.NotNull(backup.SnapshotId);
+
+            var proof = await new ProvenRestore(
+                RecoveryWorkspace.EngineRootPath,
+                workspace.EnsureDirectory("proof-work"),
+                HelperPath,
+                workspace.EnsureDirectory("runs"),
+                workspace.EnsureDirectory("receipts"),
+                storage).ProveAsync(schedule, CancellationToken.None);
+
+            Assert.Equal(backup.SnapshotId, proof.SnapshotId);
+            Assert.Equal(6ul, proof.FilesOnDisk);
+            Assert.True(proof.BytesRestored > 0);
+        }
+        finally
+        {
+            WindowsTpmEnvelope.DeleteKey(device);
+        }
+    }
+
     private static async Task WriteScheduleAsync(string stateDirectory, BackupSchedule schedule)
     {
         var directory = Path.Combine(stateDirectory, "schedules");
@@ -152,5 +214,11 @@ public sealed class ProvenRestoreTests
             """;
 
         await File.WriteAllTextAsync(Path.Combine(directory, schedule.Id + ".json"), json);
+    }
+
+    private sealed class FixedStorageCredentials(ObjectStorageCredentials credentials) : IObjectStorageCredentialProvider
+    {
+        public Task<ObjectStorageCredentials?> ForRepositoryAsync(string repositoryLocation, CancellationToken cancellationToken) =>
+            Task.FromResult<ObjectStorageCredentials?>(credentials);
     }
 }

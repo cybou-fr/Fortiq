@@ -63,13 +63,15 @@ public sealed class ProvenRestore
     private readonly string _helperPath;
     private readonly string _runDirectory;
     private readonly string _receiptDirectory;
+    private readonly IObjectStorageCredentialProvider _storage;
 
     public ProvenRestore(
         string engineRoot,
         string workingDirectory,
         string? passwordHelperPath = null,
         string? runDirectory = null,
-        string? receiptDirectory = null)
+        string? receiptDirectory = null,
+        IObjectStorageCredentialProvider? storage = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(engineRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
@@ -79,6 +81,7 @@ public sealed class ProvenRestore
         _helperPath = passwordHelperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
         _runDirectory = runDirectory ?? FortiqRunDirectory.Default();
         _receiptDirectory = receiptDirectory ?? Path.Combine(_workingDirectory, "receipts");
+        _storage = storage ?? new NoObjectStorageCredentials();
     }
 
     [SupportedOSPlatform("windows")]
@@ -100,7 +103,7 @@ public sealed class ProvenRestore
         var working = Path.Combine(_workingDirectory, "engine", schedule.Id);
         Directory.CreateDirectory(working);
 
-        var restic = ResticEngineFactory.Create(engine, credentials, working);
+        var restic = ResticEngineFactory.Create(engine, credentials, working, _storage);
         var repository = new RepositoryDescriptor(
             RepositoryId.FromBytes(device.RepositoryId),
             schedule.RepositoryLocation);

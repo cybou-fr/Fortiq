@@ -102,6 +102,39 @@ public sealed class ProtectRepositoryViewModelTests
         Assert.Null(model.RecoveryMnemonic);
     }
 
+    [Fact]
+    public async Task AScheduleFailureCannotHideTheRecoveryMnemonic()
+    {
+        var model = new ProtectRepositoryViewModel(new UnscheduledCreator(), (count, already) => (already * 4) % count)
+        {
+            RepositoryLocation = "C:/repository",
+            KitDirectory = "C:/kit",
+            SourcePath = "C:/documents"
+        };
+
+        await model.CreateAsync(CancellationToken.None);
+
+        Assert.Equal(ProtectStep.WriteDownRecoveryMaterial, model.Step);
+        Assert.Equal(Mnemonic, model.RecoveryMnemonic);
+        Assert.False(model.BackupScheduled);
+        Assert.Contains("scheduling failed", model.SchedulingFailure, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(model.Failure);
+
+        model.WroteItDown();
+        model.ConfirmationInput = string.Join(' ', model.RequestedWordNumbers.Select(number => Words()[number - 1]));
+        Assert.True(model.Confirm());
+        Assert.NotNull(model.SchedulingFailure);
+    }
+
+    [Fact]
+    public void ProtectedResultDoesNotRenderTheMnemonic()
+    {
+        var result = new ProtectedRepositoryResult(new string('a', 64), Mnemonic, DeviceUnlockAvailable: true);
+
+        Assert.DoesNotContain(Mnemonic, result.ToString(), StringComparison.Ordinal);
+        Assert.Contains("[redacted]", result.ToString(), StringComparison.Ordinal);
+    }
+
     private static string[] Words() => Mnemonic.Split(' ');
 
     private static ProtectRepositoryViewModel Wizard() =>
@@ -128,5 +161,16 @@ public sealed class ProtectRepositoryViewModelTests
     {
         public Task<ProtectedRepositoryResult> CreateAsync(ProtectRepositoryRequest request, CancellationToken cancellationToken) =>
             Task.FromException<ProtectedRepositoryResult>(new InvalidOperationException(message));
+    }
+
+    private sealed class UnscheduledCreator : IProtectRepository
+    {
+        public Task<ProtectedRepositoryResult> CreateAsync(ProtectRepositoryRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(new ProtectedRepositoryResult(
+                new string('a', 64),
+                Mnemonic,
+                DeviceUnlockAvailable: true,
+                BackupScheduled: false,
+                SchedulingFailure: "Nightly backup scheduling failed: access denied."));
     }
 }

@@ -56,12 +56,19 @@ public sealed class S3StorageProtectionInspector : IStorageProtectionInspector
             }
 
             var retention = lockConfiguration.Rule?.DefaultRetention;
+            var mode = retention?.Mode == ObjectLockRetentionMode.Compliance ? RetentionMode.Compliance
+                : retention?.Mode == ObjectLockRetentionMode.Governance ? RetentionMode.Governance
+                : RetentionMode.None;
+            var duration = Duration(retention);
+            var active = mode is RetentionMode.Governance or RetentionMode.Compliance
+                && duration is { } value
+                && value > TimeSpan.Zero;
+
             return new StorageProtection(
-                true,
-                retention?.Mode == ObjectLockRetentionMode.Compliance ? RetentionMode.Compliance
-                    : retention?.Mode == ObjectLockRetentionMode.Governance ? RetentionMode.Governance
-                    : RetentionMode.None,
-                Duration(retention));
+                Immutable: active,
+                Mode: mode,
+                DefaultRetention: duration,
+                ObjectLockCapable: true);
         }
         catch (AmazonS3Exception error) when (error.ErrorCode is "ObjectLockConfigurationNotFoundError")
         {

@@ -14,6 +14,15 @@ public interface IScheduleStore
     Task WriteStateAsync(ScheduleState state, CancellationToken cancellationToken);
 }
 
+/// <summary>A schedule file that could not safely participate in the latest read.</summary>
+public sealed record ScheduleLoadIssue(string FileName, string Failure);
+
+/// <summary>Optional diagnostics exposed by stores that load independent schedule documents.</summary>
+public interface IScheduleIssueSource
+{
+    IReadOnlyList<ScheduleLoadIssue> LastReadIssues { get; }
+}
+
 /// <summary>
 /// Schedules as files a person can read and edit, and state as files Fortiq writes. They are kept
 /// apart deliberately: configuration is not history, and writing history must never rewrite what
@@ -23,7 +32,7 @@ public interface IScheduleStore
 /// The recurrence is serialised through an explicit, closed shape rather than a type discriminator:
 /// a schedule file decides what code runs and when, so it may name only the kinds this build knows.
 /// </remarks>
-public sealed class FileSystemScheduleStore : IScheduleStore
+public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSource
 {
     private const string Schema = "fortiq.backup-schedule";
     private const int Version = 1;
@@ -32,6 +41,7 @@ public sealed class FileSystemScheduleStore : IScheduleStore
 
     private readonly string _schedules;
     private readonly string _state;
+    private IReadOnlyList<ScheduleLoadIssue> _lastReadIssues = [];
 
     public FileSystemScheduleStore(string directory)
     {
@@ -41,22 +51,43 @@ public sealed class FileSystemScheduleStore : IScheduleStore
         _state = Path.Combine(root, "state");
     }
 
+    public IReadOnlyList<ScheduleLoadIssue> LastReadIssues => _lastReadIssues;
+
     public async Task<IReadOnlyList<BackupSchedule>> ReadSchedulesAsync(CancellationToken cancellationToken)
     {
         if (!Directory.Exists(_schedules))
         {
+            _lastReadIssues = [];
             return [];
         }
 
         var schedules = new List<BackupSchedule>();
+        var issues = new List<ScheduleLoadIssue>();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var path in Directory.EnumerateFiles(_schedules, "*.json").Order(StringComparer.Ordinal))
         {
-            var document = JsonNode.Parse(await File.ReadAllTextAsync(path, cancellationToken))
-                ?? throw new InvalidDataException($"The schedule in {Path.GetFileName(path)} is empty.");
+            var fileName = Path.GetFileName(path);
+            try
+            {
+                var document = JsonNode.Parse(await File.ReadAllTextAsync(path, cancellationToken))
+                    ?? throw new InvalidDataException($"The schedule in {fileName} is empty.");
+                var schedule = ReadSchedule(document, fileName);
+                if (!ids.Add(schedule.Id))
+                {
+                    throw new InvalidDataException($"Schedule ID '{schedule.Id}' is duplicated by {fileName}.");
+                }
 
-            schedules.Add(ReadSchedule(document, Path.GetFileName(path)));
+                schedules.Add(schedule);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                // Configuration files are independent failure domains. Keep the diagnostic, but do
+                // not let one hand-edited or partially copied file suppress every healthy backup.
+                issues.Add(new ScheduleLoadIssue(fileName, error.Message));
+            }
         }
 
+        _lastReadIssues = issues.ToArray();
         return schedules;
     }
 

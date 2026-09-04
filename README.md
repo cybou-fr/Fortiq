@@ -29,6 +29,7 @@ Fortiq is under active development. Current code enforces verified security inva
 - **Scheduling & Windows Service**: Robust recurrence engine (`Fortiq.Scheduling`) resolving wall-clock timezones, DST shifts, and missed-run coalescing. Unattended background execution hosted in `Fortiq.Service` authenticated via TPM device keys.
 - **Verifiable Health Observability**: `Fortiq.Monitoring` evaluates whether repositories are *proven recoverable* (distinguishing `Recoverable`, `Unproven`, and `AtRisk`). Publishes status to `health.json` and Prometheus textfile (`fortiq.prom`).
 - **Modern Desktop UI**: Cross-platform Avalonia UI application (`Fortiq.Desktop`) with MVVM architecture, Protection Setup Wizard with mnemonic challenge verification, and inline restore-proof test adapter (`ProveRecoveryAdapter`).
+- **Embedded GUI Installer & Component Lifecycle**: Integrated self-inspection, prerequisite verification (TPM 2.0, VSS, .NET 10), and in-app atomic component updates with rollback protection.
 - **Isolated Password Broker**: One-time ephemeral Named Pipe broker (`Fortiq.PasswordHelper`) verifying client PID, open binary handle identity, account security context, and optional Authenticode digital signatures.
 
 ---
@@ -102,6 +103,7 @@ Architecture specifications and Architecture Decision Records (ADRs) are maintai
 | **18. Fleet Control Plane** | Metadata-only fleet monitoring architecture, cryptographic attestation, and zero data telemetry |
 | **19. Observability & Health** | Evidence-driven health publication (`health.json` and Prometheus textfile `fortiq.prom`) |
 | **20. Local Catalog** | File-system-based run tracking, atomic `.run` registrations, and crash-resilient locks |
-| **Architecture Decision Records (ADRs)** | Formal records ADR-001 through ADR-013 documenting key decisions (Engine, Envelopes, IPC, VSS, S3, Ledger, etc.) |
+| **21. Embedded Installer & Lifecycle** | System detection, prerequisite discovery, UAC elevation, service SID provisioning, and TUF-aligned component updates |
+| **Architecture Decision Records (ADRs)** | Formal records ADR-001 through ADR-014 documenting key decisions (Engine, Envelopes, IPC, VSS, S3, Ledger, Installer, etc.) |
 
 Security and supply chain requirements are detailed in [SECURITY.md](SECURITY.md).
