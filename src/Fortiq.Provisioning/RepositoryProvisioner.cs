@@ -38,6 +38,12 @@ public sealed record ProvisionedRepository(
 /// recovery promise real: once it returns, the repository can be restored with the kit and the
 /// mnemonic alone, on a machine that has never seen this one.
 /// </summary>
+/// <remarks>
+/// Provisioning is transactional around one invariant: no recoverable kit means no surviving
+/// initialised repository. The kit is written and then proven to open the repository before the
+/// operation is declared successful; anything that fails before that proof rolls the repository
+/// back, and a run that is killed outright leaves an intent record that a later run cleans up.
+/// </remarks>
 public sealed class RepositoryProvisioner
 {
     private readonly string _engineRoot;
@@ -51,6 +57,9 @@ public sealed class RepositoryProvisioner
         _helperPath = passwordHelperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
         _clock = clock ?? TimeProvider.System;
     }
+
+    /// <summary>Test seam: runs immediately after the repository exists and before the kit is written.</summary>
+    internal Func<CancellationToken, Task>? AfterInitialize { get; set; }
 
     /// <summary>
     /// Creates the repository and its kit. When the machine has a platform crypto provider a
@@ -69,49 +78,106 @@ public sealed class RepositoryProvisioner
         ArgumentException.ThrowIfNullOrWhiteSpace(kitDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
-        if (Directory.Exists(kitDirectory) && Directory.EnumerateFileSystemEntries(kitDirectory).Any())
+        var repositoryPath = Path.GetFullPath(repositoryLocation);
+        var kitPath = Path.GetFullPath(kitDirectory);
+
+        if (Directory.Exists(kitPath) && Directory.EnumerateFileSystemEntries(kitPath).Any())
         {
             // Overwriting a kit would destroy the only way back into an existing repository.
             throw new InvalidOperationException("The recovery kit directory must be empty.");
         }
 
-        var engineUnlockSecret = RandomNumberGenerator.GetBytes(EnginePasswordV1Encoder.EngineUnlockSecretSize);
-        var mnemonic = Bip39Mnemonic.Create();
-        using var lease = new BufferKeyLease(engineUnlockSecret);
-        CryptographicOperations.ZeroMemory(engineUnlockSecret);
-
-        using var engine = await VerifyEngineAsync(cancellationToken);
-        using var credentials = new PasswordPipeCredentialProvider(_helperPath, lease);
-        var adapter = ResticEngineFactory.Create(engine, credentials, workingDirectory);
-
-        var repository = await adapter.InitializeAsync(new InitializeRepository(repositoryLocation), cancellationToken);
-
-        // The kit is written only after the repository exists, so a kit never points at nothing.
-        var envelopes = new List<KeyEnvelopeV1>
+        // Rollback is only ever undoing this run's own work, so an existing repository with content
+        // is refused rather than adopted.
+        if (Directory.Exists(repositoryPath) && Directory.EnumerateFileSystemEntries(repositoryPath).Any())
         {
-            Bip39RecoveryEnvelope.Wrap(repository.Id.ToArray(), mnemonic, lease, clock: _clock)
-        };
-
-        var deviceUnlock = addDeviceUnlock && WindowsTpmEnvelope.IsAvailable;
-        if (deviceUnlock && OperatingSystem.IsWindows())
-        {
-            envelopes.Add(WindowsTpmEnvelope.Wrap(
-                repository.Id.ToArray(),
-                lease,
-                DeviceKeyName(repository.Id),
-                machineKey: false,
-                _clock));
+            throw new InvalidOperationException("The repository directory must be empty.");
         }
 
-        var kit = await RecoveryKitStore.WriteAsync(
-            kitDirectory,
-            repository.Location,
-            new RecoveryKitEngine(engine.Name, engine.Version, engine.Sha256),
-            envelopes,
-            _clock,
-            cancellationToken);
+        using var engine = await VerifyEngineAsync(cancellationToken);
+        var intent = await ProvisioningIntent.BeginAsync(workingDirectory, repositoryPath, kitPath, cancellationToken);
+        var deviceUnlock = addDeviceUnlock && WindowsTpmEnvelope.IsAvailable;
+        KeyEnvelopeV1? deviceEnvelope = null;
 
-        return new ProvisionedRepository(repository, kit, mnemonic, deviceUnlock);
+        try
+        {
+            var engineUnlockSecret = RandomNumberGenerator.GetBytes(EnginePasswordV1Encoder.EngineUnlockSecretSize);
+            var mnemonic = Bip39Mnemonic.Create();
+            using var lease = new BufferKeyLease(engineUnlockSecret);
+            CryptographicOperations.ZeroMemory(engineUnlockSecret);
+
+            using var credentials = new PasswordPipeCredentialProvider(_helperPath, lease);
+            var adapter = ResticEngineFactory.Create(engine, credentials, workingDirectory);
+            var repository = await adapter.InitializeAsync(new InitializeRepository(repositoryPath), cancellationToken);
+
+            if (AfterInitialize is not null)
+            {
+                await AfterInitialize(cancellationToken);
+            }
+
+            var envelopes = new List<KeyEnvelopeV1>
+            {
+                Bip39RecoveryEnvelope.Wrap(repository.Id.ToArray(), mnemonic, lease, clock: _clock)
+            };
+
+            if (deviceUnlock && OperatingSystem.IsWindows())
+            {
+                deviceEnvelope = WindowsTpmEnvelope.Wrap(
+                    repository.Id.ToArray(),
+                    lease,
+                    DeviceKeyName(repository.Id),
+                    machineKey: false,
+                    _clock);
+                envelopes.Add(deviceEnvelope);
+            }
+
+            var kit = await RecoveryKitStore.WriteAsync(
+                kitPath,
+                repository.Location,
+                new RecoveryKitEngine(engine.Name, engine.Version, engine.Sha256),
+                envelopes,
+                _clock,
+                cancellationToken);
+
+            await ProveTheKitOpensTheRepositoryAsync(engine, kitPath, repository, mnemonic, workingDirectory, cancellationToken);
+
+            await intent.CompleteAsync(cancellationToken);
+            return new ProvisionedRepository(repository, kit, mnemonic, deviceUnlock);
+        }
+        catch
+        {
+            // Nothing that can be recovered was produced, so nothing that looks like a repository is
+            // left behind. A directory that cannot be removed is reported rather than hidden.
+            if (deviceEnvelope is not null && OperatingSystem.IsWindows())
+            {
+                WindowsTpmEnvelope.DeleteKey(deviceEnvelope);
+            }
+
+            ProvisioningIntent.RollBack(repositoryPath, kitPath);
+
+            // The intent is removed last: while it exists, an interrupted run is still recognisable.
+            await intent.DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Finishes a provisioning run that was killed before it could finish, by removing the
+    /// repository and kit it had started. A run that completed leaves no intent behind, so this is a
+    /// no-op after a successful provisioning.
+    /// </summary>
+    public static async Task<bool> CleanUpInterruptedAsync(string workingDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        var intent = await ProvisioningIntent.ReadAsync(workingDirectory, cancellationToken);
+        if (intent is null)
+        {
+            return false;
+        }
+
+        ProvisioningIntent.RollBack(intent.RepositoryPath, intent.KitPath);
+        ProvisioningIntent.Remove(workingDirectory);
+        return true;
     }
 
     /// <summary>
@@ -120,6 +186,31 @@ public sealed class RepositoryProvisioner
     /// </summary>
     public static string DeviceKeyName(RepositoryId repositoryId) =>
         $"fortiq/{repositoryId.ToString().ToLowerInvariant()}/engine-unlock";
+
+    /// <summary>
+    /// Reads the kit back from disk and uses it to open the repository, so success means the kit was
+    /// demonstrated to work rather than assumed to.
+    /// </summary>
+    private async Task ProveTheKitOpensTheRepositoryAsync(
+        VerifiedEngine engine,
+        string kitPath,
+        RepositoryDescriptor repository,
+        string mnemonic,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var opened = await RecoveryKitStore.ReadAsync(kitPath, cancellationToken);
+        var recovery = opened.Envelopes.SingleOrDefault(envelope => envelope.Suite == Bip39RecoveryEnvelope.SuiteId)
+            ?? throw new InvalidOperationException("The kit that was written holds no recovery method.");
+
+        using var lease = Bip39RecoveryEnvelope.Unwrap(recovery, repository.Id.ToArray(), mnemonic);
+        using var credentials = new PasswordPipeCredentialProvider(_helperPath, lease);
+        var adapter = ResticEngineFactory.Create(engine, credentials, workingDirectory);
+
+        // Listing is the cheapest operation that still requires the engine to accept the password
+        // the kit produced.
+        await adapter.ListSnapshotsAsync(new ListSnapshots(repository), cancellationToken);
+    }
 
     private async Task<VerifiedEngine> VerifyEngineAsync(CancellationToken cancellationToken)
     {
