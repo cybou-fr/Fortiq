@@ -25,7 +25,16 @@ public sealed record BackupSchedule(
     Recurrence Recurrence,
     SourceConsistency Consistency = SourceConsistency.Live,
     CatchUp CatchUp = CatchUp.Once,
-    bool Enabled = true);
+    bool Enabled = true,
+    Recurrence? DrillRecurrence = null)
+{
+    /// <summary>
+    /// The state key under which this schedule's restore drills are tracked, kept apart from the
+    /// backup's own state: a drill that failed must not make the next backup look overdue, and a
+    /// backup that succeeded must not make a repository look recently proven.
+    /// </summary>
+    public string DrillStateId => Id + ".drill";
+}
 
 /// <summary>What has happened to a schedule so far. Kept apart from the schedule itself: one is
 /// configuration a person edits, the other is history Fortiq writes.</summary>
@@ -61,9 +70,36 @@ public static class ScheduleDecision
     public static DueDecision Evaluate(BackupSchedule schedule, ScheduleState state, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(schedule);
+        return Evaluate(schedule.Recurrence, schedule.CatchUp, schedule.Enabled, state, now);
+    }
+
+    /// <summary>
+    /// Whether a repository's restore drill is due. A schedule with no drill recurrence is not
+    /// disabled, it simply has no drills; the verdict is the same and the reason is worth knowing.
+    /// </summary>
+    /// <remarks>
+    /// Drills never catch up. A machine that was off for a month owes one proof of recovery, not
+    /// four, and each one is a full restore of the source.
+    /// </remarks>
+    public static DueDecision EvaluateDrill(BackupSchedule schedule, ScheduleState state, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(schedule);
+
+        return schedule.DrillRecurrence is null
+            ? new DueDecision(DueVerdict.Disabled, null, DateTimeOffset.MaxValue)
+            : Evaluate(schedule.DrillRecurrence, CatchUp.Once, schedule.Enabled, state, now);
+    }
+
+    private static DueDecision Evaluate(
+        Recurrence recurrence,
+        CatchUp catchUp,
+        bool enabled,
+        ScheduleState state,
+        DateTimeOffset now)
+    {
         ArgumentNullException.ThrowIfNull(state);
 
-        if (!schedule.Enabled)
+        if (!enabled)
         {
             return new DueDecision(DueVerdict.Disabled, null, DateTimeOffset.MaxValue);
         }
@@ -80,21 +116,21 @@ public static class ScheduleDecision
             ({ } attempt, null) => attempt,
             ({ } attempt, { } success) => attempt > success ? attempt : success
         };
-        var next = schedule.Recurrence.NextOccurrence(reference);
+        var next = recurrence.NextOccurrence(reference);
 
         if (next > now)
         {
             return new DueDecision(DueVerdict.NotYet, null, next);
         }
 
-        if (schedule.CatchUp == CatchUp.Skip)
+        if (catchUp == CatchUp.Skip)
         {
             // Everything up to now is forgone; the schedule waits for the next occurrence.
-            return new DueDecision(DueVerdict.NotYet, null, schedule.Recurrence.NextOccurrence(now));
+            return new DueDecision(DueVerdict.NotYet, null, recurrence.NextOccurrence(now));
         }
 
         // One occurrence is owed however many were missed: the source is only in one state now, so
         // running the same backup several times would record the same present repeatedly.
-        return new DueDecision(DueVerdict.Due, next, schedule.Recurrence.NextOccurrence(now));
+        return new DueDecision(DueVerdict.Due, next, recurrence.NextOccurrence(now));
     }
 }

@@ -184,7 +184,10 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
                 "once" or null => CatchUp.Once,
                 _ => throw new InvalidDataException($"Unknown catch-up policy in {fileName}.")
             },
-            document["enabled"]?.GetValue<bool>() ?? true);
+            document["enabled"]?.GetValue<bool>() ?? true,
+            // Absent means no drills. A restore drill is a full restore of the source, so it is
+            // never turned on by a schedule file that does not ask for it.
+            document["drillRecurrence"] is { } drill ? ReadRecurrence(drill, fileName) : null);
     }
 
     private static Recurrence ReadRecurrence(JsonNode? node, string fileName)

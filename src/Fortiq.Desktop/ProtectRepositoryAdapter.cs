@@ -95,6 +95,14 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
             },
             // Live rather than snapshot: a volume snapshot needs elevation, and a schedule that is
             // silently unable to run is worse than one that copies files as they are.
+            // A restore drill every seven days. The health model stops calling a repository proven
+            // after thirty-one days without one, so weekly leaves room for several failed attempts
+            // before anyone is told the repository is unproven again.
+            ["drillRecurrence"] = new JsonObject
+            {
+                ["kind"] = "interval",
+                ["period"] = "7.00:00:00"
+            },
             ["consistency"] = "live",
             ["catchUp"] = "once",
             ["enabled"] = true

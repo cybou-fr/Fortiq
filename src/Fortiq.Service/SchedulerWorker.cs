@@ -24,6 +24,7 @@ public sealed record SchedulerOptions(TimeSpan PollInterval)
 public sealed partial class SchedulerWorker : BackgroundService
 {
     private readonly ScheduledBackupRunner _runner;
+    private readonly ScheduledDrillRunner? _drills;
     private readonly SchedulerOptions _options;
     private readonly ILogger<SchedulerWorker> _logger;
     private readonly TimeProvider _clock;
@@ -34,9 +35,11 @@ public sealed partial class SchedulerWorker : BackgroundService
         SchedulerOptions options,
         ILogger<SchedulerWorker> logger,
         TimeProvider? clock = null,
-        HealthPublisher? health = null)
+        HealthPublisher? health = null,
+        ScheduledDrillRunner? drills = null)
     {
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
+        _drills = drills;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clock = clock ?? TimeProvider.System;
@@ -91,7 +94,47 @@ public sealed partial class SchedulerWorker : BackgroundService
             PassFailed(_logger, error);
         }
 
+        await RunDrillsAsync(stoppingToken);
+
+        // Health is published last, so a drill that has just proven a restore is reflected in the
+        // same pass rather than a poll interval later.
         await PublishHealthAsync(stoppingToken);
+    }
+
+    /// <summary>
+    /// Runs the restore drills that are due. Kept apart from the backup pass and never allowed to
+    /// end it: a repository that cannot be restored today is exactly the one that must keep being
+    /// backed up while somebody works out why.
+    /// </summary>
+    private async Task RunDrillsAsync(CancellationToken stoppingToken)
+    {
+        if (_drills is null)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var outcome in await _drills.RunDueAsync(stoppingToken))
+            {
+                if (outcome.Failure is not null)
+                {
+                    DrillFailed(_logger, outcome.ScheduleId, outcome.Failure);
+                }
+                else if (outcome.SnapshotId is not null)
+                {
+                    DrillSucceeded(_logger, outcome.ScheduleId, outcome.SnapshotId);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception error)
+        {
+            DrillPassFailed(_logger, error);
+        }
     }
 
     /// <summary>
@@ -150,4 +193,13 @@ public sealed partial class SchedulerWorker : BackgroundService
 
     [LoggerMessage(EventId = 7, Level = LogLevel.Error, Message = "Publishing the health report failed.")]
     private static partial void HealthPublicationFailed(ILogger logger, Exception error);
+
+    [LoggerMessage(EventId = 8, Level = LogLevel.Information, Message = "Restore drill for {schedule} recovered snapshot {snapshot}.")]
+    private static partial void DrillSucceeded(ILogger logger, string schedule, string snapshot);
+
+    [LoggerMessage(EventId = 9, Level = LogLevel.Error, Message = "Restore drill for {schedule} failed: {failure}")]
+    private static partial void DrillFailed(ILogger logger, string schedule, string failure);
+
+    [LoggerMessage(EventId = 10, Level = LogLevel.Error, Message = "A restore drill pass failed.")]
+    private static partial void DrillPassFailed(ILogger logger, Exception error);
 }

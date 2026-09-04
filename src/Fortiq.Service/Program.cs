@@ -50,6 +50,19 @@ public static class Program
             provider.GetRequiredService<IScheduleStore>(),
             provider.GetRequiredService<IScheduledBackup>()));
 
+        // Restore drills share the working directory, and therefore the receipt store, with backups.
+        // A drill's receipt is what turns a repository from backed up into proven, and monitoring
+        // reads the same directory: three components have to agree on one path or the proof is
+        // written somewhere nobody looks.
+        builder.Services.AddSingleton<IScheduledDrill>(provider =>
+            new UnattendedRestoreDrill(new ProvenRestore(
+                engineRoot,
+                Path.Combine(stateDirectory, "work"),
+                storage: provider.GetRequiredService<IObjectStorageCredentialProvider>())));
+        builder.Services.AddSingleton(provider => new ScheduledDrillRunner(
+            provider.GetRequiredService<IScheduleStore>(),
+            provider.GetRequiredService<IScheduledDrill>()));
+
         // Health is published to files rather than served: a monitoring path that depends on this
         // service being reachable reports health right up until it cannot report at all.
         builder.Services.AddSingleton(provider => new HealthPublisher(
