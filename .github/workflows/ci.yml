@@ -31,6 +31,13 @@ jobs:
         # the run to a skipped recovery suite.
         run: ./scripts/Get-Engine.ps1
 
+      - name: Check documentation claims
+        shell: pwsh
+        # Runs before the build, because it needs no build and its failures are the cheapest to fix.
+        # Only the published documents are checked here: docs/ is excluded from version control, so
+        # a clone has nothing else to look at. Run the script locally to cover the specifications.
+        run: ./scripts/Test-DocumentationClaims.ps1
+
       - name: Build
         shell: pwsh
         run: dotnet build Fortiq.sln --configuration Release
