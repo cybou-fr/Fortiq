@@ -20,7 +20,13 @@ is an open gate, not a description of the current state.
   Version ranges and floating versions are not used.
 - **Pinned actions.** Every GitHub Action is referenced by commit SHA with the human-readable tag in a
   comment. A tag can be moved to different code at any time; a SHA cannot.
-- **Least-privilege CI token.** The workflow declares `permissions: contents: read`.
+- **Least-privilege CI token.** The build workflow declares `permissions: contents: read`; the
+  release workflow adds only what attestation needs.
+- **Release evidence.** `scripts/New-ReleaseArtifacts.ps1` publishes the recovery tool with its
+  runtime, generates a CycloneDX bill of materials with a pinned tool version, and records the
+  SHA-256 of every published file. The release workflow attests provenance over the published
+  binaries, the bill of materials and the hash list, so a consumer can tell which workflow and which
+  commit produced exactly those files.
 - **The password goes to one approved process.** Before the engine password is written, the broker
   resolves the connecting client's process, requires its image to be the very helper file the broker
   pinned open, and requires it to run as the expected account. The process check runs at connection
@@ -44,13 +50,16 @@ These require GitHub configuration or release tooling that this repository canno
   this is on, the authorship of a commit is a claim, not evidence.
 - **CODEOWNERS.** `.github/CODEOWNERS` lists the security-critical paths, but it has no effect until
   branch protection requires Code Owner review, and the owner it names must exist.
-- **Signed release artifacts.** Fortiq's own EXE and DLL files are not yet Authenticode-signed, and
-  nothing verifies a signature at install or update time. The engine binary is pinned by hash, which
-  is a different guarantee: it proves the file did not change, not who published it.
+- **Signed release artifacts.** Fortiq's own EXE and DLL files are not yet Authenticode-signed. The
+  verification side exists: `AuthenticodeSignature` asks Windows itself, and the password broker can
+  be told to require a trusted signature on the helper (`RequireSignedHelper`). It is off by default
+  precisely because the binaries are unsigned, and the release workflow warns rather than pretending
+  otherwise. Until a certificate exists, provenance says which workflow built a file, not who
+  vouches for it.
 - **Signed and verified engine provenance.** The acquisition script trusts the hashes in the manifest.
   How those hashes were established, and by whom, is not itself verified.
-- **Reproducible build and SBOM.** No SBOM is produced, and no build output is compared across
-  machines.
+- **Reproducible build.** No build output is compared across machines, so nothing yet proves the
+  published files could be produced again from the same source.
 - **Dependency review gates.** ADR-013 requires SBOM diff, advisory review and re-run of test vectors
   for every security-critical dependency update. That process is not automated yet.
 

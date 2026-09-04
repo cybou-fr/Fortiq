@@ -51,6 +51,14 @@ Pinned metadata restic хранится в `engines/manifest.json`. Сам би�
 file index). Это закрывает TOCTOU между verify и execution, включая случай, когда каталог выше
 бинарника подменён через junction.
 
+Релизные артефакты собирает `scripts/New-ReleaseArtifacts.ps1`: публикует recovery tool вместе с
+runtime (он обязан работать на машине, где ничего не установлено), генерирует CycloneDX SBOM
+запинненной версией инструмента и записывает SHA-256 каждого файла. Release workflow attest'ит
+provenance над бинарниками, SBOM и списком хешей. Подписи Authenticode пока нет: сборка выходит
+неподписанной и прямо об этом говорит, а не выглядит подписанной. Проверяющая сторона уже есть —
+`AuthenticodeSignature` спрашивает сам Windows, и брокер паролей можно перевести в режим
+`RequireSignedHelper`, где неподписанный helper не получит пароль.
+
 Что обеспечено кодом и что остаётся открытым gate — в [SECURITY.md](SECURITY.md).
 
 CI (`.github/workflows/ci.yml`) выполняет тот же acquisition step на windows-latest, поэтому

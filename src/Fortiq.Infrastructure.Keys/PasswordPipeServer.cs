@@ -46,10 +46,16 @@ public static class PasswordPipeProtocol
 /// An SDDL string, normally supplied by the installer, describing exactly who may open the pipe.
 /// When it is absent the pipe is restricted to the current user by the operating system instead.
 /// </param>
+/// <param name="RequireSignedHelper">
+/// Requires the helper to carry an Authenticode signature this machine trusts. It is off by default
+/// because Fortiq's own binaries are not signed yet; an installed build should turn it on, and the
+/// broker then refuses to hand the password to an unsigned or untrusted helper.
+/// </param>
 public sealed record PasswordBrokerOptions(
     string HelperPath,
     SecurityIdentifier? ExpectedUser = null,
-    string? PipeSecurityDescriptor = null);
+    string? PipeSecurityDescriptor = null,
+    bool RequireSignedHelper = false);
 
 /// <summary>
 /// Serves the engine password exactly once, to exactly one process, over a pipe that exists for one
@@ -73,6 +79,10 @@ internal sealed class PasswordPipeServer
 
     internal async Task ServeOnceAsync(CancellationToken token)
     {
+        // Before a pipe exists at all: an untrusted helper is a reason not to start, not a reason to
+        // fail later.
+        RequireTrustedHelper();
+
         using var pipe = CreatePipe();
         await pipe.WaitForConnectionAsync(token);
 
@@ -143,6 +153,27 @@ internal sealed class PasswordPipeServer
             inBufferSize: 0,
             outBufferSize: 0,
             security);
+    }
+
+    private void RequireTrustedHelper()
+    {
+        if (!_options.RequireSignedHelper)
+        {
+            return;
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Signature verification is available on Windows only.");
+        }
+
+        // Checked against the pinned file, which cannot be replaced while the broker holds it open.
+        var status = AuthenticodeSignature.Verify(_helper.Path);
+        if (status != SignatureStatus.Trusted)
+        {
+            throw new UnauthorizedAccessException(
+                $"The password helper is not signed by a publisher this machine trusts ({status}).");
+        }
     }
 
     private void AuthorizeProcess(NamedPipeServerStream pipe)
