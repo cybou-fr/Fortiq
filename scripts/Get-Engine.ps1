@@ -11,12 +11,17 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $ManifestPath = (Join-Path $PSScriptRoot '..\engines\manifest.json'),
+    [string] $ManifestPath = '',
     [string] $Rid = 'win-x64'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if (-not $ManifestPath) {
+    $root = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $ManifestPath = Join-Path $root '..\engines\manifest.json'
+}
 
 $manifestPath = (Resolve-Path $ManifestPath).Path
 $engineRoot = Split-Path $manifestPath -Parent

@@ -10,12 +10,20 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $ManifestPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'test-assets/storage/manifest.json'),
-    [string] $ToolsRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'tools')
+    [string] $ManifestPath = '',
+    [string] $ToolsRoot = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$root = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $ManifestPath) {
+    $ManifestPath = Join-Path (Split-Path $root -Parent) 'test-assets/storage/manifest.json'
+}
+if (-not $ToolsRoot) {
+    $ToolsRoot = Join-Path (Split-Path $root -Parent) 'tools'
+}
 
 $manifest = Get-Content (Resolve-Path $ManifestPath).Path -Raw | ConvertFrom-Json
 if ($manifest.schema -ne 'fortiq.test-storage-manifest' -or $manifest.version -ne 1) {
