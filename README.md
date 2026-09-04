@@ -105,6 +105,7 @@ Architecture specifications and Architecture Decision Records (ADRs) are maintai
 | **20. Local Catalog** | File-system-based run tracking, atomic `.run` registrations, and crash-resilient locks |
 | **21. Embedded Installer & Lifecycle** | System detection, prerequisite discovery, UAC elevation, service SID provisioning, and TUF-aligned component updates |
 | **22. Desktop UI & Visual System** | Fluent v2 Dark Slate design system, native Windows folder pickers, resilient zero-state lifecycle, and mnemonic card grid |
+| **23. GUI Development Guidelines** | Engineering blueprints, Avalonia XAML design tokens, component specifications, and MVVM patterns |
 | **Architecture Decision Records (ADRs)** | Formal records ADR-001 through ADR-015 documenting key decisions (Engine, Envelopes, IPC, VSS, S3, Ledger, Installer, UI Design, etc.) |
 
 Security and supply chain requirements are detailed in [SECURITY.md](SECURITY.md).
