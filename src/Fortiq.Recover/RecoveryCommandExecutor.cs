@@ -9,7 +9,10 @@ namespace Fortiq.Recover;
 
 /// <summary>
 /// Runs a recovery command against a repository, a pinned engine and a recovery kit. It depends on
-/// nothing but those three: no Fortiq service, no local state, no network.
+/// nothing but those three: no Fortiq cloud, no Fortiq service, no Fortiq state on this machine.
+/// A repository in object storage needs the network to reach that storage, which is the storage's
+/// requirement and not a dependency on anything of Fortiq's - that distinction is the sovereign
+/// claim, and it is weakened by overstating it.
 /// </summary>
 public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
 {

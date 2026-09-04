@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Fortiq.Application;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Provisioning;
 
@@ -18,14 +19,13 @@ namespace Fortiq.Desktop;
 public sealed class ProtectRepositoryAdapter : IProtectRepository
 {
     private readonly RepositoryProvisioner _provisioner;
-    private readonly string _stateDirectory;
+    private readonly FortiqStatePaths _paths;
     private readonly TimeOnly _nightly;
 
-    public ProtectRepositoryAdapter(RepositoryProvisioner provisioner, string stateDirectory, TimeOnly? nightly = null)
+    public ProtectRepositoryAdapter(RepositoryProvisioner provisioner, FortiqStatePaths paths, TimeOnly? nightly = null)
     {
         _provisioner = provisioner ?? throw new ArgumentNullException(nameof(provisioner));
-        ArgumentException.ThrowIfNullOrWhiteSpace(stateDirectory);
-        _stateDirectory = Path.GetFullPath(stateDirectory);
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _nightly = nightly ?? new TimeOnly(2, 30);
     }
 
@@ -35,7 +35,7 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var working = Path.Combine(_stateDirectory, "work");
+        var working = _paths.Working;
         Directory.CreateDirectory(working);
 
         var provisioned = await _provisioner.CreateAsync(
@@ -47,7 +47,7 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
         var id = provisioned.Repository.Id.ToString();
         try
         {
-            await WriteScheduleAsync(Path.Combine(_stateDirectory, "schedules"), id, request, _nightly, cancellationToken);
+            await WriteScheduleAsync(Path.Combine(_paths.Schedules, "schedules"), id, request, _nightly, cancellationToken);
         }
         catch (Exception error)
         {

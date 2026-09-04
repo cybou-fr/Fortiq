@@ -64,6 +64,9 @@ public sealed class UnattendedBackup : IScheduledBackup
         _workingDirectory = Path.GetFullPath(workingDirectory);
         _helperPath = passwordHelperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
         _runDirectory = runDirectory ?? FortiqRunDirectory.Default();
+        // Derived from the working directory the caller supplied, which is how it stays consistent
+        // with FortiqStatePaths when that is where the working directory came from. Callers that
+        // share evidence across processes pass the directory explicitly rather than relying on this.
         _receiptDirectory = receiptDirectory ?? Path.Combine(_workingDirectory, "receipts");
         _storage = storage ?? new NoObjectStorageCredentials();
     }

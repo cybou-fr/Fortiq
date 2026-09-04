@@ -21,10 +21,10 @@ public sealed class FortiqApplication : Avalonia.Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var stateDirectory = Environment.GetEnvironmentVariable("FORTIQ_STATE_DIRECTORY")
-                ?? Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                    "Fortiq");
+            // Asked for, never composed. The desktop and the service have to mean the same
+            // directory by "receipts", or a restore proven here vanishes from the report the
+            // service publishes next.
+            var paths = FortiqStatePaths.Resolve();
 
             var engineRoot = ResolveEngineRoot();
             IObjectStorageCredentialProvider storage = new EnvironmentObjectStorageCredentialProvider();
@@ -34,23 +34,21 @@ public sealed class FortiqApplication : Avalonia.Application
                     engineRoot,
                     storage: storage,
                     protection: new S3StorageProtectionInspector(storage)),
-                stateDirectory);
+                paths);
 
-            var reportPath = Path.Combine(stateDirectory, "health", "health.json");
-            var schedules = new FileSystemScheduleStore(stateDirectory);
-            var receipts = Path.Combine(stateDirectory, "receipts");
-
+            var schedules = new FileSystemScheduleStore(paths.Schedules);
             var prove = new ProveRecoveryAdapter(
                 schedules,
-                new ProvenRestore(engineRoot, stateDirectory, receiptDirectory: receipts, storage: storage),
-                new HealthPublisher(
-                    schedules,
-                    receipts,
-                    reportPath,
-                    Path.Combine(stateDirectory, "health", "fortiq.prom")));
+                new ProvenRestore(
+                    engineRoot,
+                    paths.Working,
+                    runDirectory: paths.Runs,
+                    receiptDirectory: paths.Receipts,
+                    storage: storage),
+                new HealthPublisher(schedules, paths.Receipts, paths.HealthReport, paths.HealthMetrics));
 
             desktop.MainWindow = new MainWindow(
-                new RepositoriesViewModel(new HealthFileSource(reportPath), prove),
+                new RepositoriesViewModel(new HealthFileSource(paths.HealthReport), prove),
                 () => new ProtectRepositoryViewModel(protect));
         }
 

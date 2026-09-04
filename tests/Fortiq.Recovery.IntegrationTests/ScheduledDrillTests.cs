@@ -140,6 +140,62 @@ public sealed class ScheduledDrillTests
         Assert.Equal(DueVerdict.Disabled, Assert.Single(await runner.RunDueAsync(CancellationToken.None)).Verdict);
     }
 
+    [SkippableFact]
+    public async Task ADrillRefusesToStartWhenTheVolumeIsAlreadyLowOnRoom()
+    {
+        Skip.IfNot(WindowsTpmEnvelope.IsAvailable, "This machine has no platform crypto provider.");
+        Skip.IfNot(File.Exists(HelperPath), "The password helper was not built next to the tests.");
+
+        using var workspace = await RecoveryWorkspace.CreateAsync("drill-no-room", CancellationToken.None);
+        var source = Path.Combine(workspace.Root, "source");
+        TestDataset.Create(source);
+
+        var kitDirectory = Path.Combine(workspace.Root, "kit");
+        var provisioned = await new RepositoryProvisioner(RecoveryWorkspace.EngineRootPath, HelperPath).CreateAsync(
+            workspace.EnsureDirectory("repository"),
+            kitDirectory,
+            workspace.EnsureDirectory("state-provision"),
+            CancellationToken.None);
+
+        var receipts = workspace.EnsureDirectory("receipts");
+        var runs = workspace.EnsureDirectory("runs");
+        var schedule = new BackupSchedule(
+            "documents",
+            provisioned.Repository.Location,
+            kitDirectory,
+            source,
+            "workstation:documents",
+            new EveryInterval(TimeSpan.FromHours(6)),
+            DrillRecurrence: new EveryInterval(TimeSpan.FromDays(7)));
+
+        await new UnattendedBackup(
+            RecoveryWorkspace.EngineRootPath,
+            workspace.EnsureDirectory("backup-work"),
+            HelperPath,
+            runs,
+            receipts).RunAsync(schedule, CancellationToken.None);
+
+        // A floor larger than any real volume stands in for a disk that is already nearly full.
+        var restore = new ProvenRestore(
+            RecoveryWorkspace.EngineRootPath,
+            workspace.EnsureDirectory("drill-work"),
+            HelperPath,
+            runs,
+            receipts,
+            workspaceRoot: workspace.EnsureDirectory("drill-target"),
+            freeSpaceFloor: long.MaxValue);
+
+        var error = await Assert.ThrowsAsync<DrillWorkspaceUnavailableException>(
+            () => restore.ProveAsync(schedule, CancellationToken.None));
+
+        // It refuses before restoring anything, and says which volume and how much room it had. An
+        // unattended weekly drill that filled the system disk would break the machine it exists to
+        // reassure, so not starting is the correct outcome - reported as a drill that did not prove
+        // recovery, never as a silent success.
+        Assert.Contains("free", error.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(workspace.Root, "drill-target")));
+    }
+
     private static async Task WriteScheduleAsync(string stateDirectory, BackupSchedule schedule)
     {
         var directory = Path.Combine(stateDirectory, "schedules");

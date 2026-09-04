@@ -55,7 +55,20 @@ public sealed class ScheduledDrillRunner
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var state = await _store.ReadStateAsync(schedule.DrillStateId, cancellationToken);
+            ScheduleState state;
+            try
+            {
+                state = await _store.ReadStateAsync(schedule.DrillStateId, cancellationToken);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                outcomes.Add(new DrillRunOutcome(
+                    schedule.Id,
+                    DueVerdict.Disabled,
+                    Failure: $"The recorded drill history for this schedule could not be read: {error.Message}"));
+                continue;
+            }
+
             var decision = ScheduleDecision.EvaluateDrill(schedule, state, _clock.GetUtcNow());
             if (decision.Verdict != DueVerdict.Due)
             {

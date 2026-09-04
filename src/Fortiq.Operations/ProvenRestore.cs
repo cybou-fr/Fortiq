@@ -9,6 +9,25 @@ using Fortiq.Scheduling;
 
 namespace Fortiq.Operations;
 
+/// <summary>Raised when a drill will not start because the machine cannot afford it.</summary>
+public sealed class DrillWorkspaceUnavailableException : Exception
+{
+    public DrillWorkspaceUnavailableException(string message)
+        : base(message)
+    {
+    }
+
+    public DrillWorkspaceUnavailableException(string message, Exception? innerException)
+        : base(message, innerException)
+    {
+    }
+
+    public DrillWorkspaceUnavailableException()
+        : base("There is not enough free space to prove a restore.")
+    {
+    }
+}
+
 /// <summary>Raised when a restore ran but did not put back what the snapshot says it holds.</summary>
 public sealed class RestoreProofFailedException : Exception
 {
@@ -64,6 +83,8 @@ public sealed class ProvenRestore
     private readonly string _runDirectory;
     private readonly string _receiptDirectory;
     private readonly IObjectStorageCredentialProvider _storage;
+    private readonly string? _workspaceRoot;
+    private readonly long _freeSpaceFloor;
 
     public ProvenRestore(
         string engineRoot,
@@ -71,7 +92,9 @@ public sealed class ProvenRestore
         string? passwordHelperPath = null,
         string? runDirectory = null,
         string? receiptDirectory = null,
-        IObjectStorageCredentialProvider? storage = null)
+        IObjectStorageCredentialProvider? storage = null,
+        string? workspaceRoot = null,
+        long freeSpaceFloor = DefaultFreeSpaceFloor)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(engineRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
@@ -80,9 +103,22 @@ public sealed class ProvenRestore
         _workingDirectory = Path.GetFullPath(workingDirectory);
         _helperPath = passwordHelperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
         _runDirectory = runDirectory ?? FortiqRunDirectory.Default();
+        // Derived from the working directory the caller supplied, which is how it stays consistent
+        // with FortiqStatePaths when that is where the working directory came from. Callers that
+        // share evidence across processes pass the directory explicitly rather than relying on this.
         _receiptDirectory = receiptDirectory ?? Path.Combine(_workingDirectory, "receipts");
         _storage = storage ?? new NoObjectStorageCredentials();
+        _workspaceRoot = workspaceRoot is null ? null : Path.GetFullPath(workspaceRoot);
+        _freeSpaceFloor = freeSpaceFloor;
     }
+
+    /// <summary>
+    /// How much room must remain on the volume before a drill will start. A drill restores a whole
+    /// source, and a source can be far larger than the system disk that the temporary directory
+    /// usually lives on; an unattended weekly drill that filled that disk would break the machine it
+    /// was meant to reassure.
+    /// </summary>
+    public const long DefaultFreeSpaceFloor = 20L * 1024 * 1024 * 1024;
 
     [SupportedOSPlatform("windows")]
     public async Task<RestoreProof> ProveAsync(BackupSchedule schedule, CancellationToken cancellationToken)
@@ -124,7 +160,7 @@ public sealed class ProvenRestore
 
         // Restored somewhere disposable, not over the source. A proof that overwrote live files would
         // make the check more dangerous than the failure it is looking for.
-        var target = Directory.CreateTempSubdirectory("fortiq-proof-");
+        var target = CreateWorkspace();
         try
         {
             var receipt = await adapter.RestoreAsync(
@@ -197,6 +233,60 @@ public sealed class ProvenRestore
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
+        }
+    }
+
+    /// <summary>
+    /// Opens the scratch directory, refusing before anything is restored if the volume is already
+    /// low on room.
+    /// </summary>
+    /// <remarks>
+    /// This is a floor, not a size-aware policy: it does not yet ask how large the snapshot is, so a
+    /// source bigger than the remaining space can still fill the volume once the drill is under way.
+    /// What it does prevent is the case that needs no arithmetic - starting a full restore onto a
+    /// disk that was already nearly full. Refusing is reported as a failed drill, which is honest:
+    /// recovery was not proven, and the reason names the volume and the space it had.
+    /// </remarks>
+    private DirectoryInfo CreateWorkspace()
+    {
+        if (_workspaceRoot is null)
+        {
+            var temporary = Directory.CreateTempSubdirectory("fortiq-proof-");
+            RequireRoom(temporary.FullName);
+            return temporary;
+        }
+
+        Directory.CreateDirectory(_workspaceRoot);
+        RequireRoom(_workspaceRoot);
+
+        // Named from a fresh GUID rather than a counter: two drills may overlap, and a drill must
+        // never restore into a directory another one is already using.
+        return Directory.CreateDirectory(Path.Combine(_workspaceRoot, "fortiq-proof-" + Guid.NewGuid().ToString("N")));
+    }
+
+    private void RequireRoom(string path)
+    {
+        if (_freeSpaceFloor <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(path))!);
+            if (drive.AvailableFreeSpace < _freeSpaceFloor)
+            {
+                throw new DrillWorkspaceUnavailableException(
+                    $"A restore drill needs room to put the data back. {drive.Name} has "
+                    + $"{drive.AvailableFreeSpace / (1024 * 1024)} MB free, below the "
+                    + $"{_freeSpaceFloor / (1024 * 1024)} MB this drill requires before it will start.");
+            }
+        }
+        catch (Exception error) when (error is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            // A volume that cannot be queried is not a reason to refuse: on a network or mapped
+            // location the drill may still be perfectly affordable, and refusing every drill because
+            // free space is unknowable would quietly stop proving recovery at all.
         }
     }
 

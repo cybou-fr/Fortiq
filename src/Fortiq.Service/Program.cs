@@ -26,10 +26,7 @@ public static class Program
 
         // Machine-wide by default: a service and an operator's tool have to see the same schedules
         // and the same runs.
-        var stateDirectory = builder.Configuration["Fortiq:StateDirectory"]
-            ?? Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                "Fortiq");
+        var paths = FortiqStatePaths.Resolve(builder.Configuration["Fortiq:StateDirectory"]);
 
         var engineRoot = builder.Configuration["Fortiq:EngineRoot"]
             ?? Path.Combine(AppContext.BaseDirectory, "engines");
@@ -40,11 +37,14 @@ public static class Program
 
         builder.Services.AddSingleton(new SchedulerOptions(pollInterval));
         builder.Services.AddSingleton<IObjectStorageCredentialProvider, EnvironmentObjectStorageCredentialProvider>();
-        builder.Services.AddSingleton<IScheduleStore>(new FileSystemScheduleStore(stateDirectory));
+        builder.Services.AddSingleton(paths);
+        builder.Services.AddSingleton<IScheduleStore>(new FileSystemScheduleStore(paths.Schedules));
         builder.Services.AddSingleton<IScheduledBackup>(provider =>
             new UnattendedBackup(
                 engineRoot,
-                Path.Combine(stateDirectory, "work"),
+                paths.Working,
+                runDirectory: paths.Runs,
+                receiptDirectory: paths.Receipts,
                 storage: provider.GetRequiredService<IObjectStorageCredentialProvider>()));
         builder.Services.AddSingleton(provider => new ScheduledBackupRunner(
             provider.GetRequiredService<IScheduleStore>(),
@@ -57,7 +57,9 @@ public static class Program
         builder.Services.AddSingleton<IScheduledDrill>(provider =>
             new UnattendedRestoreDrill(new ProvenRestore(
                 engineRoot,
-                Path.Combine(stateDirectory, "work"),
+                paths.Working,
+                runDirectory: paths.Runs,
+                receiptDirectory: paths.Receipts,
                 storage: provider.GetRequiredService<IObjectStorageCredentialProvider>())));
         builder.Services.AddSingleton(provider => new ScheduledDrillRunner(
             provider.GetRequiredService<IScheduleStore>(),
@@ -67,9 +69,9 @@ public static class Program
         // service being reachable reports health right up until it cannot report at all.
         builder.Services.AddSingleton(provider => new HealthPublisher(
             provider.GetRequiredService<IScheduleStore>(),
-            Path.Combine(stateDirectory, "work", "receipts"),
-            Path.Combine(stateDirectory, "health", "health.json"),
-            Path.Combine(stateDirectory, "health", "fortiq.prom")));
+            paths.Receipts,
+            paths.HealthReport,
+            paths.HealthMetrics));
         builder.Services.AddHostedService<SchedulerWorker>();
 
         await builder.Build().RunAsync();

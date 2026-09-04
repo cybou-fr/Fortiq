@@ -57,7 +57,23 @@ public sealed class ScheduledBackupRunner
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var state = await _store.ReadStateAsync(schedule.Id, cancellationToken);
+            ScheduleState state;
+            try
+            {
+                state = await _store.ReadStateAsync(schedule.Id, cancellationToken);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                // A state file damaged by a power cut is one schedule's history, not every
+                // schedule's. Isolating the schedule file but not its state would have left one
+                // truncated JSON able to stop every other backup on the machine.
+                outcomes.Add(new ScheduleRunOutcome(
+                    schedule.Id,
+                    DueVerdict.Disabled,
+                    Failure: $"The recorded history for this schedule could not be read: {error.Message}"));
+                continue;
+            }
+
             var decision = ScheduleDecision.Evaluate(schedule, state, _clock.GetUtcNow());
             if (decision.Verdict != DueVerdict.Due)
             {

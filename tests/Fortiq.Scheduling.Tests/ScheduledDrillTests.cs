@@ -195,3 +195,113 @@ public sealed class ScheduledDrillTests
                 : Task.FromResult(new DrillResult("snapshot", 1, 1));
     }
 }
+
+/// <summary>
+/// One damaged file must never be able to stop the whole machine. Schedule files were isolated
+/// already; their recorded history was not, and a truncated state file could end a pass before the
+/// schedules after it were looked at.
+/// </summary>
+public sealed class CorruptStateIsolationTests : IDisposable
+{
+    private readonly string _directory = Directory.CreateTempSubdirectory("fortiq-corrupt-state-").FullName;
+
+    [Fact]
+    public async Task ARepositoryWithUnreadableHistoryDoesNotStopTheOthers()
+    {
+        await WriteScheduleAsync("aaa-broken");
+        await WriteScheduleAsync("bbb-healthy");
+
+        var state = Path.Combine(_directory, "state");
+        Directory.CreateDirectory(state);
+
+        // A power cut during a write leaves exactly this: a file that exists and is not JSON.
+        await File.WriteAllTextAsync(Path.Combine(state, "aaa-broken.json"), "{\"lastAttemptAt\":");
+
+        // The healthy schedule has run before, which is what makes it due now: a schedule that has
+        // never run is measured from the present and is not yet owed anything.
+        await new FileSystemScheduleStore(_directory).WriteStateAsync(
+            new ScheduleState("bbb-healthy", LastSuccessAt: DateTimeOffset.UtcNow.AddHours(-1)),
+            CancellationToken.None);
+
+        var store = new FileSystemScheduleStore(_directory);
+        var backups = new RecordingBackup();
+        var outcomes = await new ScheduledBackupRunner(store, backups).RunDueAsync(CancellationToken.None);
+
+        var broken = outcomes.Single(outcome => outcome.ScheduleId == "aaa-broken");
+        Assert.Contains("could not be read", broken.Failure!, StringComparison.Ordinal);
+
+        // The healthy schedule was still reached, and ran. Ordering matters here: the damaged one
+        // sorts first, so a pass that gave up would never have got to this one.
+        Assert.Null(outcomes.Single(outcome => outcome.ScheduleId == "bbb-healthy").Failure);
+        Assert.Equal(["bbb-healthy"], backups.Ran);
+    }
+
+    [Fact]
+    public async Task ARepositoryWithUnreadableDrillHistoryDoesNotStopTheOthers()
+    {
+        await WriteScheduleAsync("aaa-broken", drill: true);
+        await WriteScheduleAsync("bbb-healthy", drill: true);
+
+        var state = Path.Combine(_directory, "state");
+        Directory.CreateDirectory(state);
+        await File.WriteAllTextAsync(Path.Combine(state, "aaa-broken.drill.json"), "not json at all");
+
+        var outcomes = await new ScheduledDrillRunner(
+            new FileSystemScheduleStore(_directory),
+            new RecordingDrill()).RunDueAsync(CancellationToken.None);
+
+        Assert.Contains(
+            "could not be read",
+            outcomes.Single(outcome => outcome.ScheduleId == "aaa-broken").Failure!,
+            StringComparison.Ordinal);
+
+        Assert.Null(outcomes.Single(outcome => outcome.ScheduleId == "bbb-healthy").Failure);
+    }
+
+    private async Task WriteScheduleAsync(string id, bool drill = false)
+    {
+        var directory = Path.Combine(_directory, "schedules");
+        Directory.CreateDirectory(directory);
+
+        var extra = drill
+            ? ",\n  \"drillRecurrence\": { \"kind\": \"interval\", \"period\": \"7.00:00:00\" }"
+            : string.Empty;
+
+        await File.WriteAllTextAsync(
+            Path.Combine(directory, id + ".json"),
+            $$"""
+            {
+              "schema": "fortiq.backup-schedule",
+              "version": 1,
+              "id": "{{id}}",
+              "repository": "repo/{{id}}",
+              "kit": "kit/{{id}}",
+              "source": "source/{{id}}",
+              "sourceStableId": "workstation:{{id}}",
+              "recurrence": { "kind": "interval", "period": "00:00:01" }{{extra}}
+            }
+            """);
+    }
+
+    private sealed class RecordingBackup : Fortiq.Scheduling.IScheduledBackup
+    {
+        public List<string> Ran { get; } = [];
+
+        public Task<Fortiq.Domain.BackupReceipt> RunAsync(BackupSchedule schedule, CancellationToken cancellationToken)
+        {
+            Ran.Add(schedule.Id);
+            return Task.FromResult(new Fortiq.Domain.BackupReceipt(
+                Guid.NewGuid(),
+                Fortiq.Domain.RepositoryId.Create(),
+                "snapshot"));
+        }
+    }
+
+    private sealed class RecordingDrill : IScheduledDrill
+    {
+        public Task<DrillResult> RunAsync(BackupSchedule schedule, CancellationToken cancellationToken) =>
+            Task.FromResult(new DrillResult("snapshot", 1, 1));
+    }
+
+    public void Dispose() => Directory.Delete(_directory, recursive: true);
+}
