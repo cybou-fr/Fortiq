@@ -25,11 +25,10 @@ Fortiq is under active development. Current code enforces verified security inva
 - **Zero-Dependency Emergency CLI**: `Fortiq.Recover` provides an autonomous command-line interface (`inspect`, `snapshots`, `check`, `restore`) reading mnemonics exclusively from standard input to prevent credential leakage in process listings or shell history.
 - **Tamper-Evident Receipts**: `FileSystemOperationReceiptStore` writes structured cryptographic receipts (`fortiq.operation-receipt`) for every backup, check, prune, and restore operation.
 - **S3 Object Lock & Ransomware Defense**: Support for S3-compatible object storage with Object Lock immutability verification. `S3HiddenObjectRecovery` automatically unmasks repositories subjected to malicious delete-marker tampering without touching versioned data blobs.
-- **Windows Platform Consistency**: Volume Shadow Copy Service (VSS) integration (`--use-fs-snapshot`) for point-in-time filesystem captures, alongside USN Change Journal inspection.
+- **Windows Platform Consistency**: Volume Shadow Copy Service (VSS) integration (`--use-fs-snapshot`) for point-in-time filesystem captures. (USN Change Journal hints are specified but not yet implemented.)
 - **Scheduling & Windows Service**: Robust recurrence engine (`Fortiq.Scheduling`) resolving wall-clock timezones, DST shifts, and missed-run coalescing. Unattended background execution hosted in `Fortiq.Service` authenticated via TPM device keys.
 - **Verifiable Health Observability**: `Fortiq.Monitoring` evaluates whether repositories are *proven recoverable* (distinguishing `Recoverable`, `Unproven`, and `AtRisk`). Publishes status to `health.json` and Prometheus textfile (`fortiq.prom`).
-- **Modern Desktop UI & Visual System**: Cross-platform Avalonia UI application (`Fortiq.Desktop`) with Fluent v2 Dark Slate styling, native Windows folder dialogs, resilient zero-state onboarding, Protection Setup Wizard with 4x6 mnemonic card grid and challenge verification, and inline restore-proof test adapter (`ProveRecoveryAdapter`).
-- **Embedded GUI Installer & Component Lifecycle**: Integrated self-inspection, prerequisite verification (TPM 2.0, VSS, .NET 10), and in-app atomic component updates with rollback protection.
+- **Modern Desktop UI & Visual System**: Cross-platform Avalonia UI application (`Fortiq.Desktop`) with a light Fluent v2 palette, native Windows folder dialogs, resilient zero-state onboarding, Protection Setup Wizard with a 4x6 mnemonic card grid and challenge verification, and an in-app restore-proof action (`ProveRecoveryAdapter`) that restores the newest snapshot and reconciles what came back.
 - **Isolated Password Broker**: One-time ephemeral Named Pipe broker (`Fortiq.PasswordHelper`) verifying client PID, open binary handle identity, account security context, and optional Authenticode digital signatures.
 
 ---
@@ -104,7 +103,7 @@ Architecture specifications and Architecture Decision Records (ADRs) are maintai
 | **19. Observability & Health** | Evidence-driven health publication (`health.json` and Prometheus textfile `fortiq.prom`) |
 | **20. Local Catalog** | File-system-based run tracking, atomic `.run` registrations, and crash-resilient locks |
 | **21. Embedded Installer & Lifecycle** | System detection, prerequisite discovery, UAC elevation, service SID provisioning, and TUF-aligned component updates |
-| **22. Desktop UI & Visual System** | Fluent v2 Dark Slate design system, native Windows folder pickers, resilient zero-state lifecycle, and mnemonic card grid |
+| **22. Desktop UI & Visual System** | Light Fluent v2 design system, native Windows folder pickers, resilient zero-state lifecycle, and mnemonic card grid |
 | **23. GUI Development Guidelines** | Engineering blueprints, Avalonia XAML design tokens, component specifications, and MVVM patterns |
 | **Architecture Decision Records (ADRs)** | Formal records ADR-001 through ADR-015 documenting key decisions (Engine, Envelopes, IPC, VSS, S3, Ledger, Installer, UI Design, etc.) |
 
