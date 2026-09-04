@@ -138,6 +138,100 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
             summary.BytesRestored);
     }
 
+    public async Task<RetentionReceipt> ApplyRetentionAsync(ApplyRetention command, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (!command.Policy.KeepsSomething)
+        {
+            throw new RetentionWouldRemoveEverythingException(
+                "A retention policy has to keep something; this one keeps nothing.");
+        }
+
+        var operationId = OperationId(command);
+        var location = RepositoryLocation.Normalize(command.Repository.Location);
+        var policy = PolicyArguments(command.Policy);
+
+        // The plan is read before anything is done. Forgetting cannot be undone, so a policy that
+        // would empty a source has to be refused while that is still possible.
+        var planned = ResticJsonParser.ParseForget(await RunAsync(
+            ResticOperation.Forget,
+            [.. policy, "--dry-run", "--repo", location, "--json", "--no-cache"],
+            operationId,
+            cancellationToken,
+            command.Repository.Location));
+
+        foreach (var group in planned)
+        {
+            if (group.Keep.Count == 0 && group.Remove.Count > 0)
+            {
+                throw new RetentionWouldRemoveEverythingException(
+                    "This policy would leave a source with no snapshots at all.");
+            }
+        }
+
+        if (planned.All(group => group.Remove.Count == 0))
+        {
+            // Nothing to do, and saying so beats running a destructive command for no reason.
+            return new RetentionReceipt(
+                operationId,
+                command.Repository.Id,
+                [.. planned.SelectMany(group => group.Keep)],
+                [],
+                Pruned: false);
+        }
+
+        var pruning = command.Prune == PruneMode.ForgetAndPrune;
+        List<string> arguments = [.. policy, "--repo", location, "--json", "--no-cache"];
+        if (pruning)
+        {
+            arguments.Add("--prune");
+        }
+
+        var applied = ResticJsonParser.ParseForget(await RunAsync(
+            ResticOperation.Forget,
+            arguments,
+            operationId,
+            cancellationToken,
+            command.Repository.Location));
+
+        return new RetentionReceipt(
+            operationId,
+            command.Repository.Id,
+            [.. applied.SelectMany(group => group.Keep)],
+            [.. applied.SelectMany(group => group.Remove)],
+            pruning);
+    }
+
+    private static List<string> PolicyArguments(RetentionPolicy policy)
+    {
+        List<string> arguments = [];
+
+        void Add(string name, int? value)
+        {
+            if (value is > 0)
+            {
+                arguments.Add(name);
+                arguments.Add(value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
+
+        Add("--keep-last", policy.KeepLast);
+        Add("--keep-daily", policy.KeepDaily);
+        Add("--keep-weekly", policy.KeepWeekly);
+        Add("--keep-monthly", policy.KeepMonthly);
+        Add("--keep-yearly", policy.KeepYearly);
+
+        if (policy.KeepWithin is { } within && within > TimeSpan.Zero)
+        {
+            // Restic counts a duration in whole hours here; anything shorter would silently round to
+            // nothing, so it is rounded up instead.
+            arguments.Add("--keep-within");
+            arguments.Add($"{Math.Max(1, (int)Math.Ceiling(within.TotalHours))}h");
+        }
+
+        return arguments;
+    }
+
     public async Task<RepositoryId> ReadRepositoryIdAsync(RepositoryDescriptor repository, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(repository);

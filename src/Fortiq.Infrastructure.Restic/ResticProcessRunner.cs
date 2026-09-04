@@ -12,7 +12,8 @@ public enum ResticOperation
     Check,
     Restore,
     Unlock,
-    CatConfig
+    CatConfig,
+    Forget
 }
 
 public sealed record ResticProcessRequest(
@@ -148,6 +149,7 @@ public sealed class ResticProcessRunner : IResticProcessRunner
         ResticOperation.Restore => "restore",
         ResticOperation.Unlock => "unlock",
         ResticOperation.CatConfig => "cat",
+        ResticOperation.Forget => "forget",
         _ => throw new ArgumentOutOfRangeException(nameof(operation))
     };
 

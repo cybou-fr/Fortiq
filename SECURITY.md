@@ -63,6 +63,18 @@ These require GitHub configuration or release tooling that this repository canno
 - **Dependency review gates.** ADR-013 requires SBOM diff, advisory review and re-run of test vectors
   for every security-critical dependency update. That process is not automated yet.
 
+## What object locking does and does not do
+
+Verified against a real S3 server rather than assumed:
+
+- A locked bucket refuses to delete a **version**. An attempt that names one is rejected outright.
+- It does **not** refuse a delete that names only a key: that adds a delete marker, and the object
+  stops being visible while every version of it survives. Pruning a repository in a locked bucket
+  therefore succeeds and hides data rather than destroying it.
+- So immutability protects against irreversible loss, not against a repository being made to look
+  empty. Recovering from that is an operation on the storage's versions, and Fortiq does not do it
+  yet.
+
 ## Password broker
 
 The handover is a one-shot challenge-response over a pipe that exists for a single operation, and it

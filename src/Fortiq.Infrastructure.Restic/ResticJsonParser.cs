@@ -31,6 +31,9 @@ public sealed record ResticCheckSummary(long ErrorCount, IReadOnlyList<string> B
 
 public sealed record ResticRepositoryConfig(string Id, int Version);
 
+/// <summary>One group of snapshots restic considered together, and what it decided about them.</summary>
+public sealed record ResticForgetGroup(IReadOnlyList<string> Keep, IReadOnlyList<string> Remove);
+
 public sealed record ResticRestoreSummary(ulong TotalFiles, ulong FilesRestored, ulong FilesSkipped, ulong TotalBytes, ulong BytesRestored);
 
 public static partial class ResticJsonParser
@@ -161,6 +164,48 @@ public static partial class ResticJsonParser
         }
     }
 
+    /// <summary>
+    /// Reads what a forget run kept and removed, per group. The same shape comes back for a dry run,
+    /// which is what lets the plan be checked before anything is done.
+    /// </summary>
+    public static IReadOnlyList<ResticForgetGroup> ParseForget(ResticProcessResult result)
+    {
+        EnsureSuccessfulExit(result);
+
+        // A forget that also prunes prints its plan as JSON and then reports the prune in plain text,
+        // so only the first value is read and the rest is left alone.
+        using var document = ParseLeadingValue(result.StandardOutput);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("Forget output must be a JSON array.");
+        }
+
+        var groups = new List<ResticForgetGroup>();
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            var root = RequireObject(item);
+            groups.Add(new ResticForgetGroup(SnapshotIds(root, "keep"), SnapshotIds(root, "remove")));
+        }
+
+        return groups;
+    }
+
+    private static List<string> SnapshotIds(JsonElement group, string name)
+    {
+        var ids = new List<string>();
+        if (!group.TryGetProperty(name, out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return ids;
+        }
+
+        foreach (var snapshot in array.EnumerateArray())
+        {
+            ids.Add(RequireIdentifier(RequireObject(snapshot), "id"));
+        }
+
+        return ids;
+    }
+
     private static void EnsureSuccessfulExit(ResticProcessResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
@@ -253,6 +298,26 @@ public static partial class ResticJsonParser
             terminal.Dispose();
             throw;
         }
+    }
+
+    private static JsonDocument ParseLeadingValue(string json)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(json);
+        var reader = new Utf8JsonReader(bytes, new JsonReaderOptions { AllowTrailingCommas = false });
+
+        try
+        {
+            if (JsonDocument.TryParseValue(ref reader, out var document))
+            {
+                return document;
+            }
+        }
+        catch (JsonException error)
+        {
+            throw new InvalidDataException("Restic output is not valid JSON.", error);
+        }
+
+        throw new InvalidDataException("Restic emitted no JSON value.");
     }
 
     private static JsonDocument ParseSingleDocument(string json)

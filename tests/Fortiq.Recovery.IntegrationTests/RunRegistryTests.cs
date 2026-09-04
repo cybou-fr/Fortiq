@@ -171,5 +171,8 @@ public sealed class RunRegistryTests : IDisposable
             Reconciled = true;
             return Task.CompletedTask;
         }
+
+        public Task<RetentionReceipt> ApplyRetentionAsync(ApplyRetention command, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

@@ -80,6 +80,20 @@ public sealed class RegisteredRunBackupRepository : IBackupRepository
             cancellationToken);
     }
 
+    public Task<RetentionReceipt> ApplyRetentionAsync(ApplyRetention command, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        return RunAsync(
+            command.Repository.Id,
+            OperationKind.Retention,
+            command.OperationId,
+            // Pruning rewrites what other operations are reading, so it takes the repository to
+            // itself; forgetting only changes which snapshots are listed.
+            command.Prune == PruneMode.ForgetAndPrune ? RunExclusivity.Exclusive : RunExclusivity.Shared,
+            () => _inner.ApplyRetentionAsync(command, cancellationToken),
+            cancellationToken);
+    }
+
     public async Task ReconcileAsync(ReconcileRepository command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);

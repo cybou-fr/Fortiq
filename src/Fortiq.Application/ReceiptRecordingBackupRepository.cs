@@ -128,6 +128,29 @@ public sealed class ReceiptRecordingBackupRepository : IBackupRepository
             cancellationToken);
     }
 
+    public Task<RetentionReceipt> ApplyRetentionAsync(ApplyRetention command, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var identified = Identify(command, id => command with { OperationId = id });
+        return RecordAsync(
+            identified.OperationId,
+            OperationKind.Retention,
+            () => _inner.ApplyRetentionAsync(identified, cancellationToken),
+            _ => identified.Repository.Id.ToString(),
+            _ => null,
+            receipt => new Dictionary<string, long>(StringComparer.Ordinal)
+            {
+                ["snapshotsKept"] = receipt.KeptSnapshotIds.Count,
+                ["snapshotsRemoved"] = receipt.RemovedSnapshotIds.Count,
+                // Removing a snapshot is not the same as removing its data, and evidence that did
+                // not distinguish the two would overstate what happened.
+                ["dataPruned"] = receipt.Pruned ? 1 : 0
+            },
+            source: null,
+            identified.Repository.Id.ToString(),
+            cancellationToken);
+    }
+
     public async Task ReconcileAsync(ReconcileRepository command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);

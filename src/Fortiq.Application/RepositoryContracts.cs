@@ -94,6 +94,14 @@ public interface IBackupRepository
     Task ReconcileAsync(
         ReconcileRepository command,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Applies a retention policy. It never removes the last snapshot of a source: the plan is read
+    /// before anything is done, and a plan that would empty a source is refused.
+    /// </summary>
+    Task<RetentionReceipt> ApplyRetentionAsync(
+        ApplyRetention command,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>Everything a repository engine offers, as one composition root returns it.</summary>

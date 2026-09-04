@@ -30,3 +30,14 @@ public sealed record RestoreReceipt(
     string TargetPath,
     ulong FilesRestored = 0,
     ulong BytesRestored = 0);
+
+/// <summary>
+/// What a retention run kept and what it let go. The snapshots it removed are references; whether
+/// their data was deleted too is <paramref name="Pruned"/>.
+/// </summary>
+public sealed record RetentionReceipt(
+    Guid OperationId,
+    RepositoryId RepositoryId,
+    IReadOnlyList<string> KeptSnapshotIds,
+    IReadOnlyList<string> RemovedSnapshotIds,
+    bool Pruned);
