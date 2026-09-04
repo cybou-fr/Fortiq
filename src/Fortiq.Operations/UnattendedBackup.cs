@@ -7,7 +7,7 @@ using Fortiq.Infrastructure.Restic;
 using Fortiq.Infrastructure.Runs;
 using Fortiq.Scheduling;
 
-namespace Fortiq.Service;
+namespace Fortiq.Operations;
 
 /// <summary>Raised when a schedule cannot run without someone present to supply recovery material.</summary>
 public sealed class UnattendedUnlockUnavailableException : Exception

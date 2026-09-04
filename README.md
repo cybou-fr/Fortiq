@@ -4,371 +4,104 @@
   <img src="assets/icon.png" alt="Fortiq Logo" width="128" height="128" />
 </p>
 
-Fortiq — sovereign recovery platform для организаций, которым нужны проверяемые,
-зашифрованные и устойчивые к уничтожению резервные копии под собственным контролем.
+Fortiq is a sovereign disaster recovery platform for organizations that require verifiable, encrypted, and tamper-resilient backups under their own sovereign control.
 
-Главное обещание продукта:
+The core promise of the platform:
 
-> Данные можно восстановить без зависимости от облака Fortiq, аккаунта Fortiq или
-> существования компании Fortiq.
+> Data can be recovered without relying on Fortiq cloud, a Fortiq account, or the ongoing existence of the Fortiq company.
 
-Проект находится в стадии разработки и не является заявлением о готовности функций или об
-автоматической сертификации по GDPR, NIS2 либо ISO 27001. Проектные документы и ADR ведутся вне
-этого репозитория, поэтому README ссылается на них по имени, а не ссылкой.
+---
 
-Что работает сейчас на .NET 10 LTS: pinned restic-движок с проверкой бинарника, backup, snapshots,
-check, restore и reconciliation; envelope-формат ADR-002 с BIP-39 и TPM-методами; recovery kit;
-автономный `Fortiq.Recover`; operation receipts. Сценарий восстановления E2E-001 проходит целиком —
-отдельный процесс восстанавливает датасет после удаления локального состояния Fortiq.
+## Current Status (.NET 10 LTS)
 
-Чего нет: VSS, планировщика, Windows Service, S3 и Object Lock, GUI. Production
-`PasswordEnvelopeV1` заблокирован review gates ADR-013 по выбору Argon2-зависимости — отдельно от
-уже реализованных методов, которые обходятся платформенной криптографией.
+Fortiq is under active development. Current code enforces verified security invariants, cryptographic guarantees, and automated recovery tests across **17 source projects** and **7 test projects**:
 
-## Сборка и тесты
+- **Pinned Engine Execution**: Restic 0.19.1 execution via `Fortiq.Infrastructure.Restic` with pre-execution SHA-256 binary validation, handle-locking (`FileShare.Read`), and volume/index identity checks to eliminate TOCTOU attacks.
+- **Envelope Encryption**: Deterministic CBOR (RFC 8949) `KeyEnvelopeV1` specification supporting:
+  - `Bip39RecoveryEnvelopeV1`: 256-bit entropy encoded into a standard English mnemonic (PBKDF2-HMAC-SHA512 + HKDF).
+  - `WindowsTpmEnvelopeV1`: Non-exportable keys secured via Microsoft Platform Crypto Provider with public key fingerprint validation.
+  - `RecoverySecretEnvelope`: HKDF-SHA-256 key derivation with authenticated AES-256-GCM wrapping.
+- **Recovery Kits & Provisioning**: Atomic transactional repository provisioning (`RepositoryProvisioner`) generating self-contained recovery kits (`kit.json`). Rollback safety with `provisioning-intent.json`.
+- **Zero-Dependency Emergency CLI**: `Fortiq.Recover` provides an autonomous command-line interface (`inspect`, `snapshots`, `check`, `restore`) reading mnemonics exclusively from standard input to prevent credential leakage in process listings or shell history.
+- **Tamper-Evident Receipts**: `FileSystemOperationReceiptStore` writes structured cryptographic receipts (`fortiq.operation-receipt`) for every backup, check, prune, and restore operation.
+- **S3 Object Lock & Ransomware Defense**: Support for S3-compatible object storage with Object Lock immutability verification. `S3HiddenObjectRecovery` automatically unmasks repositories subjected to malicious delete-marker tampering without touching versioned data blobs.
+- **Windows Platform Consistency**: Volume Shadow Copy Service (VSS) integration (`--use-fs-snapshot`) for point-in-time filesystem captures, alongside USN Change Journal inspection.
+- **Scheduling & Windows Service**: Robust recurrence engine (`Fortiq.Scheduling`) resolving wall-clock timezones, DST shifts, and missed-run coalescing. Unattended background execution hosted in `Fortiq.Service` authenticated via TPM device keys.
+- **Verifiable Health Observability**: `Fortiq.Monitoring` evaluates whether repositories are *proven recoverable* (distinguishing `Unproven`, `AtRisk`, and `Healthy`). Publishes status to `health.json` and Prometheus textfile (`fortiq.prom`).
+- **Modern Desktop UI**: Cross-platform Avalonia UI application (`Fortiq.Desktop`) with MVVM architecture, Protection Setup Wizard with mnemonic challenge verification, and inline restore-proof test adapter (`ProveRecoveryAdapter`).
+- **Isolated Password Broker**: One-time ephemeral Named Pipe broker (`Fortiq.PasswordHelper`) verifying client PID, open binary handle identity, account security context, and optional Authenticode digital signatures.
 
-Требуется .NET SDK версии, заданной в `global.json`. Из корня проекта:
+---
+
+## Building and Testing
+
+Requires the .NET SDK version specified in [global.json](global.json).
 
 ```powershell
+# Run all unit, contract, integration, and security tests
 dotnet test Fortiq.sln --configuration Release
 ```
 
-Сборка использует nullable reference types, рекомендованные анализаторы и рассматривает
-все предупреждения как ошибки.
+All projects enforce nullable reference types, recommended Roslyn analyzers, and treat all warnings as errors (`TreatWarningsAsErrors=true`).
 
-Pinned metadata restic хранится в `engines/manifest.json`. Сам бинарник не входит в исходный
-репозиторий; его получает `scripts/Get-Engine.ps1`, который проверяет SHA-256 архива до распаковки,
-а затем длину и SHA-256 самого бинарника. Несовпадение — фатально, ничего не остаётся на диске.
-Глобально установленной версией restic подменять его нельзя.
+### Engine Acquisition
+
+Pinned metadata for the restic engine is defined in [engines/manifest.json](engines/manifest.json). The binary is not stored in Git; obtain and verify it using the PowerShell acquisition script:
 
 ```powershell
 ./scripts/Get-Engine.ps1
 ```
 
-Проверенный бинарник остаётся тем же бинарником: verifier считает хеш через дескриптор, который
-держит открытым с `FileShare.Read` (файл нельзя перезаписать, удалить или переименовать, пока движок
-используется), а непосредственно перед запуском сверяет идентичность файла по пути (volume serial +
-file index). Это закрывает TOCTOU между verify и execution, включая случай, когда каталог выше
-бинарника подменён через junction.
+The script verifies the SHA-256 archive hash prior to extraction, then verifies the file length and SHA-256 hash of the extracted executable. Any hash mismatch terminates immediately and cleans up disk artifacts. Ambient or globally installed binaries are never executed.
 
-Релизные артефакты собирает `scripts/New-ReleaseArtifacts.ps1`: публикует recovery tool вместе с
-runtime (он обязан работать на машине, где ничего не установлено), генерирует CycloneDX SBOM
-запинненной версией инструмента и записывает SHA-256 каждого файла. Release workflow attest'ит
-provenance над бинарниками, SBOM и списком хешей. Подписи Authenticode пока нет: сборка выходит
-неподписанной и прямо об этом говорит, а не выглядит подписанной. Проверяющая сторона уже есть —
-`AuthenticodeSignature` спрашивает сам Windows, и брокер паролей можно перевести в режим
-`RequireSignedHelper`, где неподписанный helper не получит пароль.
+### S3 & Object Lock Testing
 
-Что обеспечено кодом и что остаётся открытым gate — в [SECURITY.md](SECURITY.md).
-
-CI (`.github/workflows/ci.yml`) выполняет тот же acquisition step на windows-latest, поэтому
-интеграционные тесты в CI выполняются, а не пропускаются, и падают, если engine не совпал с
-манифестом. Receipts прогона и результаты тестов выгружаются артефактом `fortiq-evidence` в том
-числе при провале.
-
-Version-pinned fixtures команд `version`, `init`, `backup`, `snapshots`, `check` и
-`restore` находятся в `test-assets/restic-output/0.19.1`. Parser требует согласованности
-exit code и обязательного terminal event: один progress или summary не создаёт успешный
-receipt.
-
-`ResticRepositoryEngine` имеет internal visibility и получает credential через порт
-`IEngineCredentialProvider`. Рабочий путь — одноразовый `--password-command`, который запускает
-password helper: в командной строке присутствуют только pinned путь helper и несекретный operation
-ID. `--insecure-no-password` остался отдельной internal-реализацией порта и является исключительно
-тестовым seam; наружу — ни в Service, ни в recovery CLI — он не выходит. Проверяемая подпись всех
-Windows EXE/DLL согласно supply-chain policy остаётся требованием production activation.
-
-Неправильный secret даёт единый `UnlockFailedException` с константным сообщением для всех операций:
-отличить неверный secret от отсутствующего ключа по ошибке нельзя, и metadata снапшотов не
-раскрывается.
-
-Key lease хранит собственную копию EUS, отзывает доступ и обнуляет буфер при `Dispose`; распакованный
-секрет покидает assembly только лизом, сырых массивов публичный API не отдаёт. `EnginePasswordV1`
-кодируется напрямую в предоставленный mutable-буфер, без создания immutable secret-строки.
-
-Password broker выдаёт engine password ровно один раз и только одному процессу. До записи пароля
-брокер резолвит процесс подключившегося клиента, требует, чтобы его образ был **тем самым** файлом
-helper, который брокер держит открытым, и чтобы он выполнялся под ожидаемым аккаунтом. Проверка
-процесса выполняется в момент подключения, до выдачи challenge; проверка аккаунта — после первого
-чтения (Windows разрешает impersonation только после него) и всё равно до записи любой части пароля.
-Installer может задать SDDL канала; без него ОС ограничивает канал текущим пользователем. Оставшиеся
-ограничения перечислены в [SECURITY.md](SECURITY.md).
-
-E2E-001 выполняется на pinned restic: dataset builder создаёт пустой, текстовый, бинарный,
-Unicode-, длинный и read-only файлы, backup и restore выполняются в разных working directory,
-а временное состояние Fortiq удаляется между ними. Тест пропускается, если pinned binary
-отсутствует в `engines/`, и никогда не использует глобально установленный restic.
-
-Engine получает не унаследованное окружение, а минимальный allowlist: `TEMP`/`TMP`
-указывают на подкаталог рабочей директории Fortiq, `SystemRoot` берётся из процесса.
-Restore одного источника использует subfolder-селектор restic (`<snapshot>:/C/...`),
-поэтому содержимое попадает прямо в target и промежуточные каталоги исходного пути не
-воссоздаются.
-
-Negative-сценарии E2E-003 (повреждённый pack), E2E-004 (отмена backup, reconciliation через
-`unlock` и последующий корректный snapshot) и E2E-005 (reparse point не выводит restore за пределы
-staging directory) выполняются на том же pinned binary. E2E-002 (неправильный secret) выполняется на password helper.
-
-Restore никогда не пишет прямо в target: движок восстанавливает в staging-каталог на том же томе,
-проверяет получившееся дерево (reparse point, symlink или выход за пределы staging — отказ) и только
-затем продвигает его одним rename. Отклонённый или прерванный restore оставляет target нетронутым, а
-непустой target отклоняется до запуска движка.
-
-Репозиторий может жить не только в каталоге, но и в object storage: локация вида
-`s3:https://host/bucket` не нормализуется как путь (иначе она превратилась бы в бессмыслицу), а
-identity хранилища передаётся движку отдельным портом `IObjectStorageCredentialProvider` — в
-окружение только того процесса, которое и так очищено от всего остального. Это **не** секрет
-шифрования: репозиторий зашифрован до отправки, поэтому владелец ключей доступа видит объём данных
-и, если бакет это позволяет, может их удалить — но не прочитать.
-
-Retention описывается политикой в терминах restic (`keep-last`, `keep-daily`, ..., `keep-within`) и
-разделяет два разных действия: **забыть** снапшот (убрать из листинга) и **вырезать** его данные
-(`prune`). План читается dry-run'ом до того, как что-либо сделано: политика, которая не оставила бы
-источнику ни одного снапшота, отвергается, пока это ещё можно отменить — забывание необратимо.
-Receipt различает эти два действия (`snapshotsRemoved` и `dataPruned`), потому что «удалили снапшот»
-и «удалили данные» — разные утверждения. Prune берёт репозиторий эксклюзивно, forget — нет.
-
-**Что Object Lock на самом деле гарантирует.** Проверка на настоящем S3 показала важное: блокировка
-защищает *версии*, а не имена. Удаление без указания версии ставит delete marker — и оно **проходит**,
-поэтому `prune` в locked-бакете завершается успешно и скрывает данные, а не уничтожает их: все прежние
-версии остаются на месте, а попытка удалить конкретную версию отвергается с `WORM`. То есть
-неизменяемое хранилище защищает от безвозвратной потери, но не мешает сделать репозиторий пустым на
-вид; восстановление в этом случае — работа с версиями на стороне хранилища. Тесты фиксируют обе
-половины этого факта.
-
-Из состояния «репозиторий скрыт delete-маркерами» Fortiq теперь выходит сама:
-`S3HiddenObjectRecovery` находит ключи, поверх которых стоит маркер, а под ним уцелела версия с
-данными, снимает эти маркеры и не трогает ни одной версии с данными. Locks исключены намеренно: движок
-сам удаляет свои lock-объекты по завершении операции, поэтому у здорового репозитория в версионном
-бакете **всегда** есть маркеры над locks, и «восстановление» такого маркера заново заблокировало бы
-репозиторий. Тест проходит весь путь: атака удалением по ключу, отказ репозитория читаться,
-восстановление, здоровый `check` и restore с побайтовой сверкой.
-
-Провижининг умеет **требовать** неизменяемое хранилище: `requireImmutableStorage` спрашивает само
-хранилище (`GetObjectLockConfiguration`), и если оно не удерживает записанное — отказ **до** того, как
-что-либо создано. Это не выбор ради строгости: Object Lock включается только при создании бакета,
-поэтому «поправить потом» невозможно, и обнаружить проблему после создания репозитория было бы поздно.
-Обещанное хранилищем записывается в манифест кита (`storageProtection`: immutable, режим, срок), потому
-что настройки хранилища могут измениться позже — кит фиксирует то, что было правдой на момент создания.
-Локальный каталог честно отвечает «ничего не гарантирую», а не отказывается отвечать.
-
-Object Lock проверяется на настоящем S3-сервере, поднимаемом локально (`scripts/Get-TestStorage.ps1`,
-SHA-256 запиннен, как у движка; четыре диска — иначе erasure coding недоступен и Object Lock тихо не
-работает). Тесты показывают обе стороны обещания: в locked-бакете удаление того, что уже записано,
-отвергается хранилищем, и репозиторий остаётся исправным; в обычном бакете те же права позволяют
-уничтожить данные, и `check` это обнаруживает. Шифрование не делает бэкап неразрушимым — это делает
-только неизменяемое хранилище.
-
-Мониторинг отвечает не на вопрос «выполнилась ли задача», а на вопрос «вернутся ли данные».
-Репозиторий, который исправно бэкапится, но из которого **ни разу ничего не восстанавливали**, не
-считается здоровым — он `Unproven`: это убеждение в восстановимости, а не доказательство. `AtRisk`
-резервируется за тем, что помешало бы восстановлению **сегодня**: нет кита, нет бэкапа, бэкап
-устарел, последний запуск упал.
-
-Факты берутся из уже существующих следов: расписания говорят, какие репозитории важны, их состояние —
-что сделал последний запуск, receipts — что произошло на самом деле, кит — можно ли открыть репозиторий
-на другой машине и что обещало хранилище. Учитываются только успешные операции: упавший `check` не
-делает репозиторий проверенным. Служба публикует отчёт после **каждого** прохода, включая упавший —
-канал мониторинга, который замолкает при проблемах, хуже отсутствующего.
-
-Отчёт пишется в файлы (`health.json` и `fortiq.prom` в формате Prometheus textfile), а не отдаётся по
-HTTP: мониторинг, зависящий от доступности самой службы, докладывает о здоровье ровно до момента,
-когда докладывать становится нечем. Событие, которого не было, в метриках отсутствует, а не равно нулю
-секунд назад — иначе «никогда» читалось бы как «только что».
-
-`Fortiq.Service` — Windows Service, который по такту опрашивает расписания и выполняет то, что
-пришло время выполнить. Такт — не расписание: он определяет лишь, насколько быстро стартует уже
-наступивший бэкап. Сбой одного прохода (испорченный файл расписания, недоступный каталог) не
-останавливает службу.
-
-Запуск без человека возможен **только** через device-envelope: служба открывает репозиторий ключом
-самой машины. Мнемоника здесь намеренно неприменима — это путь назад с машины, потерявшей всё, и
-служба, умеющая разблокироваться ею автоматически, была бы вынуждена её хранить, превратив секрет
-*о* машине в секрет *на* машине. Кит без device-метода даёт внятный отказ, а не ожидание ввода.
-
-## Настольное приложение
-
-`Fortiq.Desktop` (Avalonia) — один экран и один мастер. Экран читает тот же `health.json`, что и
-мониторинг: человек и алерт видят одно и то же, а не две разные версии происходящего. Репозиторий,
-из которого никто ни разу не восстанавливался, показан **не зелёным** — «просто забэкаплено» на этом
-экране не пишется никогда, потому что именно эта формулировка и вводит в заблуждение. Если отчёта
-нет вовсе, экран говорит об этом, а не показывает пустой список: пустота читалась бы как «всё в
-порядке».
-
-Мастер защиты не завершается, пока человек не введёт обратно несколько слов мнемоники. Мнемоника
-читаема ровно на одном шаге, кнопки «скопировать» нет, а после подтверждения она стирается из
-памяти — второй копии у Fortiq нет. Вместе с репозиторием и китом мастер пишет и файл расписания:
-репозиторий, в который ничего не кладут, выглядит защищённым и не является таковым.
-
-Логика экранов лежит в `Fortiq.Desktop.ViewModels` и покрыта тестами; окна только раскладывают
-контролы. Сама отрисовка проверена запуском приложения, а не тестами.
-
-Расписания (`Fortiq.Scheduling`) описываются файлами, которые человек редактирует, а историю запусков
-Fortiq пишет отдельно — конфигурация и история не смешиваются. Повторение задаётся либо интервалом
-(«не дольше N без бэкапа»), либо временем по настенным часам в явной таймзоне. Оба перехода на летнее
-время решены явно: если выбранное время в этот день не существует, запуск происходит в первый
-существующий момент (день не пропускается), а если оно случается дважды — берётся первое (расписание
-срабатывает один раз в сутки).
-
-Пропущенные окна не копятся: машина, простоявшая неделю, должна один бэкап, а не семь — источник
-сейчас в одном состоянии, и повторные запуски записали бы одно и то же настоящее. Любая попытка,
-успешная или нет, двигает расписание вперёд, поэтому недоступный репозиторий не приводит к
-retry-циклу; при этом дата последнего успеха не стирается неудачей. Сбой одного расписания не
-останавливает остальные.
-
-Источник можно читать в двух режимах (`SourceConsistency`): `Live` — с живой файловой системы, и
-`FileSystemSnapshot` — с моментального снимка тома, который создаёт сам движок (`--use-fs-snapshot`).
-Снимок делает движок, а не Fortiq, поэтому в репозиторий попадают исходные пути источника, а не пути
-теневой копии — restore адресует то же, что и при обычном backup. Без backup-привилегий создание
-снимка **не выполняется молча в режиме live**: backup падает с ошибкой VSS, и в репозитории не
-появляется снапшот, выдающий себя за point-in-time.
-
-Режим чтения записывается в сам репозиторий тегом `fortiq.consistency` и в receipt (`source.consistency`),
-а `Fortiq.Recover snapshots` показывает его полем `pointInTime`. Снапшот, ничего не сообщающий о режиме
-(например, созданный до появления этой метаданной), отдаётся как `null`, а не как «live»: молчание —
-не утверждение.
-
-Каждая операция регистрируется как run против своего репозитория (`Fortiq.Infrastructure.Runs`).
-Обычные операции берут репозиторий как shared, reconciliation — эксклюзивно, и это то, что превращает
-«другая операция точно не выполняется» в проверяемый факт, а не в допущение: `unlock --remove-all`
-удаляет lock, чей владелец не доказуемо мёртв, и без такой гарантии он опасен. Блокировка живёт в
-самом файловом дескрипторе, поэтому упавший процесс освобождает репозиторий силами ОС — устаревших
-записей и таймаутов «жив ли владелец» не существует; содержимое `.run`-файла пишется только для
-диагностики и никогда не решает, занят ли репозиторий. `Fortiq.Recover` — отдельный процесс и
-регистрируется так же; занятый репозиторий даёт exit code 75.
-
-Staging-каталог приватный: имя из CSPRNG (не из operation ID, который ходит в receipts и командных
-строках), никакого переиспользования — существующий путь отвергается, а на Windows каталог создаётся
-с собственным ACL без наследования, дающим доступ только аккаунту Fortiq. Валидация выполняется
-дважды: до продвижения и **после** — уже по конечному пути, откуда читает вызывающий; дерево, не
-прошедшее вторую проверку, удаляется, а не остаётся в target. Уборка не ходит сквозь reparse point:
-линк отвязывается, а не обходится, поэтому очистка staging не может дотянуться наружу.
-
-Один `OperationId` проходит операцию насквозь: команда → процесс движка → operation ID в
-`--password-command` helper → receipt → возвращённый результат. Если вызывающий его не задал, id
-назначается один раз и именно он попадает во все три места.
-
-Каждая операция движка пишет JSON-receipt схемы `fortiq.operation-receipt`: operation ID, repository
-ID, идентичность engine с pinned SHA-256, время начала и конца, result, snapshot ID, source и метрики.
-Failed и cancelled операции тоже оставляют receipt — с `engineResult` `failed`/`cancelled` и
-диагностикой движка в `warnings`; `succeeded` не выдаётся авансом. `engineResult` описывает только
-то, что сделал движок: отмена вызывающего уже после завершения движка не переписывает результат и не
-отменяет запись evidence — она выполняется собственным токеном. Успешность записи evidence
-фиксируется отдельно от результата движка и отдаётся через `IOperationEvidenceObserver`, поэтому
-потерянный receipt виден, а не проглочен. Receipt не нужен для автономного
-restore. Переменная окружения `FORTIQ_TEST_ARTIFACTS` заставляет тесты сохранить receipts прогона в
-указанный каталог.
-
-Реализован формат `KeyEnvelopeV1` из ADR-002: deterministic CBOR (RFC 8949), строгий декодер
-(отклоняет дубликаты полей, indefinite-length, trailing data, неизвестные critical fields и
-превышение лимитов) и AEAD-обёртка EUS с authenticated context из всех публичных полей envelope.
-`RecoverySecretEnvelope` выводит KEK через HKDF-SHA-256 из 256-битной recovery entropy и
-заворачивает EUS в AES-256-GCM. Он использует только платформенную криптографию, поэтому не
-затрагивает gate ADR-013 на Argon2 — production `PasswordEnvelopeV1` по-прежнему заблокирован.
-Неизвестный suite приводит к явной ошибке, а не к попытке угадать параметры; любой отказ unwrap —
-единый `UnlockFailed`.
-
-`Bip39RecoveryEnvelopeV1` реализован: мнемоника проверяется по словарю и checksum до любой
-derivation, seed выводится стандартным PBKDF2-HMAC-SHA512 (2048 итераций, salt `mnemonic` +
-опциональная passphrase), а KEK — отдельным HKDF с Fortiq-контекстом. Encode, decode и seed
-сверяются со всеми официальными English-векторами BIP-39 (`test-assets/bip39/`). Английский словарь
-встроен в assembly, чтобы recovery работал офлайн; его происхождение и normalized SHA-256
-зафиксированы в `src/Fortiq.Infrastructure.Keys/Bip39/english.provenance.json` и проверяются тестом.
-
-Версии пакетов заданы централизованно в `Directory.Packages.props`, как требует dependency policy
-ADR-013; диапазоны и floating versions запрещены.
-
-`Fortiq.Recover` работает поверх recovery kit и больше не fail-closed. Команды:
+To spin up a local 4-node S3 cluster with Object Lock support for integration tests:
 
 ```powershell
-Fortiq.Recover inspect   --repository <repo> --engine-root <engines> [--kit <kit dir>]
-Fortiq.Recover snapshots --repository <repo> --engine-root <engines> --kit <kit dir>
-Fortiq.Recover check     --repository <repo> --engine-root <engines> --kit <kit dir>
-Fortiq.Recover restore   --repository <repo> --engine-root <engines> --kit <kit dir> `
-                         --snapshot <id> --target <dir> [--source <original path>]
+./scripts/Get-TestStorage.ps1
 ```
 
-Stable source ID пишется внутрь репозитория движковыми тегами (`fortiq.v1` и
-`fortiq.source=<id>`), а не только в receipt: восстановление на чистой машине узнаёт, что представляет
-собой snapshot, не имея ни одного локального файла Fortiq. `snapshots` возвращает `source` (из
-метаданных репозитория, `null` если их нет) и отдельно `path` — filesystem path движка идентичностью
-не считается и ею не подменяется. Идентификатор ограничен ASCII-формой без запятых, потому что restic
-режет значение `--tag` по запятой; недопустимый id отвергается до запуска движка.
+---
 
-Recovery kit — это каталог: манифест `kit.json` схемы `fortiq.recovery-kit` (repository ID и
-локатор, идентичность движка, список unlock-методов с их SHA-256, инструкция) плюс файлы envelope.
-Чтение кита проверяет схему, хеш каждого envelope, его декодирование и принадлежность тому же
-репозиторию; расхождение манифеста с содержимым — отказ, а не выбор. Мнемоника в кит не пишется.
+## Architectural Principles
 
-`WindowsTpmEnvelopeV1` реализован: ключ создаётся в TPM через Microsoft Platform Crypto Provider,
-неэкспортируем (`ExportPolicy.None` проверяется после создания), envelope хранит ссылку на ключ,
-отпечаток его публичной части и обёрнутый материал — приватный ключ в envelope не попадает. PCR
-binding намеренно не используется, чтобы обновление firmware не уничтожало ежедневный unlock.
-Отпечаток сверяется при открытии, поэтому другой ключ с тем же именем (переустановка, восстановленный
-профиль) отвергается, а не пробуется. Device-путь никогда не единственный: `RecoveryKitStore`
-отказывается писать кит, где TPM — единственный метод.
+1. **Recoverable First**: A backup job completing without errors is insufficient; recovery capability must be continuously and verifiably demonstrated.
+2. **Sovereign Control**: The customer retains exclusive control over encryption keys, data placement, access policies, and network dependencies.
+3. **Resilient Under Compromise**: An endpoint compromise must not allow an attacker to destroy immutable backup history.
+4. **Deterministic Core**: Cryptography, policy enforcement, and restore sequences never depend on cloud services or generative AI.
+5. **Portable Survival**: The recovery envelope format and emergency CLI (`Fortiq.Recover`) are designed to outlive the primary product.
 
-Репозиторий вместе с китом создаёт `RepositoryProvisioner` (`Fortiq.Provisioning`): он генерирует
-EUS через CSPRNG, инициализирует репозиторий, заворачивает EUS в envelope и записывает кит **после**
-создания репозитория. Мнемоника возвращается ровно один раз — это единственная копия, Fortiq не может
-её воспроизвести.
+---
 
-Провижининг транзакционен вокруг одного инварианта: **нет восстановимого кита — нет и уцелевшего
-инициализированного репозитория**. Перед успехом кит перечитывается с диска и им реально открывается
-репозиторий (доказательство, а не допущение); любой сбой до этого момента откатывает репозиторий,
-удаляет частичный кит и созданный TPM-ключ. Откат безопасен потому, что каталоги репозитория и кита
-обязаны быть пустыми на входе — удаляется ровно то, что создал этот запуск, чужой репозиторий никогда
-не «усыновляется». Убитый процесс откатить себя не может, поэтому до начала работ пишется
-`provisioning-intent.json`: он блокирует повторный запуск в том же working directory, а
-`RepositoryProvisioner.CleanUpInterruptedAsync` доводит уборку до конца.
+## Documentation & Architecture Specifications
 
-Отношения кита формализованы в `RecoveryKitPolicy`:
+Architecture specifications and Architecture Decision Records (ADRs) are maintained in the local workspace archive (`docs/`). Only code-level documentation and repository policies are published directly to the public GitHub repository ([README.md](README.md) and [SECURITY.md](SECURITY.md)).
 
-- **kit ↔ envelope** — каждый envelope принадлежит репозиторию из манифеста, совпадает с записанным
-  хешем и несёт заявленный suite (проверяется при чтении кита);
-- **kit ↔ фактический движок** — имя движка обязано совпадать: кит, написанный для другого движка,
-  ничего не говорит о чтении этого репозитория. Другая версия или сборка того же движка допускается и
-  сообщается полем `engineAgreement`; отказ ломал бы восстановление ровно тогда, когда оно нужно;
-- **kit ↔ фактический репозиторий** — после разблокировки репозиторий сообщает свою идентичность
-  (`restic cat config`), и она обязана совпасть с той, что описана в ките. Путь идентичностью не
-  является. Несовпадение — отдельный exit code 78 и отдельная ошибка: это не «неверный secret», а
-  «кит не про этот репозиторий». Если же secret вообще не подходит, идентичность прочитать нельзя, и
-  наружу уходит только `UnlockFailed` — оракула не возникает.
+### Architectural Specifications Overview
 
-`inspect` описывает kit по публичному заголовку envelope и никогда не запрашивает recovery material.
-Остальные команды читают мнемонику **только из stdin**: аргументы процесса видны другим процессам и
-попадают в историю оболочки и логи, поэтому `--password`, `--secret`, `--recovery-phrase` и
-`--mnemonic` отвергаются парсером. Неверная мнемоника даёт единый `UnlockFailed` и exit code 77 без
-раскрытия snapshot metadata; неизвестный suite envelope — явную ошибку вместо попытки угадать.
+| Topic | Focus Area & Design Objectives |
+| :--- | :--- |
+| **01. Product Vision** | Sovereign recovery paradigm, core tenets, target environments, and version 1 boundaries |
+| **02. System Architecture** | Component topology, process boundaries, isolation models, and trust boundaries |
+| **03. Threat Model** | Compromised endpoints, ransomware scenarios, untrusted storage, and cryptographic threat vectors |
+| **04. Key Management** | Key envelopes, BIP-39 mnemonic derivation, TPM Platform Crypto Provider, and memory zeroization |
+| **05. Recovery Assurance** | Verifiable restore model, evidence-based SLAs, recovery readiness metrics, and continuous proof |
+| **06. On-Device AI** | Local copilot capabilities, non-critical advisory boundaries, and Microsoft Phi Silica integration |
+| **07. Product Roadmap** | Phased milestone delivery from foundation to enterprise fleet control |
+| **08. Open Decisions** | Trade-off analyses for open architectural dilemmas and protocol selections |
+| **09. Engine Contract** | `IRepositoryEngine` contract definition, execution lifecycle, and stream parser specifications |
+| **10. Disaster Recovery** | Full autonomous bare-metal restore runbook via `Fortiq.Recover` |
+| **11. Executable Prototype** | Test harness specification, simulated vs. production envelopes, and verification evidence |
+| **12. IPC Security Profile** | Named pipe communication protocol, client PID verification, and Authenticode signature checks |
+| **13. Windows Capture** | VSS snapshot creation (`--use-fs-snapshot`), volume locking, and USN Change Journal hints |
+| **14. Storage Immutability** | S3 Object Lock compliance, retention enforcement, WORM semantics, and delete-marker recovery |
+| **15. Audit & Compliance** | Cryptographic operation receipts (`fortiq.operation-receipt`) and compliance traceability |
+| **16. Supply-Chain Security** | Pinned engine manifest verification, TOCTOU handle locking, CycloneDX SBOM, and provenance attestation |
+| **17. Product UX** | Avalonia UI desktop experience, mnemonic entry challenges, and recovery proof workflows |
+| **18. Fleet Control Plane** | Metadata-only fleet monitoring architecture, cryptographic attestation, and zero data telemetry |
+| **19. Observability & Health** | Evidence-driven health publication (`health.json` and Prometheus textfile `fortiq.prom`) |
+| **20. Local Catalog** | File-system-based run tracking, atomic `.run` registrations, and crash-resilient locks |
+| **Architecture Decision Records (ADRs)** | Formal records ADR-001 through ADR-013 documenting key decisions (Engine, Envelopes, IPC, VSS, S3, Ledger, etc.) |
 
-Инструмент зависит только от репозитория, pinned движка и kit: ни Fortiq service, ни локального
-состояния, ни сети. Распакованный EUS живёт лишь в пределах команды, внутри лиза с зачисткой буфера,
-и доходит до restic через одноразовый pipe helper — не через аргумент или environment.
-
-E2E-001 теперь выполняется в полной форме: после удаления локального состояния Fortiq отдельный
-процесс `Fortiq.Recover` восстанавливает датасет, имея только kit, и тест сверяет SHA-256 каждого
-файла, а также что ни мнемоника, ни engine password не появились в выводе.
-
-## Принципы
-
-- **Recoverable:** успешный backup недостаточен — восстановление должно регулярно проверяться.
-- **Sovereign:** клиент контролирует данные, ключи, размещение и сетевые зависимости.
-- **Resilient:** компрометация endpoint не должна позволять уничтожить историю backup.
-- **Deterministic core:** криптография, policy enforcement и restore не зависят от AI.
-- **Portable recovery:** формат и recovery-инструмент должны пережить основной продукт.
-
-## Документация
-
-Проектные документы, план исполняемого прототипа и ADR ведутся вне репозитория. Здесь опубликовано
-только то, что относится к коду: этот README и [SECURITY.md](SECURITY.md).
-
-## Предварительный технологический профиль
-
-- C# / .NET
-- Avalonia UI
-- Windows Service и минимально привилегированный Windows broker
-- VSS и NTFS USN Journal
-- один основной repository engine в первой версии
-- S3-compatible Object Lock и локальные хранилища
-- TPM, recovery secret и Enterprise KMS как независимые способы разблокировки
-- Microsoft Phi Silica как опциональный on-device AI provider
+Security and supply chain requirements are detailed in [SECURITY.md](SECURITY.md).

@@ -2,7 +2,7 @@ using Fortiq.Infrastructure.Keys;
 using Fortiq.Monitoring;
 using Fortiq.Scheduling;
 
-namespace Fortiq.Service;
+namespace Fortiq.Operations;
 
 /// <summary>
 /// Assembles what this machine knows about its repositories and writes it where a monitoring system

@@ -20,6 +20,8 @@
     <ProjectReference Include="..\Fortiq.Desktop.ViewModels\Fortiq.Desktop.ViewModels.csproj" />
     <ProjectReference Include="..\Fortiq.Provisioning\Fortiq.Provisioning.csproj" />
     <ProjectReference Include="..\Fortiq.Monitoring\Fortiq.Monitoring.csproj" />
+    <ProjectReference Include="..\Fortiq.Operations\Fortiq.Operations.csproj" />
+    <ProjectReference Include="..\Fortiq.Scheduling\Fortiq.Scheduling.csproj" />
   </ItemGroup>
 
 </Project>

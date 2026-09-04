@@ -1,3 +1,4 @@
+using Fortiq.Operations;
 using System.Runtime.Versioning;
 using Fortiq.Application;
 using Fortiq.Infrastructure.Keys;

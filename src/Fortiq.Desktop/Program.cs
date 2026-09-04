@@ -5,7 +5,9 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Monitoring;
+using Fortiq.Operations;
 using Fortiq.Provisioning;
+using Fortiq.Scheduling;
 
 namespace Fortiq.Desktop;
 
@@ -29,10 +31,21 @@ public sealed class FortiqApplication : Avalonia.Application
                 new RepositoryProvisioner(engineRoot),
                 stateDirectory);
 
+            var reportPath = Path.Combine(stateDirectory, "health", "health.json");
+            var schedules = new FileSystemScheduleStore(stateDirectory);
+            var receipts = Path.Combine(stateDirectory, "receipts");
+
+            var prove = new ProveRecoveryAdapter(
+                schedules,
+                new ProvenRestore(engineRoot, stateDirectory, receiptDirectory: receipts),
+                new HealthPublisher(
+                    schedules,
+                    receipts,
+                    reportPath,
+                    Path.Combine(stateDirectory, "health", "fortiq.prom")));
+
             desktop.MainWindow = new MainWindow(
-                new RepositoriesViewModel(
-                    new HealthFileSource(Path.Combine(stateDirectory, "health", "health.json")),
-                    new RecoveryNotWiredUp()),
+                new RepositoriesViewModel(new HealthFileSource(reportPath), prove),
                 () => new ProtectRepositoryViewModel(protect));
         }
 
@@ -80,17 +93,6 @@ public sealed class HealthFileSource : IHealthSource
         int Version,
         DateTimeOffset ProducedAt,
         IReadOnlyList<RepositoryHealth> Repositories);
-}
-
-/// <summary>
-/// Proving recovery means restoring, which needs the kit and the engine. Until the desktop is given
-/// those, it says so instead of pretending the button did something.
-/// </summary>
-public sealed class RecoveryNotWiredUp : IProveRecovery
-{
-    public Task<bool> ProveAsync(string repositoryId, CancellationToken cancellationToken) =>
-        Task.FromException<bool>(new NotSupportedException(
-            "Proving recovery from the desktop is not connected yet; run a restore with Fortiq.Recover."));
 }
 
 public static class Program
