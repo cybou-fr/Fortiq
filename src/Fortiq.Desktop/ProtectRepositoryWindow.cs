@@ -5,18 +5,16 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Fortiq.Desktop.ViewModels;
 using System.Globalization;
+using static Fortiq.Desktop.DesignTokens;
 
 namespace Fortiq.Desktop;
 
 public sealed class ProtectRepositoryWindow : Window
 {
-    private static readonly IBrush Canvas = Paint("#F6F8FB"), Surface = Paint("#FFFFFF"), Line = Paint("#E3E8EF");
-    private static readonly IBrush Ink = Paint("#172033"), Muted = Paint("#667085"), Blue = Paint("#0866D9");
-    private static readonly IBrush PaleBlue = Paint("#EAF3FF"), Green = Paint("#159455"), Amber = Paint("#B7791F");
     private readonly ProtectRepositoryViewModel _model;
     private readonly ContentControl _stepperHost = new();
     private readonly StackPanel _content = new() { Spacing = 18 };
-    private readonly TextBlock _failure = Text(string.Empty, 12, FontWeight.Normal, Paint("#B42318"), true);
+    private readonly TextBlock _failure = Text(string.Empty, 12, FontWeight.Normal, Failure, true);
     private int _setupStep;
     private Button? _next;
 
@@ -25,7 +23,7 @@ public sealed class ProtectRepositoryWindow : Window
         _model = model ?? throw new ArgumentNullException(nameof(model));
         Title = "Protect your data"; Icon = FortiqBrand.WindowIcon();
         Width = 800; Height = 660; MinWidth = 700; MinHeight = 580;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner; Background = Canvas;
+        WindowStartupLocation = WindowStartupLocation.CenterOwner; Background = CanvasBackground;
 
         Content = new ScrollViewer
         {
@@ -66,7 +64,7 @@ public sealed class ProtectRepositoryWindow : Window
             var marker = new Border
             {
                 Width = 24, Height = 24, CornerRadius = new CornerRadius(12),
-                Background = selected ? Blue : Paint("#D5DBE5"),
+                Background = selected ? Brand : StepInactive,
                 Child = Text((index + 1).ToString(CultureInfo.InvariantCulture), 11, FontWeight.SemiBold, Brushes.White),
                 HorizontalAlignment = HorizontalAlignment.Center
             };
@@ -176,10 +174,10 @@ public sealed class ProtectRepositoryWindow : Window
             Spacing = 10,
             Children =
             {
-                Text(_model.BackupScheduled ? "Protection is ready" : "Repository created", 22, FontWeight.SemiBold, Green),
+                Text(_model.BackupScheduled ? "Protection is ready" : "Repository created", 22, FontWeight.SemiBold, Recoverable),
                 Text(_model.BackupScheduled ? "The first backup is scheduled. Recovery will remain unproven until Fortiq completes a real restore test." : _model.SchedulingFailure ?? "Automatic scheduling needs attention.", 13, FontWeight.Normal, Muted, true)
             }
-        }, Paint("#EAF8F0"), Green));
+        }, RecoverableSurface, Recoverable));
         var close = Primary("Done"); close.Click += (_, _) => Close();
         _content.Children.Add(new StackPanel { HorizontalAlignment = HorizontalAlignment.Right, Children = { close } });
     }
@@ -219,14 +217,13 @@ public sealed class ProtectRepositoryWindow : Window
 
     private static StackPanel SectionTitle(string title, string subtitle) => new() { Spacing = 4, Children = { Text(title, 19, FontWeight.SemiBold, Ink), Text(subtitle, 12, FontWeight.Normal, Muted, true) } };
     private static StackPanel Summary(string label, string value) => new() { Spacing = 3, Children = { Text(label, 11, FontWeight.SemiBold, Muted), Text(value, 13, FontWeight.Normal, Ink, true) } };
-    private static Border Info(string value) => Card(Text(value, 12, FontWeight.Normal, Blue, true), PaleBlue, Paint("#B9D7FF"));
-    private static Border Warning(string value) => Card(Text(value, 12, FontWeight.Normal, Paint("#8A5A00"), true), Paint("#FFF8E7"), Paint("#F4CC73"));
-    private static Border Badge(string value) => new() { Background = PaleBlue, CornerRadius = new CornerRadius(10), Padding = new Thickness(9, 3), HorizontalAlignment = HorizontalAlignment.Left, Child = Text(value, 10, FontWeight.SemiBold, Blue) };
+    private static Border Info(string value) => Card(Text(value, 12, FontWeight.Normal, Brand, true), InfoSurface, InfoLine);
+    private static Border Warning(string value) => Card(Text(value, 12, FontWeight.Normal, Caution, true), UnprovenSurface, UnprovenLine);
+    private static Border Badge(string value) => new() { Background = InfoSurface, CornerRadius = new CornerRadius(10), Padding = new Thickness(9, 3), HorizontalAlignment = HorizontalAlignment.Left, Child = Text(value, 10, FontWeight.SemiBold, Brand) };
     private static StackPanel Field(string label, string value, Action<string> set) { var box = new TextBox { Text = value }; box.TextChanged += (_, _) => set(box.Text ?? string.Empty); return new StackPanel { Spacing = 5, Children = { Text(label, 13, FontWeight.SemiBold, Ink), box } }; }
     private static Border Card(Control child, IBrush? background = null, IBrush? border = null) => new() { Child = child, Background = background ?? Surface, BorderBrush = border ?? Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(7), Padding = new Thickness(16) };
-    private static Button Primary(string label) => new() { Content = label, Background = Blue, Foreground = Brushes.White, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(5), Padding = new Thickness(16, 9), FontWeight = FontWeight.SemiBold };
+    private static Button Primary(string label) => new() { Content = label, Background = Brand, Foreground = Brushes.White, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(5), Padding = new Thickness(16, 9), FontWeight = FontWeight.SemiBold };
     private static Button Secondary(string label) => new() { Content = label, Background = Surface, Foreground = Ink, BorderBrush = Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(14, 8) };
     private static TextBlock Text(string value, double size, FontWeight weight, IBrush color, bool wrap = false) => new() { Text = value, FontSize = size, FontWeight = weight, Foreground = color, TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center };
     private static bool Has(string value) => !string.IsNullOrWhiteSpace(value);
-    private static SolidColorBrush Paint(string value) => new(Color.Parse(value));
 }

@@ -4,17 +4,15 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Monitoring;
+using static Fortiq.Desktop.DesignTokens;
 
 namespace Fortiq.Desktop;
 
 public sealed class MainWindow : Window
 {
-    private static readonly IBrush Canvas = Brush("#F6F8FB"), Surface = Brush("#FFFFFF"), Line = Brush("#E3E8EF");
-    private static readonly IBrush Ink = Brush("#172033"), Muted = Brush("#667085"), Blue = Brush("#0866D9");
-    private static readonly IBrush PaleBlue = Brush("#EAF3FF"), Green = Brush("#159455"), PaleGreen = Brush("#EAF8F0"), Amber = Brush("#B7791F");
     private readonly RepositoriesViewModel _model;
     private readonly Func<ProtectRepositoryViewModel>? _wizard;
-    private readonly Border _page = new() { Background = Canvas };
+    private readonly Border _page = new() { Background = CanvasBackground };
     private readonly Dictionary<string, Button> _navigation = new(StringComparer.Ordinal);
     private string _activeSection = "Home";
     private bool _historySelected;
@@ -27,7 +25,7 @@ public sealed class MainWindow : Window
         _wizard = wizard;
         Title = "Fortiq";
         Icon = FortiqBrand.WindowIcon();
-        Width = 1000; Height = 650; MinWidth = 850; MinHeight = 560; Background = Canvas;
+        Width = 1000; Height = 650; MinWidth = 850; MinHeight = 560; Background = CanvasBackground;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         var shell = new Grid { ColumnDefinitions = new ColumnDefinitions("210,*") };
@@ -57,7 +55,7 @@ public sealed class MainWindow : Window
         menu.Children.Add(Nav("Recovery Kit", RenderRecoveryKit));
         menu.Children.Add(Nav("Settings", () => ShowSection("Settings", "Application, schedule, storage and service settings.")));
         Grid.SetRow(menu, 1); rail.Children.Add(menu);
-        var service = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, Children = { new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(4), Background = Green, VerticalAlignment = VerticalAlignment.Center }, Text("Service running", 11, FontWeight.Normal, Green) } };
+        var service = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, Children = { new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(4), Background = Recoverable, VerticalAlignment = VerticalAlignment.Center }, Text("Service running", 11, FontWeight.Normal, Recoverable) } };
         var footer = new StackPanel { Spacing = 4, Margin = new Thickness(4, 0), Children = { Text("Fortiq", 13, FontWeight.SemiBold, Ink), Text("Protect What Matters", 11, FontWeight.Normal, Muted), service } };
         Grid.SetRow(footer, 2); rail.Children.Add(footer);
         return new Border { Background = Surface, BorderBrush = Line, BorderThickness = new Thickness(0, 0, 1, 0), Child = rail };
@@ -92,8 +90,8 @@ public sealed class MainWindow : Window
 
     private static void ApplyNavigationStyle(Button button, bool selected)
     {
-        button.Background = selected ? PaleBlue : Brushes.Transparent;
-        button.Foreground = selected ? Blue : Ink;
+        button.Background = selected ? InfoSurface : Brushes.Transparent;
+        button.Foreground = selected ? Brand : Ink;
         button.FontWeight = selected ? FontWeight.SemiBold : FontWeight.Normal;
     }
 
@@ -105,7 +103,7 @@ public sealed class MainWindow : Window
         if (_model.State is HealthStoreState.NotInitialized or HealthStoreState.Empty) body.Children.Add(Welcome());
         else { body.Children.Add(Hero()); body.Children.Add(Metrics()); body.Children.Add(Repositories()); }
         if (_model.Failure is { Length: > 0 })
-            body.Children.Add(Card(new StackPanel { Spacing = 5, Children = { Text("We could not read the latest protection status.", 14, FontWeight.SemiBold, Brush("#B42318")), Text(_model.Failure, 12, FontWeight.Normal, Muted, true) } }, Brush("#FFF4F2"), Brush("#FDA29B")));
+            body.Children.Add(Card(new StackPanel { Spacing = 5, Children = { Text("We could not read the latest protection status.", 14, FontWeight.SemiBold, Failure), Text(_model.Failure, 12, FontWeight.Normal, Muted, true) } }, AtRiskSurface, AtRiskLine));
         _page.Child = new ScrollViewer { Content = body };
     }
 
@@ -129,8 +127,8 @@ public sealed class MainWindow : Window
     {
         var risk = _model.Repositories.Any(x => x.Health.Verdict == HealthVerdict.AtRisk);
         var unproven = _model.Repositories.Any(x => x.Health.Verdict == HealthVerdict.Unproven);
-        var tone = risk ? Brush("#FFF4F2") : unproven ? Brush("#FFF8E7") : PaleGreen;
-        var accent = risk ? Brush("#D92D20") : unproven ? Amber : Green;
+        var tone = risk ? AtRiskSurface : unproven ? UnprovenSurface : RecoverableSurface;
+        var accent = risk ? AtRisk : unproven ? Unproven : Recoverable;
         var detail = risk ? "One or more sources need attention. Review the findings below."
             : unproven ? "Backups exist, but at least one source still needs a proven restore."
             : "All critical checks are healthy. Fortiq has recently restored and verified your data.";
@@ -175,7 +173,7 @@ public sealed class MainWindow : Window
 
     private static Border Metric(string title, string value, string status) => Card(new StackPanel
     {
-        Spacing = 7, Children = { Text(title, 12, FontWeight.Normal, Muted), Text(value, 17, FontWeight.SemiBold, Ink), Text(status, 11, FontWeight.SemiBold, status is "Healthy" or "Verified" or "Protected" or "Completed" ? Green : Amber) }
+        Spacing = 7, Children = { Text(title, 12, FontWeight.Normal, Muted), Text(value, 17, FontWeight.SemiBold, Ink), Text(status, 11, FontWeight.SemiBold, status is "Healthy" or "Verified" or "Protected" or "Completed" ? Recoverable : Unproven) }
     }, Surface, Line);
 
     private void RenderBackups()
@@ -241,14 +239,14 @@ public sealed class MainWindow : Window
         row.Children.Add(Text(first, heading ? 11 : 13, weight, color, true));
         row.Children.Add(At(Text(second, heading ? 11 : 12, weight, color, true), 1));
         row.Children.Add(At(Text(third, heading ? 11 : 12, weight, color, true), 2));
-        var statusColor = !heading && fourth is "Recoverable" or "Completed" or "Healthy" or "Verified" ? Green : !heading ? Amber : color;
+        var statusColor = !heading && fourth is "Recoverable" or "Completed" or "Healthy" or "Verified" ? Recoverable : !heading ? Unproven : color;
         row.Children.Add(At(Text(fourth, heading ? 11 : 12, heading ? weight : FontWeight.SemiBold, statusColor), 3));
         return row;
     }
 
     private static Button Tab(string label, bool selected, Action action)
     {
-        var button = new Button { Content = label, Padding = new Thickness(14, 7), Background = selected ? PaleBlue : Brushes.Transparent, Foreground = selected ? Blue : Muted, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(5), FontWeight = selected ? FontWeight.SemiBold : FontWeight.Normal };
+        var button = new Button { Content = label, Padding = new Thickness(14, 7), Background = selected ? InfoSurface : Brushes.Transparent, Foreground = selected ? Brand : Muted, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(5), FontWeight = selected ? FontWeight.SemiBold : FontWeight.Normal };
         button.Click += (_, _) => action(); return button;
     }
 
@@ -277,8 +275,8 @@ public sealed class MainWindow : Window
     private Border RecoveryHero(RepositoryRowViewModel repository)
     {
         var proven = repository.Health.Facts.LastProvenRestoreAt;
-        var tone = proven is null ? Brush("#FFF8E7") : PaleGreen;
-        var accent = proven is null ? Amber : Green;
+        var tone = proven is null ? UnprovenSurface : RecoverableSurface;
+        var accent = proven is null ? Unproven : Recoverable;
         var run = Primary(_model.Busy ? "Running recovery proof…" : "Run recovery proof now");
         run.IsEnabled = repository.CanProveRecovery && !_model.Busy;
         run.Click += async (_, _) => await _model.ProveRecoveryAsync(repository, CancellationToken.None);
@@ -339,20 +337,20 @@ public sealed class MainWindow : Window
             Spacing = 7,
             Children =
             {
-                Text(present ? "Recovery kit is available" : "Recovery kit is missing", 21, FontWeight.SemiBold, present ? Green : Brush("#B42318")),
+                Text(present ? "Recovery kit is available" : "Recovery kit is missing", 21, FontWeight.SemiBold, present ? Recoverable : Failure),
                 Text(present ? "Fortiq found recovery material for this repository." : "This repository cannot be opened on another machine until its recovery material is restored.", 13, FontWeight.Normal, Muted, true),
                 Text($"Repository ID: {_kitSource.Health.RepositoryId}", 11, FontWeight.Normal, Muted, true)
             }
-        }, present ? PaleGreen : Brush("#FFF4F2"), present ? Green : Brush("#D92D20"), new Thickness(22)));
+        }, present ? RecoverableSurface : AtRiskSurface, present ? Recoverable : AtRisk, new Thickness(22)));
         body.Children.Add(Card(new StackPanel
         {
             Spacing = 8,
             Children =
             {
-                Text("Your recovery phrase is sensitive", 15, FontWeight.SemiBold, Brush("#8A5A00")),
+                Text("Your recovery phrase is sensitive", 15, FontWeight.SemiBold, Caution),
                 Text("Fortiq does not retain a displayable copy after setup. Use the offline copy you verified in the protection wizard; never store it on this computer or in cloud notes.", 12, FontWeight.Normal, Muted, true)
             }
-        }, Brush("#FFF8E7"), Brush("#F4CC73"), new Thickness(18)));
+        }, UnprovenSurface, UnprovenLine, new Thickness(18)));
 
         var verify = Primary("Verify recovery with a restore");
         verify.IsEnabled = present && _kitSource.CanProveRecovery;
@@ -395,14 +393,13 @@ public sealed class MainWindow : Window
         var button = primary ? Primary(label) : Secondary(label);
         button.Click += async (_, _) => await action(); Grid.SetColumn(button, column); return button;
     }
-    private static Button Primary(string label) => new() { Content = label, Background = Blue, Foreground = Brushes.White, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(5), Padding = new Thickness(17, 9), HorizontalAlignment = HorizontalAlignment.Left, FontWeight = FontWeight.SemiBold };
+    private static Button Primary(string label) => new() { Content = label, Background = Brand, Foreground = Brushes.White, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(5), Padding = new Thickness(17, 9), HorizontalAlignment = HorizontalAlignment.Left, FontWeight = FontWeight.SemiBold };
     private static Button Secondary(string label) => new() { Content = label, Background = Surface, Foreground = Ink, BorderBrush = Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(14, 7), HorizontalAlignment = HorizontalAlignment.Left };
     private static Border Card(Control child, IBrush background, IBrush border, Thickness? padding = null) => new() { Child = child, Background = background, BorderBrush = border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = padding ?? new Thickness(16) };
-    private static StackPanel Check(string label) => new() { Orientation = Orientation.Horizontal, Spacing = 9, Children = { new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Green, VerticalAlignment = VerticalAlignment.Center }, Text(label, 13, FontWeight.Normal, Ink) } };
+    private static StackPanel Check(string label) => new() { Orientation = Orientation.Horizontal, Spacing = 9, Children = { new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Recoverable, VerticalAlignment = VerticalAlignment.Center }, Text(label, 13, FontWeight.Normal, Ink) } };
     private static TextBlock Text(string value, double size, FontWeight weight, IBrush color, bool wrap = false) => new() { Text = value, FontSize = size, FontWeight = weight, Foreground = color, TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center };
     private static T At<T>(T control, int column) where T : Control { Grid.SetColumn(control, column); return control; }
     private static void Add(Grid grid, Control control, int column) { Grid.SetColumn(control, column); grid.Children.Add(control); }
-    private static SolidColorBrush Brush(string value) => new(Color.Parse(value));
     private static string Relative(DateTimeOffset? value)
     {
         if (value is null) return "Not yet"; var age = DateTimeOffset.UtcNow - value.Value;
