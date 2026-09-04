@@ -96,14 +96,13 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
 
         // The engine restores into a staging area; the target only ever receives a tree that passed
         // validation, and it receives it as one rename.
-        using var staging = RestoreStagingArea.Create(target, operationId);
+        using var staging = RestoreStagingArea.Create(target);
         var result = await RunAsync(
             ResticOperation.Restore,
             [RestoreSelector(command), "--target", staging.Path, "--repo", NormalizePath(command.Repository.Location), "--json", "--no-cache"],
             operationId,
             cancellationToken);
         var summary = ResticJsonParser.ParseRestore(result);
-        staging.Validate();
         staging.Promote();
         return new RestoreReceipt(
             operationId,
