@@ -27,7 +27,7 @@ Fortiq is under active development. Current code enforces verified security inva
 - **S3 Object Lock & Ransomware Defense**: Support for S3-compatible object storage with Object Lock immutability verification. `S3HiddenObjectRecovery` automatically unmasks repositories subjected to malicious delete-marker tampering without touching versioned data blobs.
 - **Windows Platform Consistency**: Volume Shadow Copy Service (VSS) integration (`--use-fs-snapshot`) for point-in-time filesystem captures, alongside USN Change Journal inspection.
 - **Scheduling & Windows Service**: Robust recurrence engine (`Fortiq.Scheduling`) resolving wall-clock timezones, DST shifts, and missed-run coalescing. Unattended background execution hosted in `Fortiq.Service` authenticated via TPM device keys.
-- **Verifiable Health Observability**: `Fortiq.Monitoring` evaluates whether repositories are *proven recoverable* (distinguishing `Unproven`, `AtRisk`, and `Healthy`). Publishes status to `health.json` and Prometheus textfile (`fortiq.prom`).
+- **Verifiable Health Observability**: `Fortiq.Monitoring` evaluates whether repositories are *proven recoverable* (distinguishing `Recoverable`, `Unproven`, and `AtRisk`). Publishes status to `health.json` and Prometheus textfile (`fortiq.prom`).
 - **Modern Desktop UI**: Cross-platform Avalonia UI application (`Fortiq.Desktop`) with MVVM architecture, Protection Setup Wizard with mnemonic challenge verification, and inline restore-proof test adapter (`ProveRecoveryAdapter`).
 - **Isolated Password Broker**: One-time ephemeral Named Pipe broker (`Fortiq.PasswordHelper`) verifying client PID, open binary handle identity, account security context, and optional Authenticode digital signatures.
 
