@@ -72,8 +72,10 @@ Verified against a real S3 server rather than assumed:
   stops being visible while every version of it survives. Pruning a repository in a locked bucket
   therefore succeeds and hides data rather than destroying it.
 - So immutability protects against irreversible loss, not against a repository being made to look
-  empty. Recovering from that is an operation on the storage's versions, and Fortiq does not do it
-  yet.
+  empty. Fortiq recovers from that: `S3HiddenObjectRecovery` finds keys whose newest version is a
+  delete marker with data surviving beneath, removes those markers, and leaves every version holding
+  data untouched. It deliberately does not resurrect the engine's own locks - a healthy repository
+  always carries markers over locks it removed on purpose, and restoring one would block it.
 
 ## Password broker
 
