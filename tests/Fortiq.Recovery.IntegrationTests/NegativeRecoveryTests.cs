@@ -165,10 +165,15 @@ public sealed class NegativeRecoveryTests
         }
     }
 
+    /// <summary>
+    /// Waits until the backup is genuinely under way, which is when cancelling it means something.
+    /// This is a precondition of the test rather than the behaviour under test, so the deadline is
+    /// generous: under a loaded machine the engine can take a while to reach this point.
+    /// </summary>
     private static async Task WaitUntilRepositoryIsLockedAsync(string repository, CancellationToken cancellationToken)
     {
         var locks = Path.Combine(repository, "locks");
-        var deadline = DateTime.UtcNow.AddSeconds(30);
+        var deadline = DateTime.UtcNow.AddMinutes(3);
         while (DateTime.UtcNow < deadline)
         {
             if (Directory.Exists(locks) && Directory.EnumerateFiles(locks).Any())
@@ -176,10 +181,12 @@ public sealed class NegativeRecoveryTests
                 return;
             }
 
-            await Task.Delay(50, cancellationToken);
+            await Task.Delay(100, cancellationToken);
         }
 
-        throw new TimeoutException("The engine never locked the repository.");
+        throw new TimeoutException(
+            "The engine never started the backup, so there was nothing to cancel. This is a timing "
+            + "precondition of the test, not the behaviour it checks.");
     }
 
     private static bool TryCreateJunction(string link, string target)

@@ -40,6 +40,7 @@ public static class RecoveryCli
     public const int ExitDataError = 69;
     public const int ExitUnlockFailed = 77;
     public const int ExitKitMismatch = 78;
+    public const int ExitRepositoryBusy = 75;
 
     private static readonly JsonSerializerOptions OutputJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -72,6 +73,12 @@ public static class RecoveryCli
             // repository or snapshot detail leaks through the exit path.
             await error.WriteLineAsync("UnlockFailed");
             return ExitUnlockFailed;
+        }
+        catch (RepositoryBusyException failure)
+        {
+            // Temporary by nature: the repository is in use, and the caller may simply try later.
+            await error.WriteLineAsync(failure.Message);
+            return ExitRepositoryBusy;
         }
         catch (RecoveryKitMismatchException failure)
         {

@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\src\Fortiq.PasswordHelper\Fortiq.PasswordHelper.csproj" />
     <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Receipts\Fortiq.Infrastructure.Receipts.csproj" />
     <ProjectReference Include="..\..\src\Fortiq.Provisioning\Fortiq.Provisioning.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Runs\Fortiq.Infrastructure.Runs.csproj" />
   </ItemGroup>
 
 </Project>

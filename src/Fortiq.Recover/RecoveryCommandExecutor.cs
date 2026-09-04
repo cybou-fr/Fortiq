@@ -3,6 +3,7 @@ using Fortiq.Application;
 using Fortiq.Domain;
 using Fortiq.Infrastructure.Keys;
 using Fortiq.Infrastructure.Restic;
+using Fortiq.Infrastructure.Runs;
 
 namespace Fortiq.Recover;
 
@@ -13,9 +14,13 @@ namespace Fortiq.Recover;
 public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
 {
     private readonly string _helperPath;
+    private readonly string _runDirectory;
 
-    public RecoveryCommandExecutor(string? passwordHelperPath = null) =>
+    public RecoveryCommandExecutor(string? passwordHelperPath = null, string? runDirectory = null)
+    {
         _helperPath = passwordHelperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
+        _runDirectory = runDirectory ?? FortiqRunDirectory.Default();
+    }
 
     public async Task<object> ExecuteAsync(
         RecoveryCommand command,
@@ -50,14 +55,20 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
         var workspace = Directory.CreateTempSubdirectory("fortiq-recover-");
         try
         {
-            var adapter = ResticEngineFactory.Create(
+            var restic = ResticEngineFactory.Create(
                 engine,
                 new PasswordPipeCredentialProvider(_helperPath, lease),
                 workspace.FullName);
 
+            // Recovery runs in its own process, so it registers its work like any other run: a
+            // reconciliation elsewhere must not clear locks while a restore is in flight.
+            var adapter = new RegisteredRunBackupRepository(
+                restic,
+                new FileSystemRepositoryRunRegistry(_runDirectory));
+
             // The repository states its own identity once it is open; the kit has to be the kit for
             // that repository, not merely for whatever sits at that path.
-            var actual = await adapter.ReadRepositoryIdAsync(repository, token);
+            var actual = await restic.ReadRepositoryIdAsync(repository, token);
             RecoveryKitPolicy.RequireSameRepository(kit.Manifest, actual.ToArray());
 
             return command.Operation switch
@@ -122,7 +133,7 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
     }
 
     private static async Task<object> SnapshotsAsync(
-        IBackupRepository adapter,
+        RegisteredRunBackupRepository adapter,
         RepositoryDescriptor repository,
         EngineAgreement engineAgreement,
         CancellationToken token)
@@ -148,7 +159,7 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
     }
 
     private static async Task<object> CheckAsync(
-        IBackupRepository adapter,
+        RegisteredRunBackupRepository adapter,
         RepositoryDescriptor repository,
         EngineAgreement engineAgreement,
         CancellationToken token)
@@ -166,7 +177,7 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
     }
 
     private static async Task<object> RestoreAsync(
-        IBackupRepository adapter,
+        RegisteredRunBackupRepository adapter,
         RepositoryDescriptor repository,
         RecoveryCommand command,
         EngineAgreement engineAgreement,
