@@ -24,8 +24,7 @@ public sealed class FortiqApplication : Avalonia.Application
                     Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
                     "Fortiq");
 
-            var engineRoot = Environment.GetEnvironmentVariable("FORTIQ_ENGINE_ROOT")
-                ?? Path.Combine(AppContext.BaseDirectory, "engine");
+            var engineRoot = ResolveEngineRoot();
 
             var protect = new ProtectRepositoryAdapter(
                 new RepositoryProvisioner(engineRoot),
@@ -50,6 +49,34 @@ public sealed class FortiqApplication : Avalonia.Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static string ResolveEngineRoot()
+    {
+        if (Environment.GetEnvironmentVariable("FORTIQ_ENGINE_ROOT") is { Length: > 0 } configured && Directory.Exists(configured))
+        {
+            return configured;
+        }
+
+        var candidate = Path.Combine(AppContext.BaseDirectory, "engines");
+        if (File.Exists(Path.Combine(candidate, "manifest.json")))
+        {
+            return candidate;
+        }
+
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var enginesPath = Path.Combine(directory.FullName, "engines");
+            if (File.Exists(Path.Combine(enginesPath, "manifest.json")))
+            {
+                return enginesPath;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return candidate;
     }
 }
 
