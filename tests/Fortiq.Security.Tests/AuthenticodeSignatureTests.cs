@@ -13,12 +13,17 @@ namespace Fortiq.Security.Tests;
 public sealed class AuthenticodeSignatureTests
 {
     [SkippableFact]
-    public void AWindowsBinaryIsReportedAsTrusted()
+    public void ASignedBinaryThisMachineTrustsIsReportedAsTrusted()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Authenticode is a Windows notion.");
-        var system = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "kernel32.dll");
 
-        Assert.Equal(SignatureStatus.Trusted, AuthenticodeSignature.Verify(system));
+        // Which files come back trusted depends on how the installation signs them - a catalog entry
+        // is not the same as an embedded signature, and Windows editions differ - so this asserts
+        // that a trusted file is recognised where one exists rather than that any given file is.
+        var trusted = TrustedSample();
+        Skip.If(trusted is null, "This machine exposes no file this check reports as trusted.");
+
+        Assert.Equal(SignatureStatus.Trusted, AuthenticodeSignature.Verify(trusted!));
     }
 
     [SkippableFact]
@@ -42,13 +47,16 @@ public sealed class AuthenticodeSignatureTests
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Authenticode is a Windows notion.");
 
-        var copy = Path.Combine(Path.GetTempPath(), "fortiq-tampered-" + Guid.NewGuid().ToString("N") + ".dll");
-        File.Copy(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "kernel32.dll"), copy);
+        var original = TrustedSample();
+        Skip.If(original is null, "This machine has no trusted binary to tamper with.");
+
+        var copy = Path.Combine(Path.GetTempPath(), "fortiq-tampered-" + Guid.NewGuid().ToString("N") + Path.GetExtension(original!));
+        File.Copy(original!, copy);
         try
         {
             Skip.IfNot(
                 AuthenticodeSignature.Verify(copy) == SignatureStatus.Trusted,
-                "This machine has no trusted binary to tamper with.");
+                "The signature of this sample does not travel with a copy of it.");
 
             using (var stream = new FileStream(copy, FileMode.Open, FileAccess.Write))
             {
@@ -65,6 +73,23 @@ public sealed class AuthenticodeSignatureTests
         {
             File.Delete(copy);
         }
+    }
+
+    /// <summary>A file this machine reports as trusted, if it has one.</summary>
+    private static string? TrustedSample()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "kernel32.dll"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+            Environment.ProcessPath ?? string.Empty
+        };
+
+        return candidates.FirstOrDefault(candidate =>
+            !string.IsNullOrEmpty(candidate)
+            && File.Exists(candidate)
+            && AuthenticodeSignature.Verify(candidate) == SignatureStatus.Trusted);
     }
 
     [SkippableFact]
