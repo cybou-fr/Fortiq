@@ -51,6 +51,13 @@ jobs:
           }
           if ($failed) { throw "One or more test assemblies failed." }
 
+      - name: Report failed tests as annotations
+        if: always()
+        shell: pwsh
+        # A failing job whose only annotation is "exit code 1" cannot be diagnosed without its log,
+        # and a log is not always reachable. The names and messages of failed tests belong here.
+        run: ./scripts/Write-TestFailures.ps1
+
       - name: Upload receipts and diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

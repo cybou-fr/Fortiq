@@ -43,6 +43,11 @@ jobs:
           }
           if ($failed) { throw "One or more test assemblies failed." }
 
+      - name: Report failed tests as annotations
+        if: always()
+        shell: pwsh
+        run: ./scripts/Write-TestFailures.ps1
+
       - name: Publish release artifacts
         shell: pwsh
         run: ./scripts/New-ReleaseArtifacts.ps1
