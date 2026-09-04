@@ -19,7 +19,9 @@ public sealed record BackupReceipt(
     RepositoryId RepositoryId,
     string SnapshotId,
     ulong FilesProcessed = 0,
-    ulong BytesProcessed = 0);
+    ulong BytesProcessed = 0,
+    ulong BytesAdded = 0,
+    ulong FilesChanged = 0);
 
 public sealed record CheckReceipt(Guid OperationId, RepositoryId RepositoryId, bool IsHealthy);
 

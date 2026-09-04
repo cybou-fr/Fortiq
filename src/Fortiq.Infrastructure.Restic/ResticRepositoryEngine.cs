@@ -71,7 +71,9 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
             command.Repository.Id,
             summary.SnapshotId,
             summary.TotalFilesProcessed,
-            summary.TotalBytesProcessed);
+            summary.TotalBytesProcessed,
+            summary.BytesAdded,
+            summary.FilesNew + summary.FilesChanged);
     }
 
     public async Task<IReadOnlyList<SnapshotDescriptor>> ListSnapshotsAsync(ListSnapshots query, CancellationToken cancellationToken)

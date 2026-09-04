@@ -9,12 +9,21 @@ public sealed record ResticVersionInfo(string Version, string GoVersion, string 
 
 public sealed record ResticInitializedRepository(string Id, string Repository);
 
+/// <summary>
+/// What one backup did. <paramref name="BytesAdded"/> is the part deduplication could not avoid
+/// writing, which is a different fact from <paramref name="TotalBytesProcessed"/> and the more
+/// telling one: a source whose files have all been rewritten is the same size as before, and only
+/// the added bytes say so.
+/// </summary>
 public sealed record ResticBackupSummary(
     string SnapshotId,
     ulong TotalFilesProcessed,
     ulong TotalBytesProcessed,
     DateTimeOffset StartedAt,
-    DateTimeOffset CompletedAt);
+    DateTimeOffset CompletedAt,
+    ulong BytesAdded = 0,
+    ulong FilesNew = 0,
+    ulong FilesChanged = 0);
 
 public sealed record ResticSnapshot(
     string Id,
@@ -77,7 +86,12 @@ public static partial class ResticJsonParser
             RequireUInt64(root, "total_files_processed"),
             RequireUInt64(root, "total_bytes_processed"),
             RequireDateTimeOffset(root, "backup_start"),
-            RequireDateTimeOffset(root, "backup_end"));
+            RequireDateTimeOffset(root, "backup_end"),
+            // Optional rather than required: these are read for observation, not for correctness, and
+            // an engine build that stopped emitting one must not fail a backup that succeeded.
+            OptionalUInt64(root, "data_added"),
+            OptionalUInt64(root, "files_new"),
+            OptionalUInt64(root, "files_changed"));
     }
 
     public static IReadOnlyList<ResticSnapshot> ParseSnapshots(ResticProcessResult result)

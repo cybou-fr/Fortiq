@@ -66,7 +66,12 @@ public sealed class ReceiptRecordingBackupRepository : IBackupRepository
             receipt => new Dictionary<string, long>(StringComparer.Ordinal)
             {
                 ["filesProcessed"] = ToMetric(receipt.FilesProcessed),
-                ["bytesProcessed"] = ToMetric(receipt.BytesProcessed)
+                ["bytesProcessed"] = ToMetric(receipt.BytesProcessed),
+                // What deduplication could not avoid writing, and how much of the source was new or
+                // rewritten. Recorded so that a later pass can compare a backup against this
+                // repository's own history rather than against a number somebody guessed.
+                ["bytesAdded"] = ToMetric(receipt.BytesAdded),
+                ["filesChanged"] = ToMetric(receipt.FilesChanged)
             },
             new ReceiptSource(
                 "directory",

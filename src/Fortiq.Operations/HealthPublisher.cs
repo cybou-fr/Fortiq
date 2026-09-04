@@ -60,7 +60,11 @@ public sealed class HealthPublisher
                     KitPresent: kit is not null,
                     StorageImmutable: kit?.Manifest.StorageProtection?.Immutable ?? false,
                     state.LastFailure ?? seen?.LastFailure),
-                now));
+                now,
+                thresholds: null,
+                // Compared against this repository's own history, which is why it is read from the
+                // receipts rather than from anything the schedule declares.
+                BackupAnomalyDetector.Inspect(seen?.Backups ?? [])));
         }
 
         var report = new HealthReport(now, repositories);

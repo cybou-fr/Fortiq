@@ -8,7 +8,12 @@ public sealed record RepositoryEvidence(
     DateTimeOffset? LastBackupAt,
     DateTimeOffset? LastHealthyCheckAt,
     DateTimeOffset? LastProvenRestoreAt,
-    string? LastFailure);
+    string? LastFailure,
+    /// <summary>Successful backups newest first, for comparing one against the rest.</summary>
+    IReadOnlyList<BackupObservation>? Backups = null)
+{
+    public IReadOnlyList<BackupObservation> Backups { get; init; } = Backups ?? [];
+}
 
 /// <summary>
 /// Reads the operation receipts a machine has kept and summarises them per repository. Receipts are
@@ -78,6 +83,7 @@ public static class ReceiptHistory
 
     private sealed class Accumulator
     {
+        private readonly List<BackupObservation> _backups = [];
         private DateTimeOffset? _backup;
         private DateTimeOffset? _check;
         private DateTimeOffset? _restore;
@@ -111,6 +117,12 @@ public static class ReceiptHistory
             {
                 case "backup":
                     _backup = Later(_backup, at);
+                    _backups.Add(new BackupObservation(
+                        at,
+                        receipt.TryGetProperty("snapshotId", out var snapshot) ? snapshot.GetString() : null,
+                        Metric(receipt, "bytesProcessed"),
+                        Metric(receipt, "bytesAdded"),
+                        Metric(receipt, "filesChanged")));
                     break;
                 case "check":
                     _check = Later(_check, at);
@@ -131,8 +143,23 @@ public static class ReceiptHistory
                 ? recorded.Message
                 : null;
 
-            return new RepositoryEvidence(repositoryId, _backup, _check, _restore, failure);
+            return new RepositoryEvidence(repositoryId, _backup, _check, _restore, failure)
+            {
+                Backups = [.. _backups.OrderByDescending(backup => backup.CompletedAt)]
+            };
         }
+
+        /// <summary>
+        /// Reads one figure a backup recorded. A receipt written before a metric existed simply does
+        /// not carry it, and zero is the honest reading: nothing was recorded, so nothing is claimed.
+        /// </summary>
+        private static long Metric(JsonElement receipt, string name) =>
+            receipt.TryGetProperty("metrics", out var metrics)
+            && metrics.ValueKind == JsonValueKind.Object
+            && metrics.TryGetProperty(name, out var value)
+            && value.TryGetInt64(out var number)
+                ? number
+                : 0;
 
         private static DateTimeOffset Later(DateTimeOffset? current, DateTimeOffset candidate) =>
             current is null || candidate > current ? candidate : current.Value;

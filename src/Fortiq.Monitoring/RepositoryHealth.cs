@@ -69,7 +69,11 @@ public sealed record HealthReport(DateTimeOffset ProducedAt, IReadOnlyList<Repos
 /// </summary>
 public static class HealthAssessor
 {
-    public static RepositoryHealth Assess(RepositoryFacts facts, DateTimeOffset now, HealthThresholds? thresholds = null)
+    public static RepositoryHealth Assess(
+        RepositoryFacts facts,
+        DateTimeOffset now,
+        HealthThresholds? thresholds = null,
+        IReadOnlyList<BackupAnomaly>? anomalies = null)
     {
         ArgumentNullException.ThrowIfNull(facts);
         var limits = thresholds ?? HealthThresholds.Default;
@@ -131,7 +135,17 @@ public static class HealthAssessor
                 "The storage holding this repository does not keep what is written to it."));
         }
 
-        return new RepositoryHealth(facts.RepositoryId, facts.ScheduleId, Verdict(findings), findings, facts);
+        // The verdict is settled before anomalies are added. An unusual backup is not a reason to
+        // say a repository cannot be recovered - the snapshots are still there and still restorable -
+        // and letting it lower the verdict would mean a large but perfectly legitimate change made
+        // Fortiq report a recovery problem that does not exist.
+        var verdict = Verdict(findings);
+        foreach (var anomaly in anomalies ?? [])
+        {
+            findings.Add(new HealthFinding("backup-unusual", anomaly.Detail));
+        }
+
+        return new RepositoryHealth(facts.RepositoryId, facts.ScheduleId, verdict, findings, facts);
     }
 
     private static HealthVerdict Verdict(List<HealthFinding> findings)
