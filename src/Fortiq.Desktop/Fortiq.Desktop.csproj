@@ -7,8 +7,14 @@
     <Nullable>enable</Nullable>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\assets\icon.ico" Link="Assets\icon.ico" />
+    <AvaloniaResource Include="..\..\assets\icon.png" Link="Assets\icon.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" />
