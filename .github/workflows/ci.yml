@@ -42,11 +42,29 @@ jobs:
         # One TRX per test assembly, named after it. A single shared file name makes the assemblies
         # overwrite each other, and the run whose evidence is lost is usually the one that failed.
         run: |
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+          $isElevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          $privilegeFilter = if ($isElevated) {
+            'PrivilegeMode!=StandardUser'
+          } else {
+            'PrivilegeMode!=ElevatedVss'
+          }
+          "VSS privilege lane: $(if ($isElevated) { 'elevated' } else { 'standard-user' })"
+
           $failed = $false
           foreach ($project in Get-ChildItem tests -Filter *.csproj -Recurse) {
-            dotnet test $project.FullName --configuration Release --no-build `
-              --logger "trx;LogFileName=$($project.BaseName).trx" `
-              --results-directory artifacts/test-results
+            $testArguments = @(
+              'test', $project.FullName,
+              '--configuration', 'Release',
+              '--no-build',
+              '--logger', "trx;LogFileName=$($project.BaseName).trx",
+              '--results-directory', 'artifacts/test-results'
+            )
+            if ($project.BaseName -eq 'Fortiq.Recovery.IntegrationTests') {
+              $testArguments += @('--filter', $privilegeFilter)
+            }
+            & dotnet @testArguments
             if ($LASTEXITCODE -ne 0) { $failed = $true }
           }
           if ($failed) { throw "One or more test assemblies failed." }

@@ -28,6 +28,7 @@ public sealed class SourceConsistencyTests
     }
 
     [SkippableFact]
+    [Trait("PrivilegeMode", "StandardUser")]
     public async Task WithoutBackupPrivilegesASnapshotBackupFailsRatherThanFallingBackToLive()
     {
         Skip.If(HasBackupPrivileges, "This session can create volume snapshots, so there is nothing to refuse.");
@@ -70,6 +71,7 @@ public sealed class SourceConsistencyTests
     }
 
     [SkippableFact]
+    [Trait("PrivilegeMode", "ElevatedVss")]
     public async Task WithBackupPrivilegesTheSnapshotIsPointInTimeAndSaysSo()
     {
         Skip.IfNot(HasBackupPrivileges, "Creating a volume snapshot needs backup privileges.");
