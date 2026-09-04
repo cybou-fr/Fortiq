@@ -147,6 +147,77 @@ public sealed class RunRegistryTests : IDisposable
     private FileSystemRepositoryRunRegistry Registry(TimeSpan? wait = null) =>
         new(_directory, wait ?? TimeSpan.FromMilliseconds(500));
 
+    [Theory]
+    [InlineData(PruneMode.ForgetOnly)]
+    [InlineData(PruneMode.ForgetAndPrune)]
+    public async Task RetentionTakesTheRepositoryToItselfInEitherMode(PruneMode mode)
+    {
+        var holder = Registry();
+        var repository = new RepositoryDescriptor(RepositoryId.Create(), @"C:
+epo");
+
+        var adapter = new RegisteredRunBackupRepository(
+            new RecordingRepository(),
+            Registry(TimeSpan.FromMilliseconds(200)));
+
+        // Something else is already reading the repository.
+        await using var reading = await holder.BeginAsync(
+            repository.Id, OperationKind.Snapshots, Guid.NewGuid(), RunExclusivity.Shared, CancellationToken.None);
+
+        // Forgetting is not merely bookkeeping. It decides what to keep from the snapshots as they
+        // stand, so a backup landing partway through applies the policy to a repository that no
+        // longer exists; and it removes snapshots a restore may be about to read, which would be
+        // recorded as a drill that could not prove recovery.
+        await Assert.ThrowsAsync<RepositoryBusyException>(
+            () => adapter.ApplyRetentionAsync(
+                new ApplyRetention(repository, new RetentionPolicy(), mode),
+                CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task NothingElseStartsWhileRetentionIsRunning()
+    {
+        var holder = Registry();
+        var repository = RepositoryId.Create();
+
+        await using var retention = await holder.BeginAsync(
+            repository, OperationKind.Retention, Guid.NewGuid(), RunExclusivity.Exclusive, CancellationToken.None);
+
+        var claimant = Registry(TimeSpan.FromMilliseconds(200));
+
+        // A backup that started here would be writing into a repository whose data is being deleted.
+        await Assert.ThrowsAsync<RepositoryBusyException>(
+            () => claimant.BeginAsync(repository, OperationKind.Backup, Guid.NewGuid(), RunExclusivity.Shared, CancellationToken.None));
+
+        await Assert.ThrowsAsync<RepositoryBusyException>(
+            () => claimant.BeginAsync(repository, OperationKind.Restore, Guid.NewGuid(), RunExclusivity.Shared, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ADrillHoldsTheRepositoryFromChoosingASnapshotUntilItHasRestoredIt()
+    {
+        var registry = Registry();
+        var repository = RepositoryId.Create();
+
+        // What a drill holds for the whole of its work.
+        await using var drill = await registry.BeginAsync(
+            repository, OperationKind.Restore, Guid.NewGuid(), RunExclusivity.Shared, CancellationToken.None);
+
+        // Retention cannot slip in and forget the snapshot the drill has just chosen.
+        await Assert.ThrowsAsync<RepositoryBusyException>(
+            () => Registry(TimeSpan.FromMilliseconds(200)).BeginAsync(
+                repository, OperationKind.Retention, Guid.NewGuid(), RunExclusivity.Exclusive, CancellationToken.None));
+
+        // The drill's own listing and restore still register underneath it: shared runs nest, or the
+        // drill would deadlock against itself.
+        await using var listing = await registry.BeginAsync(
+            repository, OperationKind.Snapshots, Guid.NewGuid(), RunExclusivity.Shared, CancellationToken.None);
+        await using var restore = await registry.BeginAsync(
+            repository, OperationKind.Restore, Guid.NewGuid(), RunExclusivity.Shared, CancellationToken.None);
+
+        Assert.NotEqual(drill.OperationId, restore.OperationId);
+    }
+
     private sealed class RecordingRepository : IBackupRepository
     {
         internal bool Reconciled { get; private set; }

@@ -26,8 +26,23 @@ public sealed record BackupSchedule(
     SourceConsistency Consistency = SourceConsistency.Live,
     CatchUp CatchUp = CatchUp.Once,
     bool Enabled = true,
-    Recurrence? DrillRecurrence = null)
+    Recurrence? DrillRecurrence = null,
+    Recurrence? RetentionRecurrence = null,
+    RetentionPolicy? Retention = null,
+    PruneMode Prune = PruneMode.ForgetOnly)
 {
+    /// <summary>
+    /// The state key under which this schedule's retention runs are tracked. Apart from the backup's
+    /// and the drill's for the same reason: three different questions, three different histories.
+    /// </summary>
+    public string RetentionStateId => Id + ".retention";
+
+    /// <summary>
+    /// Whether retention is configured at all. Both halves are required: a recurrence without a
+    /// policy would be a schedule for deleting snapshots according to no rule.
+    /// </summary>
+    public bool RetentionConfigured => RetentionRecurrence is not null && Retention is { } policy && policy.KeepsSomething;
+
     /// <summary>
     /// The state key under which this schedule's restore drills are tracked, kept apart from the
     /// backup's own state: a drill that failed must not make the next backup look overdue, and a
@@ -88,6 +103,24 @@ public static class ScheduleDecision
         return schedule.DrillRecurrence is null
             ? new DueDecision(DueVerdict.Disabled, null, DateTimeOffset.MaxValue)
             : Evaluate(schedule.DrillRecurrence, CatchUp.Once, schedule.Enabled, state, now);
+    }
+
+    /// <summary>
+    /// Whether a repository's retention run is due. A schedule that does not configure retention is
+    /// never due, which is not the same as disabled by a person and is reported the same way.
+    /// </summary>
+    /// <remarks>
+    /// Retention deletes backups. Nothing here infers a policy, supplies a default, or treats a
+    /// missing field as permission: a schedule that says nothing about retention keeps everything
+    /// forever, which is the only safe reading of silence.
+    /// </remarks>
+    public static DueDecision EvaluateRetention(BackupSchedule schedule, ScheduleState state, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(schedule);
+
+        return schedule.RetentionConfigured
+            ? Evaluate(schedule.RetentionRecurrence!, CatchUp.Once, schedule.Enabled, state, now)
+            : new DueDecision(DueVerdict.Disabled, null, DateTimeOffset.MaxValue);
     }
 
     private static DueDecision Evaluate(

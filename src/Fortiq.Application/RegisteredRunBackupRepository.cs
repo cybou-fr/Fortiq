@@ -87,9 +87,13 @@ public sealed class RegisteredRunBackupRepository : IBackupRepository
             command.Repository.Id,
             OperationKind.Retention,
             command.OperationId,
-            // Pruning rewrites what other operations are reading, so it takes the repository to
-            // itself; forgetting only changes which snapshots are listed.
-            command.Prune == PruneMode.ForgetAndPrune ? RunExclusivity.Exclusive : RunExclusivity.Shared,
+            // Both modes take the repository to themselves, not only the one that deletes data.
+            // Forgetting decides what to keep from the list of snapshots as it stands, and a backup
+            // landing partway through that decision means the policy was applied to a repository
+            // that no longer exists. It also removes snapshots a restore may be about to read, and
+            // a drill that failed because its snapshot was forgotten underneath it would be
+            // recorded as recovery not proven - a false alarm about the one thing that matters.
+            RunExclusivity.Exclusive,
             () => _inner.ApplyRetentionAsync(command, cancellationToken),
             cancellationToken);
     }

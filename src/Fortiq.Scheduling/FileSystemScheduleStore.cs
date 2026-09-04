@@ -187,7 +187,38 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
             document["enabled"]?.GetValue<bool>() ?? true,
             // Absent means no drills. A restore drill is a full restore of the source, so it is
             // never turned on by a schedule file that does not ask for it.
-            document["drillRecurrence"] is { } drill ? ReadRecurrence(drill, fileName) : null);
+            document["drillRecurrence"] is { } drill ? ReadRecurrence(drill, fileName) : null,
+            // Retention deletes backups, so both halves must be present and the policy must keep
+            // something. A recurrence on its own is a schedule for deleting snapshots by no rule.
+            document["retentionRecurrence"] is { } retention ? ReadRecurrence(retention, fileName) : null,
+            ReadRetention(document["retention"], fileName),
+            document["prune"]?.GetValue<bool>() == true ? PruneMode.ForgetAndPrune : PruneMode.ForgetOnly);
+    }
+
+    private static RetentionPolicy? ReadRetention(JsonNode? node, string fileName)
+    {
+        if (node is null)
+        {
+            return null;
+        }
+
+        var policy = new RetentionPolicy(
+            KeepLast: (int?)node["keepLast"],
+            KeepDaily: (int?)node["keepDaily"],
+            KeepWeekly: (int?)node["keepWeekly"],
+            KeepMonthly: (int?)node["keepMonthly"],
+            KeepYearly: (int?)node["keepYearly"],
+            KeepWithin: node["keepWithin"] is { } within
+                ? TimeSpan.Parse(within.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture)
+                : null);
+
+        // Refused rather than ignored. A policy that keeps nothing is not a conservative reading of
+        // a typo; it is an instruction to delete every backup, and it must never be arrived at by
+        // accident.
+        return policy.KeepsSomething
+            ? policy
+            : throw new InvalidDataException(
+                $"The retention policy in {fileName} keeps nothing. A policy that keeps nothing is deletion, not retention.");
     }
 
     private static Recurrence ReadRecurrence(JsonNode? node, string fileName)

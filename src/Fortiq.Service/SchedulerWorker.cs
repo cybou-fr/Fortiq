@@ -25,6 +25,7 @@ public sealed partial class SchedulerWorker : BackgroundService
 {
     private readonly ScheduledBackupRunner _runner;
     private readonly ScheduledDrillRunner? _drills;
+    private readonly ScheduledRetentionRunner? _retention;
     private readonly SchedulerOptions _options;
     private readonly ILogger<SchedulerWorker> _logger;
     private readonly TimeProvider _clock;
@@ -36,10 +37,12 @@ public sealed partial class SchedulerWorker : BackgroundService
         ILogger<SchedulerWorker> logger,
         TimeProvider? clock = null,
         HealthPublisher? health = null,
-        ScheduledDrillRunner? drills = null)
+        ScheduledDrillRunner? drills = null,
+        ScheduledRetentionRunner? retention = null)
     {
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         _drills = drills;
+        _retention = retention;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clock = clock ?? TimeProvider.System;
@@ -96,6 +99,11 @@ public sealed partial class SchedulerWorker : BackgroundService
 
         await RunDrillsAsync(stoppingToken);
 
+        // Retention runs after the drills, deliberately. A drill restores from the newest snapshot,
+        // and taking the repository exclusively to forget snapshots while one is reading would fail
+        // the drill - reporting recovery as unproven because of Fortiq's own housekeeping.
+        await RunRetentionAsync(stoppingToken);
+
         // Health is published last, so a drill that has just proven a restore is reflected in the
         // same pass rather than a poll interval later.
         await PublishHealthAsync(stoppingToken);
@@ -134,6 +142,41 @@ public sealed partial class SchedulerWorker : BackgroundService
         catch (Exception error)
         {
             DrillPassFailed(_logger, error);
+        }
+    }
+
+    /// <summary>
+    /// Applies retention policies that are due. Isolated from the rest of the pass like the others,
+    /// and last among the operations, because it is the only one that destroys anything.
+    /// </summary>
+    private async Task RunRetentionAsync(CancellationToken stoppingToken)
+    {
+        if (_retention is null)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var outcome in await _retention.RunDueAsync(stoppingToken))
+            {
+                if (outcome.Failure is not null)
+                {
+                    RetentionFailed(_logger, outcome.ScheduleId, outcome.Failure);
+                }
+                else if (outcome.Verdict == DueVerdict.Due)
+                {
+                    RetentionApplied(_logger, outcome.ScheduleId, outcome.Removed, outcome.Pruned);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception error)
+        {
+            RetentionPassFailed(_logger, error);
         }
     }
 
@@ -202,4 +245,13 @@ public sealed partial class SchedulerWorker : BackgroundService
 
     [LoggerMessage(EventId = 10, Level = LogLevel.Error, Message = "A restore drill pass failed.")]
     private static partial void DrillPassFailed(ILogger logger, Exception error);
+
+    [LoggerMessage(EventId = 11, Level = LogLevel.Information, Message = "Retention for {schedule} removed {removed} snapshot(s); data pruned: {pruned}.")]
+    private static partial void RetentionApplied(ILogger logger, string schedule, int removed, bool pruned);
+
+    [LoggerMessage(EventId = 12, Level = LogLevel.Error, Message = "Retention for {schedule} failed: {failure}")]
+    private static partial void RetentionFailed(ILogger logger, string schedule, string failure);
+
+    [LoggerMessage(EventId = 13, Level = LogLevel.Error, Message = "A retention pass failed.")]
+    private static partial void RetentionPassFailed(ILogger logger, Exception error);
 }

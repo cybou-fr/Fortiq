@@ -62,6 +62,19 @@ public static class Program
                 runDirectory: paths.Runs,
                 receiptDirectory: paths.Receipts,
                 storage: provider.GetRequiredService<IObjectStorageCredentialProvider>())));
+        // Retention is the only scheduled operation that destroys anything, and it is opt-in per
+        // schedule: a schedule file that says nothing about retention keeps everything forever.
+        builder.Services.AddSingleton<IScheduledRetention>(provider =>
+            new UnattendedRetention(
+                engineRoot,
+                paths.Working,
+                runDirectory: paths.Runs,
+                receiptDirectory: paths.Receipts,
+                storage: provider.GetRequiredService<IObjectStorageCredentialProvider>()));
+        builder.Services.AddSingleton(provider => new ScheduledRetentionRunner(
+            provider.GetRequiredService<IScheduleStore>(),
+            provider.GetRequiredService<IScheduledRetention>()));
+
         builder.Services.AddSingleton(provider => new ScheduledDrillRunner(
             provider.GetRequiredService<IScheduleStore>(),
             provider.GetRequiredService<IScheduledDrill>()));

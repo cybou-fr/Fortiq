@@ -148,10 +148,24 @@ public sealed class ProvenRestore
             kit.Manifest,
             (await restic.ReadRepositoryIdAsync(repository, cancellationToken)).ToArray());
 
+        var registry = new FileSystemRepositoryRunRegistry(_runDirectory);
         var adapter = new ReceiptRecordingBackupRepository(
-            new RegisteredRunBackupRepository(restic, new FileSystemRepositoryRunRegistry(_runDirectory)),
+            new RegisteredRunBackupRepository(restic, registry),
             new EngineIdentity(engine.Name, engine.Version, engine.Sha256),
             new FileSystemOperationReceiptStore(_receiptDirectory));
+
+        // Choosing a snapshot and restoring it are two operations, and each registers a run of its
+        // own. Between them the repository is unheld, so a retention run - which takes the
+        // repository to itself - could forget the snapshot that was just chosen. The restore would
+        // then fail, and be recorded as a drill that could not prove recovery: a false alarm about
+        // the one thing this product exists to report on. One shared run held across both closes
+        // that window; shared runs nest, so the operations underneath still register normally.
+        await using var drill = await registry.BeginAsync(
+            repository.Id,
+            OperationKind.Restore,
+            Guid.NewGuid(),
+            RunExclusivity.Shared,
+            cancellationToken);
 
         var snapshots = await adapter.ListSnapshotsAsync(new ListSnapshots(repository), cancellationToken);
         var latest = snapshots.OrderByDescending(snapshot => snapshot.CreatedAt).FirstOrDefault()
