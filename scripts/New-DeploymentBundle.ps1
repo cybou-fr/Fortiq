@@ -30,7 +30,7 @@ if ($engine.Length -ne $entry.binaryLength -or (Get-FileHash -LiteralPath $engin
     throw 'Pinned engine verification failed. Acquire it with scripts/Get-Engine.ps1.'
 }
 New-Item -ItemType Directory -Path $destination | Out-Null
-foreach ($component in @(@{Folder='service'; Project='Fortiq.Service'}, @{Folder='recover'; Project='Fortiq.Recover'})) {
+foreach ($component in @(@{Folder='desktop'; Project='Fortiq.Desktop'}, @{Folder='service'; Project='Fortiq.Service'}, @{Folder='recover'; Project='Fortiq.Recover'})) {
     $componentOutput = Join-Path $destination $component.Folder
     $project = Join-Path $repositoryRoot "src/$($component.Project)/$($component.Project).csproj"
     & dotnet publish $project --configuration $Configuration --runtime win-x64 --self-contained true -p:FortiqPublishRuntime=win-x64 -p:PublishSingleFile=false --output $componentOutput

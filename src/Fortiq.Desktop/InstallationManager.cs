@@ -267,6 +267,52 @@ public sealed class InstallationManager : IInstallationOperations
                 }
             }
         }
+
+        // If Fortiq.Service or Fortiq.Recover are missing from sourceDir (e.g. running from project bin/ in dev),
+        // resolve and copy them from sibling build directories so the installed environment is complete.
+        CopySiblingComponentIfMissing("Fortiq.Service", sourceDir, targetDir);
+        CopySiblingComponentIfMissing("Fortiq.Recover", sourceDir, targetDir);
+    }
+
+    private static void CopySiblingComponentIfMissing(string componentName, string sourceDir, string targetDir)
+    {
+        var targetExe = Path.Combine(targetDir, $"{componentName}.exe");
+        if (File.Exists(targetExe)) return;
+
+        var parent = new DirectoryInfo(sourceDir).Parent;
+        while (parent is not null)
+        {
+            var siblingDir = Path.Combine(parent.FullName, componentName);
+            if (Directory.Exists(siblingDir))
+            {
+                var candidateFiles = Directory.EnumerateFiles(siblingDir, $"{componentName}.*", SearchOption.AllDirectories)
+                    .Where(f => BinaryExtensions.Any(ext => string.Equals(Path.GetExtension(f), ext, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+
+                var releaseCandidate = candidateFiles.FirstOrDefault(f => f.Contains("Release", StringComparison.OrdinalIgnoreCase) && Path.GetFileName(f).Equals($"{componentName}.exe", StringComparison.OrdinalIgnoreCase));
+                var exeToUse = releaseCandidate ?? candidateFiles.FirstOrDefault(f => Path.GetFileName(f).Equals($"{componentName}.exe", StringComparison.OrdinalIgnoreCase));
+
+                if (exeToUse is not null)
+                {
+                    var componentDir = Path.GetDirectoryName(exeToUse)!;
+                    foreach (var file in Directory.EnumerateFiles(componentDir, "*.*", SearchOption.TopDirectoryOnly))
+                    {
+                        var ext = Path.GetExtension(file);
+                        if (BinaryExtensions.Any(valid => string.Equals(ext, valid, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            var destFile = Path.Combine(targetDir, Path.GetFileName(file));
+                            try
+                            {
+                                File.Copy(file, destFile, overwrite: true);
+                            }
+                            catch (IOException) { }
+                        }
+                    }
+                    break;
+                }
+            }
+            parent = parent.Parent;
+        }
     }
 
     private static void CopyEngines(string sourceDir, string targetDir)
