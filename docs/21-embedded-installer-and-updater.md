@@ -4,11 +4,14 @@
 > system discovery (`InstallationInspector`), service registration (`WindowsServiceController`), bundle
 > validation and the headless CLI (`InstallationCli`) exist.
 >
-> The updater is half built. Its **trust layer** exists — `TufTrustedMetadata` decides whether a binary
-> is authorised, refusing rollback, freeze and mix-and-match under [ADR-008 Revision 1](adr/ADR-008-update-trust.md).
-> Its **application layer does not**: nothing downloads, stages, swaps or rolls back a component, and
-> there is no updates manager in the desktop. The sections *In-App Component & Updates Manager* and
-> *Transactional Atomic Update Protocol & Rollback* remain design intent.
+> The updater's engine is built. `TufTrustedMetadata` decides whether a binary is authorised — refusing
+> rollback, freeze and mix-and-match under [ADR-008 Revision 1](adr/ADR-008-update-trust.md);
+> `UpdateTransaction` stages, swaps and rolls back crash-safely; `ComponentUpdater` joins the two, and
+> `Fortiq.Service` resolves an interrupted update before it runs any scheduled work.
+>
+> What is missing is the **delivery and the surface**: no implementation of `IUpdateContentSource`
+> fetches from anywhere, no release publishes TUF metadata, and there is no updates manager in the
+> desktop. The section *In-App Component & Updates Manager* remains design intent.
 >
 > Read the *State Directory Layout & Access* and *Device Key Scope* sections before writing any of
 > it. Both record a way this specification could be implemented exactly and still produce a machine
@@ -266,11 +269,11 @@ If a new release or updated engine is discovered:
 
 ## Transactional Atomic Update Protocol & Rollback
 
-> *Design intent, not implemented.* The staging, swap and rollback state machine below describes what
-> must be built. `TufTrustedMetadata` already answers the question this protocol asks first — whether a
-> given binary is authorised at all — so what remains is moving files safely once it has said yes. The
-> installer's `provisioning-intent.json` pattern in `Fortiq.Provisioning` is the working precedent for
-> that crash-safety.
+> *Implemented.* `UpdateTransaction` performs this protocol through three directories on one volume —
+> staging, backup, install — recording its position in `update-intent.json`, the same device
+> `provisioning-intent.json` uses. Recovery does not need to know where a crash landed: every file in
+> the backup directory is one whose original has not been put back, so restoring all of them is correct
+> after one swap or all of them, and correct again when recovery is itself interrupted.
 
 Updating a running disaster recovery service must never leave the machine in a broken or half-updated state. The update process executes as a transactional state machine:
 

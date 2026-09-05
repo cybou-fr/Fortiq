@@ -2,6 +2,7 @@
 using Fortiq.Infrastructure.ObjectStorage;
 using Fortiq.Operations;
 using Fortiq.Application;
+using Fortiq.Infrastructure.Updates;
 using Fortiq.Scheduling;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -34,6 +35,12 @@ public static class Program
                 FortiqStatePaths.Resolve(Environment.GetEnvironmentVariable("FORTIQ_STATE_DIRECTORY")),
                 CancellationToken.None);
         }
+
+        // Before anything else runs. A machine switched off mid-update holds binaries from two
+        // releases, and every check that would have caught that mixture ran before the crash - so the
+        // service must settle which release it is before it acts as one. Recovery is idempotent and
+        // does nothing on the overwhelming majority of starts, where no update was in flight.
+        await RecoverInterruptedUpdateAsync();
 
         var doctor = args.Length > 0 && args[0] == "doctor";
         var builder = Host.CreateApplicationBuilder(doctor ? args[1..] : args);
@@ -146,5 +153,33 @@ public static class Program
 
         await builder.Build().RunAsync();
         return 0;
+    }
+
+    /// <summary>
+    /// Finishes an update the machine was interrupted in the middle of, and says so on the console.
+    /// </summary>
+    /// <remarks>
+    /// A failure here is reported and not fatal. The alternative - refusing to start - turns a
+    /// half-updated installation into no backups at all, and an installation that is merely the
+    /// previous release is a working one. What must never happen silently is the third case, running
+    /// as a mixture of two, which is why the outcome is written out rather than swallowed.
+    /// </remarks>
+    private static async Task RecoverInterruptedUpdateAsync()
+    {
+        try
+        {
+            var outcome = await ComponentUpdater.RecoverAsync(AppContext.BaseDirectory);
+            if (outcome != UpdateRecoveryOutcome.NothingToRecover)
+            {
+                await Console.Out.WriteLineAsync(
+                    $"An interrupted update was found and resolved: {outcome}.");
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            await Console.Error.WriteLineAsync(
+                $"An interrupted update could not be resolved: {error.Message} " +
+                "This installation may hold components from two releases; reinstall before relying on it.");
+        }
     }
 }

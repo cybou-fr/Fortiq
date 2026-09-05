@@ -14,6 +14,7 @@
     <ProjectReference Include="..\Fortiq.Infrastructure.Restic\Fortiq.Infrastructure.Restic.csproj" />
     <ProjectReference Include="..\Fortiq.Infrastructure.Runs\Fortiq.Infrastructure.Runs.csproj" />
     <ProjectReference Include="..\Fortiq.Infrastructure.Receipts\Fortiq.Infrastructure.Receipts.csproj" />
+    <ProjectReference Include="..\Fortiq.Infrastructure.Updates\Fortiq.Infrastructure.Updates.csproj" />
     <ProjectReference Include="..\Fortiq.PasswordHelper\Fortiq.PasswordHelper.csproj" />
     <ProjectReference Include="..\Fortiq.Provisioning\Fortiq.Provisioning.csproj" />
     <ProjectReference Include="..\Fortiq.Platform.Windows\Fortiq.Platform.Windows.csproj" />
