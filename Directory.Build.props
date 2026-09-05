@@ -4,6 +4,9 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <PackageIcon>icon.png</PackageIcon>
+    <!-- Keep executable helpers reached through library references in the same runtime graph
+         during bundle publication; the SDK otherwise mixes RID-neutral and RID-specific outputs. -->
+    <RuntimeIdentifier Condition="'$(FortiqPublishRuntime)' != ''">$(FortiqPublishRuntime)</RuntimeIdentifier>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(OutputType)' == 'Exe' Or '$(OutputType)' == 'WinExe'">

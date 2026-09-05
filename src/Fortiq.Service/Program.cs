@@ -22,7 +22,19 @@ public static class Program
             return 1;
         }
 
-        var builder = Host.CreateApplicationBuilder(args);
+        // Credential management runs in this binary and exits, rather than starting the host. It
+        // belongs here because this is the process that reads the credentials, and it needs the same
+        // state directory to find them.
+        if (args.Length > 0 && args[0] == "credentials")
+        {
+            return await StorageCredentialCommand.RunAsync(
+                args,
+                FortiqStatePaths.Resolve(Environment.GetEnvironmentVariable("FORTIQ_STATE_DIRECTORY")),
+                CancellationToken.None);
+        }
+
+        var doctor = args.Length > 0 && args[0] == "doctor";
+        var builder = Host.CreateApplicationBuilder(doctor ? args[1..] : args);
         builder.Services.AddWindowsService(options => options.ServiceName = "Fortiq");
 
         // Machine-wide by default: a service and an operator's tool have to see the same schedules
@@ -32,12 +44,40 @@ public static class Program
         var engineRoot = builder.Configuration["Fortiq:EngineRoot"]
             ?? Path.Combine(AppContext.BaseDirectory, "engines");
 
+        var storage = new FirstAvailableObjectStorageCredentials(
+            new StoredObjectStorageCredentials(Path.Combine(paths.Root, "credentials")),
+            new EnvironmentObjectStorageCredentialProvider());
+        var readiness = new ServiceReadiness(paths, engineRoot,
+            Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe"), storage);
+        if (doctor)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            var report = await readiness.InspectAsync(timeout.Token);
+            await Console.Out.WriteLineAsync(ReadinessPublication.Serialize(report));
+            return report.Passed ? 0 : 2;
+        }
+
+        if (bool.TryParse(builder.Configuration["Fortiq:ReadinessOnly"], out var readinessOnly) && readinessOnly)
+        {
+            // This host completes the SCM handshake, inspects access as the actual service identity,
+            // writes its report, and stops. No backup, drill or retention runner is registered.
+            builder.Services.AddSingleton(readiness);
+            builder.Services.AddSingleton(new ReadinessOutput(
+                builder.Configuration["Fortiq:ReadinessReport"] ?? Path.Combine(paths.Root, "readiness.json")));
+            builder.Services.AddHostedService<ReadinessWorker>();
+            await builder.Build().RunAsync();
+            return 0;
+        }
+
         var pollInterval = builder.Configuration["Fortiq:PollInterval"] is { Length: > 0 } configured
             ? TimeSpan.Parse(configured, System.Globalization.CultureInfo.InvariantCulture)
             : SchedulerOptions.Default.PollInterval;
 
         builder.Services.AddSingleton(new SchedulerOptions(pollInterval));
-        builder.Services.AddSingleton<IObjectStorageCredentialProvider, EnvironmentObjectStorageCredentialProvider>();
+        // Credentials stored for a specific repository beat one set of environment variables that
+        // covers every repository on the machine. The environment stays as a fallback for tooling,
+        // tests and CI, where exporting two variables is the natural thing to do.
+        builder.Services.AddSingleton<IObjectStorageCredentialProvider>(storage);
         builder.Services.AddSingleton(paths);
         builder.Services.AddSingleton<IScheduleStore>(new FileSystemScheduleStore(paths.Schedules));
         builder.Services.AddSingleton<IScheduledBackup>(provider =>
