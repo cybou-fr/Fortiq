@@ -93,6 +93,15 @@ public sealed class PilotCoreWorkflowTests
                 new InstallationManager.BundleComponentManifest("service", "service", "service/Fortiq.Service.exe", true, Convert.ToHexStringLower(SHA256.HashData(serviceBytes))),
                 new InstallationManager.BundleComponentManifest("recover", "recover", "recover/Fortiq.Recover.exe", true, Convert.ToHexStringLower(SHA256.HashData(recoverBytes))),
                 new InstallationManager.BundleComponentManifest("passwordHelper", "desktop", "desktop/Fortiq.PasswordHelper.exe", true, Convert.ToHexStringLower(SHA256.HashData(helperBytes)))
+            },
+            // Every installed file, which is what the installer verifies. A manifest naming only the
+            // executables leaves every library the service loads outside the integrity boundary.
+            new[]
+            {
+                new InstallationManager.BundleFileManifest("desktop/Fortiq.Desktop.exe", desktopBytes.Length, Convert.ToHexStringLower(SHA256.HashData(desktopBytes))),
+                new InstallationManager.BundleFileManifest("desktop/Fortiq.PasswordHelper.exe", helperBytes.Length, Convert.ToHexStringLower(SHA256.HashData(helperBytes))),
+                new InstallationManager.BundleFileManifest("service/Fortiq.Service.exe", serviceBytes.Length, Convert.ToHexStringLower(SHA256.HashData(serviceBytes))),
+                new InstallationManager.BundleFileManifest("recover/Fortiq.Recover.exe", recoverBytes.Length, Convert.ToHexStringLower(SHA256.HashData(recoverBytes)))
             });
 
         var manifestJson = JsonSerializer.Serialize(bundleManifest, JsonIndented);

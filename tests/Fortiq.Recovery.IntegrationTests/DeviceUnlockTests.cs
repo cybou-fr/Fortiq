@@ -95,7 +95,12 @@ public sealed class DeviceUnlockTests
         // The machine loses its key, as it would in a reinstall.
         WindowsTpmEnvelope.DeleteKey(deviceEnvelope);
 
-        Assert.Throws<UnlockFailedException>(
+        // ThrowsAny, not Throws. What matters here is that device unlock fails and the mnemonic still
+        // works; which failure it is may be more specific than UnlockFailedException, and is. A
+        // deleted key now reports DeviceKeyIdentityException - a subclass - because NCrypt cannot
+        // tell "no such key" from "no such key in this scope", so the diagnostic names both. Pinning
+        // the exact type made this test fail on any machine with a TPM the moment that improved.
+        Assert.ThrowsAny<UnlockFailedException>(
             () => WindowsTpmEnvelope.Unwrap(deviceEnvelope, provisioned.Repository.Id.ToArray()));
 
         using var recoveryLease = Bip39RecoveryEnvelope.Unwrap(
