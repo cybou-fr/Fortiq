@@ -90,6 +90,22 @@ public sealed class ServiceIpcAdapterTests
         }
     }
 
+    [Fact]
+    public async Task UnavailableInstalledServiceNeverFallsBackToLocalRestore()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "fortiq-missing-" + Guid.NewGuid().ToString("N"));
+        var paths = FortiqStatePaths.Resolve(root);
+        var schedules = new FileSystemScheduleStore(paths.Schedules);
+        var client = new StubServiceIpcClient { IsAvailable = false };
+        var adapter = new ProveRecoveryAdapter(schedules,
+            new ProvenRestore(root, paths.Working, paths.Runs, paths.Receipts),
+            new HealthPublisher(schedules, paths.Receipts, paths.HealthReport, paths.HealthMetrics), client);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => adapter.ProveAsync("repo", CancellationToken.None));
+        Assert.Contains("service is unavailable", error.Message, StringComparison.Ordinal);
+        Assert.False(client.ProveCalled);
+        Assert.False(Directory.Exists(root));
+    }
+
     private sealed class StubServiceIpcClient : IServiceIpcClient
     {
         public bool IsAvailable { get; set; } = true;

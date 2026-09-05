@@ -118,6 +118,7 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
 
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
+        if (Busy) return;
         Busy = true;
         Failure = null;
         try

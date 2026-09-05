@@ -36,8 +36,10 @@ public sealed class ProveRecoveryAdapter : IProveRecovery
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
 
-        if (_serviceClient is not null && await _serviceClient.IsServiceAvailableAsync(cancellationToken))
+        if (_serviceClient is not null)
         {
+            if (!await _serviceClient.IsServiceAvailableAsync(cancellationToken))
+                throw new InvalidOperationException("The Fortiq service is unavailable. Start the service and retry the recovery proof.");
             return await _serviceClient.ProveRecoveryAsync(repositoryId, cancellationToken);
         }
 

@@ -44,45 +44,73 @@ public sealed class FortiqApplication : Avalonia.Application
             var args = desktop.Args ?? Array.Empty<string>();
             var isPortable = args.Contains("--portable", StringComparer.OrdinalIgnoreCase);
 
-            var inspector = new InstallationInspector();
-
-            // Run off the UI thread, and block here rather than on the dispatcher. Calling
-            // GetResult() directly on the UI thread deadlocked: the inspector's continuations were
-            // posted back to the thread that was blocking on them, and the application started with
-            // no window - a process alive, nothing on screen, nothing in the log.
-            //
-            // Blocking at all is still wrong for a slow disk; the inspection hashes a 31 MB engine
-            // binary. That is a separate change: show the window first and fill it in.
-            var status = Task.Run(() => inspector.InspectAsync()).GetAwaiter().GetResult();
-
-            if (isPortable || status.IsInstalled)
+            var message = new Avalonia.Controls.TextBlock
             {
-                desktop.MainWindow = CreateMainWindow(installed: status.IsInstalled && !isPortable);
-            }
-            else
+                Text = "Checking Fortiq installation...",
+                TextWrapping = TextWrapping.Wrap
+            };
+            var retry = new Avalonia.Controls.Button { Content = "Retry", IsVisible = false };
+            var loading = new Avalonia.Controls.Window
             {
-                var installOperations = new InstallationManager();
-                var installVm = new InstallViewModel(inspector, status, installOperations);
-                var installWindow = new InstallWindow(installVm);
-
-                installVm.RequestCloseAndLaunchMain += () =>
+                Title = "Fortiq", Width = 460, Height = 200,
+                Content = new Avalonia.Controls.StackPanel
                 {
-                    var mainWindow = CreateMainWindow(installed: true);
-                    desktop.MainWindow = mainWindow;
-                    mainWindow.Show();
-                    installWindow.Close();
-                };
-
-                installVm.RequestCloseAndLaunchPortable += () =>
+                    Margin = new Thickness(24), Spacing = 16, Children = { message, retry }
+                }
+            };
+            desktop.MainWindow = loading;
+            var closed = false;
+            loading.Closed += (_, _) => closed = true;
+            async Task InitializeAsync()
+            {
+                retry.IsVisible = false;
+                message.Text = "Checking Fortiq installation...";
+                try
                 {
-                    var mainWindow = CreateMainWindow(installed: false);
-                    desktop.MainWindow = mainWindow;
-                    mainWindow.Show();
-                    installWindow.Close();
-                };
+                    var inspector = new InstallationInspector();
+                    var status = await Task.Run(() => inspector.InspectAsync());
+                    if (closed) return;
+                    if (isPortable || status.IsInstalled)
+                    {
+                        desktop.MainWindow = CreateMainWindow(installed: status.IsInstalled && !isPortable);
+                    }
+                    else
+                    {
+                        var installOperations = new InstallationManager();
+                        var installVm = new InstallViewModel(inspector, status, installOperations);
+                        var installWindow = new InstallWindow(installVm);
 
-                desktop.MainWindow = installWindow;
+                        installVm.RequestCloseAndLaunchMain += () =>
+                        {
+                            var mainWindow = CreateMainWindow(installed: true);
+                            desktop.MainWindow = mainWindow;
+                            mainWindow.Show();
+                            installWindow.Close();
+                        };
+
+                        installVm.RequestCloseAndLaunchPortable += () =>
+                        {
+                            var mainWindow = CreateMainWindow(installed: false);
+                            desktop.MainWindow = mainWindow;
+                            mainWindow.Show();
+                            installWindow.Close();
+                        };
+
+                        desktop.MainWindow = installWindow;
+                    }
+                    desktop.MainWindow.Show();
+                    loading.Close();
+                }
+                catch (Exception error)
+                {
+                    if (closed) return;
+                    message.Text = "Fortiq could not start. " + error.Message;
+                    retry.IsVisible = true;
+                }
             }
+            loading.Opened += async (_, _) => await InitializeAsync();
+            retry.Click += async (_, _) => await InitializeAsync();
+
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -130,13 +158,24 @@ public sealed class FortiqApplication : Avalonia.Application
         // there is no path from this process to the privileged service.
         var serviceClient = installed && OperatingSystem.IsWindows() ? new ServiceIpcClient() : null;
 
+        // The wizard can now be given object storage keys, so something has to write them down.
+        // Windows only, because the machine store is DPAPI; elsewhere the environment remains the
+        // way in, and the wizard's fields simply have nowhere to be kept.
+        Func<string, ObjectStorageCredentials, CancellationToken, Task>? storeCredentials = null;
+        if (OperatingSystem.IsWindows())
+        {
+            var credentialStore = new StoredObjectStorageCredentials(Path.Combine(paths.Root, "credentials"));
+            storeCredentials = credentialStore.WriteAsync;
+        }
+
         var protect = new ProtectRepositoryAdapter(
             new RepositoryProvisioner(
                 engineRoot,
                 storage: storage,
                 protection: new S3StorageProtectionInspector(storage)),
             paths,
-            serviceClient: serviceClient);
+            serviceClient: serviceClient,
+            storeCredentials: storeCredentials);
 
         var schedules = new FileSystemScheduleStore(paths.Schedules);
         var prove = new ProveRecoveryAdapter(
@@ -156,30 +195,46 @@ public sealed class FortiqApplication : Avalonia.Application
             serviceClient: serviceClient);
 
         var settings = new SettingsViewModel(paths.Root, Path.Combine(paths.Root, "logs"));
-        if (OperatingSystem.IsWindows())
+        if (!installed) settings.ServiceStatus = "Portable mode";
+        if (installed && OperatingSystem.IsWindows())
         {
             settings.RefreshServiceStatusAction = () =>
             {
-                if (!OperatingSystem.IsWindows()) return Task.FromResult("Not Supported");
+                if (!OperatingSystem.IsWindows())
+                {
+                    return Task.FromResult("Not supported on this platform");
+                }
+
+                // Was svcStatus.ToString(), which put the record's debug form on the Settings screen:
+                // "WindowsServiceInfo { Exists = False, Running = False, CurrentState = 0,
+                // ServiceSid...". Whatever a person opened this screen to find out, that was not it.
+                // It also broke the running check, which compared this string to "Running".
                 var svcStatus = WindowsServiceController.QueryStatus("Fortiq");
-                return Task.FromResult(svcStatus.ToString());
+
+                return Task.FromResult(svcStatus switch
+                {
+                    { Exists: false } => "Not installed",
+                    { Running: true } => "Running",
+                    _ => "Stopped"
+                });
             };
             settings.StartServiceAction = () =>
             {
                 if (!OperatingSystem.IsWindows()) return Task.FromResult(false);
-                return Task.FromResult(WindowsServiceController.StartService("Fortiq", TimeSpan.FromSeconds(5)));
+                return Task.Run(() => OperatingSystem.IsWindows() && WindowsServiceController.StartService("Fortiq", TimeSpan.FromSeconds(5)));
             };
             settings.StopServiceAction = () =>
             {
                 if (!OperatingSystem.IsWindows()) return Task.FromResult(false);
-                return Task.FromResult(WindowsServiceController.StopService("Fortiq", TimeSpan.FromSeconds(5)));
+                return Task.Run(() => OperatingSystem.IsWindows() && WindowsServiceController.StopService("Fortiq", TimeSpan.FromSeconds(5)));
             };
         }
 
         return new MainWindow(
             new RepositoriesViewModel(new HealthFileSource(paths.HealthReport), prove),
-            () => new ProtectRepositoryViewModel(protect),
-            settings);
+            () => new ProtectRepositoryViewModel(protect, automaticBackupsAvailable: installed),
+            settings, installed: installed,
+            fileRecovery: () => new FileRecoveryViewModel(new FileRecoveryAdapter(engineRoot, paths.Runs)));
     }
 
     private static string ResolveEngineRoot()

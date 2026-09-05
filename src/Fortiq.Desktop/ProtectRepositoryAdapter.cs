@@ -17,17 +17,20 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
     private readonly FortiqStatePaths _paths;
     private readonly TimeOnly _nightly;
     private readonly IServiceIpcClient? _serviceClient;
+    private readonly Func<string, ObjectStorageCredentials, CancellationToken, Task>? _storeCredentials;
 
     public ProtectRepositoryAdapter(
         RepositoryProvisioner provisioner,
         FortiqStatePaths paths,
         TimeOnly? nightly = null,
-        IServiceIpcClient? serviceClient = null)
+        IServiceIpcClient? serviceClient = null,
+        Func<string, ObjectStorageCredentials, CancellationToken, Task>? storeCredentials = null)
     {
         _provisioner = provisioner ?? throw new ArgumentNullException(nameof(provisioner));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _nightly = nightly ?? new TimeOnly(2, 30);
         _serviceClient = serviceClient;
+        _storeCredentials = storeCredentials;
     }
 
     public async Task<ProtectedRepositoryResult> CreateAsync(
@@ -35,6 +38,23 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // Written before anything is provisioned. The engine reaches the bucket during provisioning,
+        // so credentials that arrive afterwards arrive too late - and they are stored per repository
+        // rather than per machine, so a key issued for one bucket does not silently become the key
+        // for every other.
+        if (_storeCredentials is not null &&
+            !string.IsNullOrWhiteSpace(request.StorageAccessKeyId) &&
+            !string.IsNullOrWhiteSpace(request.StorageSecretKey))
+        {
+            await _storeCredentials(
+                request.RepositoryLocation,
+                new ObjectStorageCredentials(
+                    request.StorageAccessKeyId,
+                    request.StorageSecretKey,
+                    string.IsNullOrWhiteSpace(request.StorageRegion) ? null : request.StorageRegion),
+                cancellationToken);
+        }
 
         // Installed mode hands the whole operation to the service and does not have a second way to
         // do it. The fallback that used to sit here provisioned directly from the desktop process:
@@ -92,7 +112,9 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
                 SchedulingFailure: $"The repository and recovery kit were created, but nightly backup scheduling failed: {error.Message}");
         }
 
-        return new ProtectedRepositoryResult(id, provisioned.RecoveryMnemonic, provisioned.DeviceUnlockAvailable);
+        return new ProtectedRepositoryResult(id, provisioned.RecoveryMnemonic, provisioned.DeviceUnlockAvailable,
+            BackupScheduled: false,
+            SchedulingFailure: "Portable mode does not run automatic backups. The repository and recovery kit exist, but your files are not backed up. Install Fortiq and configure protection in installed mode to enable automatic backups.");
     }
 
     /// <summary>

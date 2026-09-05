@@ -11,6 +11,34 @@ public sealed class ProtectRepositoryViewModelTests
     private const string Mnemonic = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima";
 
     [Fact]
+    public async Task ClosingRequiresRecoveryConfirmationAndClearsStorageSecret()
+    {
+        var model = Wizard();
+        model.RepositoryLocation = "s3:https://example.test/bucket";
+        model.KitDirectory = "C:/kit";
+        model.SourcePath = "C:/source";
+        model.StorageAccessKeyId = "access";
+        model.StorageSecretKey = "secret";
+        Assert.True(model.CanClose);
+        await model.CreateAsync(CancellationToken.None);
+        Assert.False(model.CanClose);
+        Assert.Empty(model.StorageSecretKey);
+        model.WroteItDown();
+        Assert.False(model.CanClose);
+        model.ConfirmationInput = string.Join(' ', model.RequestedWordNumbers.Select(number => Words()[number - 1]));
+        Assert.True(model.Confirm());
+        Assert.True(model.CanClose);
+    }
+
+    [Fact]
+    public void RequestsNeverPrintCredentials()
+    {
+        var request = new ProtectRepositoryRequest("repo", "kit", "source", "private-access", "private-secret");
+        Assert.DoesNotContain("private-secret", request.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("private-access", request.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TheWizardWillNotStartWithoutBeingToldWhatToProtect()
     {
         var model = Wizard();

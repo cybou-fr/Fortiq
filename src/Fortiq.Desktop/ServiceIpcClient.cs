@@ -76,7 +76,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
         }
 
         await using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-        await client.ConnectAsync(cancellationToken);
+        await client.ConnectAsync(5000, cancellationToken);
 
         using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
         using var writer = new StreamWriter(client, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
@@ -86,7 +86,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
 
         await writer.WriteLineAsync(JsonSerializer.Serialize(req, JsonOptions).AsMemory(), cancellationToken);
 
-        var line = await reader.ReadLineAsync(cancellationToken)
+        var line = await ReadOperationResponseAsync(reader, cancellationToken)
             ?? throw new InvalidOperationException("Service closed connection unexpectedly during provisioning.");
 
         var resp = JsonSerializer.Deserialize<ServiceIpcProtocol.Response>(line, JsonOptions)
@@ -114,7 +114,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
         }
 
         await using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-        await client.ConnectAsync(cancellationToken);
+        await client.ConnectAsync(5000, cancellationToken);
 
         using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
         using var writer = new StreamWriter(client, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
@@ -124,7 +124,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
 
         await writer.WriteLineAsync(JsonSerializer.Serialize(req, JsonOptions).AsMemory(), cancellationToken);
 
-        var line = await reader.ReadLineAsync(cancellationToken)
+        var line = await ReadOperationResponseAsync(reader, cancellationToken)
             ?? throw new InvalidOperationException("Service closed connection unexpectedly during restore drill.");
 
         var resp = JsonSerializer.Deserialize<ServiceIpcProtocol.Response>(line, JsonOptions)
@@ -143,4 +143,19 @@ public sealed class ServiceIpcClient : IServiceIpcClient
         var proveResp = JsonSerializer.Deserialize<ServiceIpcProtocol.ProveResponse>(resp.PayloadJson, JsonOptions);
         return proveResp is null || proveResp.Success;
     }
+    private static async Task<string?> ReadOperationResponseAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await reader.ReadLineAsync(cancellationToken).AsTask()
+                .WaitAsync(TimeSpan.FromMinutes(30), cancellationToken);
+        }
+        catch (TimeoutException error)
+        {
+            throw new TimeoutException(
+                "The service has not returned a result after 30 minutes. The operation may still be running. " +
+                "Do not repeat repository creation until its outcome has been checked. Refresh protection status or inspect the service logs.", error);
+        }
+    }
+
 }

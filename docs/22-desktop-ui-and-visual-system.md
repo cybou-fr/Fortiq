@@ -5,6 +5,13 @@
 > views remain design intent; markers appear inline.
 
 
+### Current desktop implementation update (September 2026)
+
+The executable client now includes `FileRecoveryWindow` with a testable `FileRecoveryViewModel` and an adapter to the emergency recovery executor. It restores a selected snapshot's whole source folder into a new destination; individual-file selection remains unimplemented. Status, cancellation and restore actions are docked below the scrolling form, and snapshot controls appear after repository access succeeds.
+
+Startup inspection is asynchronous. Protection setup blocks ordinary closing while creating or awaiting phrase confirmation, reports portable scheduling as unavailable, and offers a UAC restart for installed administrative actions. Crash-resume of the protection wizard remains unimplemented. The current behavior and limits are documented in [Spec 17](17-product-ux.md) and the [desktop recovery guide](desktop-recovery-guide.md); the broader component blueprints below remain design intent where marked.
+
+
 ## 1. Purpose & Guiding Principles
 
 This specification defines the user interface architecture, visual design system, interaction workflows, and component hierarchy for the Fortiq desktop client (`Fortiq.Desktop`).

@@ -110,14 +110,14 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             {
                 if (StopServiceAction != null)
                 {
-                    await StopServiceAction();
+                    if (!await StopServiceAction()) StatusMessage = "The service did not stop. Check administrator permissions and retry.";
                 }
             }
             else
             {
                 if (StartServiceAction != null)
                 {
-                    await StartServiceAction();
+                    if (!await StartServiceAction()) StatusMessage = "The service did not start. Check administrator permissions and retry.";
                 }
             }
             await RefreshServiceStatusAsync();

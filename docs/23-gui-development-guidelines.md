@@ -3,6 +3,13 @@
 > **Implementation status: Partially implemented.** MVVM separation, testable view models and the design token layer are real, though tokens are C# (`DesignTokens.cs`) rather than XAML — see section 9. The component blueprint in section 7 is design intent: no view classes exist.
 
 
+### Current desktop implementation update (September 2026)
+
+The executable client now includes `FileRecoveryWindow` with a testable `FileRecoveryViewModel` and an adapter to the emergency recovery executor. It restores a selected snapshot's whole source folder into a new destination; individual-file selection remains unimplemented. Status, cancellation and restore actions are docked below the scrolling form, and snapshot controls appear after repository access succeeds.
+
+Startup inspection is asynchronous. Protection setup blocks ordinary closing while creating or awaiting phrase confirmation, reports portable scheduling as unavailable, and offers a UAC restart for installed administrative actions. Crash-resume of the protection wizard remains unimplemented. The current behavior and limits are documented in [Spec 17](17-product-ux.md) and the [desktop recovery guide](desktop-recovery-guide.md); the broader component blueprints below remain design intent where marked.
+
+
 ## 1. Scope & Engineering Objectives
 
 This document establishes the official frontend development guidelines, architectural patterns, design token definitions, and reusable component blueprints for the Fortiq desktop client (`src/Fortiq.Desktop`).

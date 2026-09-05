@@ -16,6 +16,10 @@ A specification written in the present indicative is describing a design, not re
 
 ---
 
+## Desktop user guide
+
+- [Restore files from a recovery kit](desktop-recovery-guide.md): current GUI workflow, destination safety, cancellation and limitations.
+
 ## Document Index
 
 ### 1. Fundamentals & Strategy

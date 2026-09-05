@@ -15,6 +15,8 @@ namespace Fortiq.Desktop;
 
 public sealed class MainWindow : Window
 {
+    private readonly Func<FileRecoveryViewModel>? _fileRecovery;
+    private readonly bool _installed;
     private readonly RepositoriesViewModel _model;
     private readonly SettingsViewModel _settings;
     private readonly Func<ProtectRepositoryViewModel>? _wizard;
@@ -40,8 +42,10 @@ public sealed class MainWindow : Window
     public MainWindow(
         RepositoriesViewModel model,
         Func<ProtectRepositoryViewModel>? wizard = null,
-        SettingsViewModel? settings = null)
+        SettingsViewModel? settings = null, bool installed = false, Func<FileRecoveryViewModel>? fileRecovery = null)
     {
+        _installed = installed;
+        _fileRecovery = fileRecovery;
         _model = model ?? throw new ArgumentNullException(nameof(model));
         _wizard = wizard;
         _settings = settings ?? new SettingsViewModel(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
@@ -411,7 +415,7 @@ public sealed class MainWindow : Window
 
             var prove = Secondary(repository.Health.Verdict == HealthVerdict.Recoverable ? "Proven" : "Prove recovery");
             prove.IsEnabled = repository.CanProveRecovery && !_model.Busy;
-            prove.Click += async (_, _) => await _model.ProveRecoveryAsync(repository, CancellationToken.None);
+            prove.Click += async (_, _) => await ProveAsync(repository);
             row.Children.Add(At(prove, 2));
 
             list.Children.Add(row);
@@ -500,7 +504,7 @@ public sealed class MainWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(7, 2),
-            Child = Text("Audit Chain: Verified", 11, FontWeight.SemiBold, Recoverable)
+            Child = Text(AuditBadgeText(), 11, FontWeight.SemiBold, Recoverable)
         };
         badgeStack.Children.Add(badge);
 
@@ -565,7 +569,7 @@ public sealed class MainWindow : Window
     {
         if (_model.Repositories.Count == 0)
         {
-            var add = Primary("Add your first source");
+            var add = Primary("Protect a folder");
             add.Click += async (_, _) => await ProtectAsync();
             return Card(new StackPanel
             {
@@ -638,7 +642,17 @@ public sealed class MainWindow : Window
             ?? _model.Repositories.FirstOrDefault();
 
         var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
-        body.Children.Add(Header("Prove Recovery", "Execute isolated restore drills to prove data can truly be recovered."));
+        body.Children.Add(Header("Recovery", "Restore files from a recovery kit or run a recovery proof for a protected source."));
+        if (_fileRecovery is not null)
+        {
+            var restoreFiles = Primary("Restore files from a recovery kit");
+            restoreFiles.Click += async (_, _) =>
+            {
+                if (await EnsurePrivilegesAsync())
+                    await new FileRecoveryWindow(_fileRecovery()).ShowDialog(this);
+            };
+            body.Children.Add(restoreFiles);
+        }
 
         if (_recoverySource is null)
         {
@@ -692,7 +706,7 @@ public sealed class MainWindow : Window
 
         var run = Primary(_model.Busy ? "Running restore drill…" : "Run recovery proof now");
         run.IsEnabled = repository.CanProveRecovery && !_model.Busy;
-        run.Click += async (_, _) => await _model.ProveRecoveryAsync(repository, CancellationToken.None);
+        run.Click += async (_, _) => await ProveAsync(repository);
 
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         grid.Children.Add(new StackPanel
@@ -750,7 +764,7 @@ public sealed class MainWindow : Window
 
         if (_kitSource is null)
         {
-            var protect = Primary("Create protection and a kit");
+            var protect = Primary("Protect a folder");
             protect.Click += async (_, _) => await ProtectAsync();
             body.Children.Add(Card(new StackPanel
             {
@@ -853,20 +867,26 @@ public sealed class MainWindow : Window
             Spacing = 4,
             Children =
             {
-                Text($"Service Status: {_settings.ServiceStatus}", 14, FontWeight.SemiBold, Ink),
-                Text("Account: NT SERVICE\\Fortiq (Least-privilege Service SID)", 12, FontWeight.Normal, Muted)
+                // The status is a word now, not a record dump, and this says what the word means for
+                // the person's backups rather than restating it.
+                Text(ServiceStatusHeadline(), 14, FontWeight.SemiBold, Ink),
+                Text(_installed ? "Managed by the installed Fortiq service" : "Portable mode: no background scheduler", 12, FontWeight.Normal, Muted)
             }
         });
 
         var toggleServiceBtn = Secondary(_settings.IsServiceRunning ? "Stop Service" : "Start Service");
+        toggleServiceBtn.IsEnabled = _installed && !_settings.IsBusy;
         toggleServiceBtn.Click += async (_, _) =>
         {
+            if (!await EnsurePrivilegesAsync()) return;
             await _settings.ToggleServiceAsync();
             RenderSettings();
         };
         Grid.SetColumn(toggleServiceBtn, 1);
         serviceRow.Children.Add(toggleServiceBtn);
         serviceGroup.Children.Add(serviceRow);
+        if (_settings.StatusMessage is { } statusMessage)
+            serviceGroup.Children.Add(Text(statusMessage, 12, FontWeight.Normal, Failure, true));
         body.Children.Add(Card(serviceGroup, Surface, Line, new Thickness(20)));
 
         // 3. Storage & Folders
@@ -890,13 +910,42 @@ public sealed class MainWindow : Window
         aboutGroup.Children.Add(Text("About Fortiq", 16, FontWeight.SemiBold, Ink));
         aboutGroup.Children.Add(DetailRow("Version", _settings.AppVersion));
         aboutGroup.Children.Add(DetailRow(".NET Runtime", _settings.RuntimeVersion));
-        aboutGroup.Children.Add(DetailRow("Silicon Security", "TPM 2.0 Provider Available"));
+        aboutGroup.Children.Add(DetailRow("Silicon Security", "Device unlock availability is checked during repository setup"));
         body.Children.Add(Card(aboutGroup, Surface, Line, new Thickness(20)));
 
         _page.Child = new ScrollViewer { Content = body };
     }
 
     // --- Helpers ---
+    /// <summary>One sentence about the background service, answering what a person came here to ask.</summary>
+    private string ServiceStatusHeadline() => _settings.ServiceStatus switch
+    {
+        "Running" => "Backups run on schedule, even when Fortiq is closed",
+        "Stopped" => "The background service is installed but stopped",
+        "Not installed" => "Automatic backups are unavailable without the Fortiq service",
+        _ => "Checking the background service…"
+    };
+
+    private string ServiceStatusDetail() => _settings.ServiceStatus switch
+    {
+        "Running" => @"Running as NT SERVICE\Fortiq, an account with only the permissions Fortiq needs.",
+        "Stopped" => "Start it to let scheduled backups run again. Until then, backups happen only while Fortiq is open.",
+        "Not installed" => "No background service is installed on this PC. Fortiq can still back up and restore while it is open; scheduled backups need the service, which the installer sets up.",
+        _ => string.Empty
+    };
+
+    /// <summary>
+    /// What the audit chain badge may honestly claim.
+    /// </summary>
+    /// <remarks>
+    /// It read "Audit Chain: Verified" always, including on a machine with no repositories and so no
+    /// receipts at all. An empty chain is not a verified one, and a green badge that says it is
+    /// teaches people the badge means nothing - which is expensive for the one badge in this product
+    /// that has to mean something.
+    /// </remarks>
+    private string AuditBadgeText() =>
+        _model.Repositories.Count == 0 ? "Audit chain: nothing recorded yet" : "Audit chain: verified";
+
     private static Grid Header(string title, string subtitle, string? action = null, Func<Task>? handler = null)
     {
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
@@ -916,9 +965,56 @@ public sealed class MainWindow : Window
         return grid;
     }
 
+    private async Task ProveAsync(RepositoryRowViewModel repository)
+    {
+        if (await EnsurePrivilegesAsync())
+            await _model.ProveRecoveryAsync(repository, CancellationToken.None);
+    }
+
+    private async Task<bool> EnsurePrivilegesAsync()
+    {
+        if (!_installed || !OperatingSystem.IsWindows() || Fortiq.Platform.Windows.WindowsPrivilegeChecker.IsElevated())
+            return true;
+
+        var explanation = Text("This action requires administrator permission. Reopen Fortiq as administrator, then repeat the action. Windows will ask for your approval.", 14, FontWeight.Normal, Ink, true);
+        var reopen = Primary("Reopen as administrator");
+        var cancel = Secondary("Cancel");
+        var dialog = new Window
+        {
+            Title = "Administrator permission required", Width = 480, Height = 240,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(24), Spacing = 16,
+                Children = { explanation, reopen, cancel }
+            }
+        };
+        var launched = false;
+        cancel.Click += (_, _) => dialog.Close();
+        reopen.Click += (_, _) =>
+        {
+            try
+            {
+                var executable = Path.Combine(AppContext.BaseDirectory, "Fortiq.Desktop.exe");
+                if (!File.Exists(executable)) throw new FileNotFoundException("The Fortiq desktop executable was not found.");
+                using var process = Process.Start(new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas" });
+                if (process is null) throw new InvalidOperationException("Windows did not start Fortiq.");
+                launched = true;
+                dialog.Close();
+            }
+            catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+            {
+                explanation.Text = "Fortiq was not reopened. " + error.Message;
+            }
+        };
+        await dialog.ShowDialog(this);
+        if (launched) Close();
+        return false;
+    }
+
     private async Task ProtectAsync()
     {
-        if (_wizard is null) return;
+        if (_wizard is null || !await EnsurePrivilegesAsync()) return;
         await new ProtectRepositoryWindow(_wizard()).ShowDialog(this);
         await RefreshAsync();
     }

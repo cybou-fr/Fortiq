@@ -4,7 +4,19 @@ using System.Runtime.CompilerServices;
 namespace Fortiq.Desktop.ViewModels;
 
 /// <summary>What creating a protected repository needs, and what it produced.</summary>
-public sealed record ProtectRepositoryRequest(string RepositoryLocation, string KitDirectory, string SourcePath);
+/// <param name="StorageAccessKeyId">Object storage key, when the repository is in object storage.</param>
+/// <param name="StorageSecretKey">Its secret. Held only long enough to be written to the machine store.</param>
+/// <param name="StorageRegion">The region the endpoint signs requests for.</param>
+public sealed record ProtectRepositoryRequest(
+    string RepositoryLocation,
+    string KitDirectory,
+    string SourcePath,
+    string? StorageAccessKeyId = null,
+    string? StorageSecretKey = null,
+    string? StorageRegion = null)
+{
+    public override string ToString() => "ProtectRepositoryRequest { storage credentials = [redacted] }";
+}
 
 public sealed record ProtectedRepositoryResult(
     string RepositoryId,
@@ -68,14 +80,18 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
     private string _repositoryLocation = string.Empty;
     private string _kitDirectory = string.Empty;
     private string _sourcePath = string.Empty;
+    private string _storageAccessKeyId = string.Empty;
+    private string _storageSecretKey = string.Empty;
+    private string _storageRegion = string.Empty;
     private string _confirmationInput = string.Empty;
     private string? _mnemonic;
     private string? _failure;
     private bool _busy;
     private ProtectStep _step = ProtectStep.Describe;
 
-    public ProtectRepositoryViewModel(IProtectRepository protect, Func<int, int, int>? pickWord = null)
+    public ProtectRepositoryViewModel(IProtectRepository protect, Func<int, int, int>? pickWord = null, bool automaticBackupsAvailable = true)
     {
+        AutomaticBackupsAvailable = automaticBackupsAvailable;
         _protect = protect ?? throw new ArgumentNullException(nameof(protect));
         _pickWord = pickWord ?? ((count, _) => Random.Shared.Next(count));
     }
@@ -89,6 +105,28 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
     public string KitDirectory { get => _kitDirectory; set => Set(ref _kitDirectory, value); }
 
     public string SourcePath { get => _sourcePath; set => Set(ref _sourcePath, value); }
+
+    /// <summary>
+    /// The object storage credentials, asked for here because there was nowhere else to type them.
+    /// </summary>
+    /// <remarks>
+    /// A person choosing "S3-compatible cloud storage" in a desktop wizard had no way to say which
+    /// account: the only paths in were an environment variable and a service command line. The
+    /// wizard offered the choice and then could not carry it out, which is the worst combination.
+    ///
+    /// These are held in memory for as long as the wizard is open and written to the machine
+    /// credential store on completion, per repository. They are not stored on the view model beyond
+    /// that, and the window's field for the secret is masked.
+    /// </remarks>
+    public string StorageAccessKeyId { get => _storageAccessKeyId; set => Set(ref _storageAccessKeyId, value); }
+
+    public string StorageSecretKey { get => _storageSecretKey; set => Set(ref _storageSecretKey, value); }
+
+    public string StorageRegion { get => _storageRegion; set => Set(ref _storageRegion, value); }
+
+    /// <summary>True when the destination is object storage, which is what makes the keys required.</summary>
+    public bool NeedsStorageCredentials =>
+        RepositoryLocation.StartsWith("s3:", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The recovery mnemonic, shown once and only while the wizard is on that step.</summary>
     public string? RecoveryMnemonic => Step is ProtectStep.WriteDownRecoveryMaterial ? _mnemonic : null;
@@ -115,12 +153,26 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
     /// </summary>
     public string? SchedulingFailure { get; private set; }
 
+    public bool AutomaticBackupsAvailable { get; }
+
+    public bool CanClose => !Busy && Step is ProtectStep.Describe or ProtectStep.Done;
+
+    public void ClearStorageCredentials()
+    {
+        StorageSecretKey = string.Empty;
+        StorageAccessKeyId = string.Empty;
+    }
+
     public bool CanCreate =>
         !Busy
         && Step == ProtectStep.Describe
         && !string.IsNullOrWhiteSpace(RepositoryLocation)
         && !string.IsNullOrWhiteSpace(KitDirectory)
-        && !string.IsNullOrWhiteSpace(SourcePath);
+        && !string.IsNullOrWhiteSpace(SourcePath)
+        // Object storage without keys cannot be reached, so creating would fail after the recovery
+        // phrase had been shown - the one point in this wizard where a failure costs the most.
+        && (!NeedsStorageCredentials
+            || (!string.IsNullOrWhiteSpace(StorageAccessKeyId) && !string.IsNullOrWhiteSpace(StorageSecretKey)));
 
     public async Task CreateAsync(CancellationToken cancellationToken)
     {
@@ -134,9 +186,16 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
         try
         {
             var result = await _protect.CreateAsync(
-                new ProtectRepositoryRequest(RepositoryLocation, KitDirectory, SourcePath),
+                new ProtectRepositoryRequest(
+                    RepositoryLocation,
+                    KitDirectory,
+                    SourcePath,
+                    NeedsStorageCredentials ? StorageAccessKeyId : null,
+                    NeedsStorageCredentials ? StorageSecretKey : null,
+                    NeedsStorageCredentials ? StorageRegion : null),
                 cancellationToken);
 
+            ClearStorageCredentials();
             RepositoryId = result.RepositoryId;
             DeviceUnlockAvailable = result.DeviceUnlockAvailable;
             BackupScheduled = result.BackupScheduled;
@@ -237,7 +296,7 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
 
         field = value;
         OnPropertyChanged(property);
-        if (property is nameof(RepositoryLocation) or nameof(KitDirectory) or nameof(SourcePath) or nameof(Busy) or nameof(Step))
+        if (property is nameof(RepositoryLocation) or nameof(KitDirectory) or nameof(SourcePath) or nameof(Busy) or nameof(Step) or nameof(StorageAccessKeyId) or nameof(StorageSecretKey))
         {
             OnPropertyChanged(nameof(CanCreate));
         }

@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Fortiq.Recover\Fortiq.Recover.csproj" />
     <ProjectReference Include="..\Fortiq.Desktop.ViewModels\Fortiq.Desktop.ViewModels.csproj" />
     <ProjectReference Include="..\Fortiq.Provisioning\Fortiq.Provisioning.csproj" />
     <ProjectReference Include="..\Fortiq.Monitoring\Fortiq.Monitoring.csproj" />

@@ -63,9 +63,10 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
         var workspace = Directory.CreateTempSubdirectory("fortiq-recover-");
         try
         {
+            using var credentials = new PasswordPipeCredentialProvider(_helperPath, lease);
             var restic = ResticEngineFactory.Create(
                 engine,
-                new PasswordPipeCredentialProvider(_helperPath, lease),
+                credentials,
                 workspace.FullName,
                 _storage);
 
@@ -90,7 +91,11 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
         }
         finally
         {
-            workspace.Delete(recursive: true);
+            try { workspace.Delete(recursive: true); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                // Temporary-file cleanup must not turn an already completed restore into a reported failure.
+            }
         }
     }
 
