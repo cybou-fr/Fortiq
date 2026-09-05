@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Fortiq.Monitoring\Fortiq.Monitoring.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Operations\Fortiq.Operations.csproj" />
   </ItemGroup>
 
 </Project>

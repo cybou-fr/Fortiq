@@ -27,6 +27,9 @@ public sealed class UnattendedRetention : IScheduledRetention
     private readonly string _workingDirectory;
     private readonly string _runDirectory;
     private readonly string _receiptDirectory;
+
+    /// <summary>Where this operation records its ledger head, outside the receipt directory.</summary>
+    private readonly IAuditLedgerAnchor? _auditAnchor;
     private readonly IObjectStorageCredentialProvider _storage;
 
     public UnattendedRetention(
@@ -35,7 +38,8 @@ public sealed class UnattendedRetention : IScheduledRetention
         string? passwordHelperPath = null,
         string? runDirectory = null,
         string? receiptDirectory = null,
-        IObjectStorageCredentialProvider? storage = null)
+        IObjectStorageCredentialProvider? storage = null,
+        IAuditLedgerAnchor? auditAnchor = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(engineRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
@@ -45,6 +49,7 @@ public sealed class UnattendedRetention : IScheduledRetention
         _helperPath = passwordHelperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
         _runDirectory = runDirectory ?? FortiqRunDirectory.Default();
         _receiptDirectory = receiptDirectory ?? Path.Combine(_workingDirectory, "receipts");
+        _auditAnchor = auditAnchor;
         _storage = storage ?? new NoObjectStorageCredentials();
     }
 
@@ -85,7 +90,7 @@ public sealed class UnattendedRetention : IScheduledRetention
         var adapter = new ReceiptRecordingBackupRepository(
             new RegisteredRunBackupRepository(restic, new FileSystemRepositoryRunRegistry(_runDirectory)),
             new EngineIdentity(engine.Name, engine.Version, engine.Sha256),
-            new FileSystemOperationReceiptStore(_receiptDirectory));
+            new FileSystemOperationReceiptStore(_receiptDirectory, _auditAnchor));
 
         return await adapter.ApplyRetentionAsync(
             new ApplyRetention(repository, schedule.Retention!, schedule.Prune),

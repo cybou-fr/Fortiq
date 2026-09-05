@@ -47,6 +47,7 @@ public static class DirectoryAclProvisioner
         var healthPath = Path.GetDirectoryName(paths.HealthReport)!;
         var credentialsPath = Path.Combine(paths.Root, "credentials");
         var updatesStagingPath = Path.Combine(paths.Root, "updates", "staging");
+        var auditPath = paths.AuditAnchors;
 
         // Pre-create all directories before applying restrictive ACLs
         Directory.CreateDirectory(paths.Root);
@@ -58,6 +59,7 @@ public static class DirectoryAclProvisioner
         Directory.CreateDirectory(healthPath);
         Directory.CreateDirectory(credentialsPath);
         Directory.CreateDirectory(updatesStagingPath);
+        Directory.CreateDirectory(auditPath);
 
         // 1. Root state directory (%ProgramData%\Fortiq)
         ApplyAcl(paths.Root, sec =>
@@ -119,6 +121,23 @@ public static class DirectoryAclProvisioner
             {
                 sec.AddAccessRule(new(serviceSid, FileSystemRights.FullControl, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
             }
+        });
+
+        // 4b. audit — Where ledger heads are anchored, and the one directory that must not be
+        // writable by anything that can write receipts. An anchor a receipt-writer can also rewrite
+        // attests to nothing: the tampered history and the record of where it had got to would simply
+        // agree with each other. Users read it, so an investigation needs no elevation; nobody but
+        // SYSTEM, the service and administrators writes it.
+        ApplyAcl(auditPath, sec =>
+        {
+            sec.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            sec.AddAccessRule(new(systemSid, FileSystemRights.FullControl, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
+            sec.AddAccessRule(new(adminsSid, FileSystemRights.FullControl, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
+            if (canMapServiceSid)
+            {
+                sec.AddAccessRule(new(serviceSid, FileSystemRights.FullControl, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
+            }
+            sec.AddAccessRule(new(authUsersSid, FileSystemRights.ReadAndExecute, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
         });
 
         // 5. work\receipts\ — The audit trail; evidence read by desktop and monitoring

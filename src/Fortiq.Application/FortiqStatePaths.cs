@@ -41,6 +41,18 @@ public sealed class FortiqStatePaths
     /// <summary>The run registry, which keeps two processes off the same repository at once.</summary>
     public string Runs => Path.Combine(Root, "runs");
 
+    /// <summary>
+    /// Where ledger heads are anchored: outside <see cref="Receipts"/>, deliberately.
+    /// </summary>
+    /// <remarks>
+    /// An anchor kept inside the directory it attests to is not an anchor. Whoever can rewrite the
+    /// receipts and their ledger can rewrite the record of where that ledger had got to, and the
+    /// rewrite is consistent with itself. Putting the head somewhere else means a tampered history has
+    /// to agree with a second file it may not have been able to reach - and the ETW anchor beside it
+    /// means it also has to agree with events that have already left the machine.
+    /// </remarks>
+    public string AuditAnchors => Path.Combine(Root, "audit");
+
     /// <summary>The published health report, read by the desktop and by monitoring alike.</summary>
     public string HealthReport => Path.Combine(Root, "health", "health.json");
 

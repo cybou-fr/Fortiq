@@ -82,6 +82,9 @@ public sealed class ProvenRestore
     private readonly string _helperPath;
     private readonly string _runDirectory;
     private readonly string _receiptDirectory;
+
+    /// <summary>Where this operation records its ledger head, outside the receipt directory.</summary>
+    private readonly IAuditLedgerAnchor? _auditAnchor;
     private readonly IObjectStorageCredentialProvider _storage;
     private readonly string? _workspaceRoot;
     private readonly long _freeSpaceFloor;
@@ -94,7 +97,8 @@ public sealed class ProvenRestore
         string? receiptDirectory = null,
         IObjectStorageCredentialProvider? storage = null,
         string? workspaceRoot = null,
-        long freeSpaceFloor = DefaultFreeSpaceFloor)
+        long freeSpaceFloor = DefaultFreeSpaceFloor,
+        IAuditLedgerAnchor? auditAnchor = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(engineRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
@@ -107,6 +111,7 @@ public sealed class ProvenRestore
         // with FortiqStatePaths when that is where the working directory came from. Callers that
         // share evidence across processes pass the directory explicitly rather than relying on this.
         _receiptDirectory = receiptDirectory ?? Path.Combine(_workingDirectory, "receipts");
+        _auditAnchor = auditAnchor;
         _storage = storage ?? new NoObjectStorageCredentials();
         var effectiveWorkspace = workspaceRoot
             ?? (Environment.GetEnvironmentVariable("FORTIQ_DRILL_WORKSPACE") is { Length: > 0 } env ? env : null);
@@ -129,7 +134,7 @@ public sealed class ProvenRestore
 
         var kit = await RecoveryKitStore.ReadAsync(schedule.KitDirectory, cancellationToken);
 
-        return await new RestoreProofRecorder(new FileSystemOperationReceiptStore(_receiptDirectory)).RecordAsync(
+        return await new RestoreProofRecorder(new FileSystemOperationReceiptStore(_receiptDirectory, _auditAnchor)).RecordAsync(
             kit.Manifest.RepositoryId,
             new EngineIdentity(kit.Manifest.Engine.Name, kit.Manifest.Engine.Version, kit.Manifest.Engine.Sha256),
             async () =>
@@ -168,7 +173,7 @@ public sealed class ProvenRestore
         var adapter = new ReceiptRecordingBackupRepository(
             new RegisteredRunBackupRepository(restic, registry),
             new EngineIdentity(engine.Name, engine.Version, engine.Sha256),
-            new FileSystemOperationReceiptStore(_receiptDirectory));
+            new FileSystemOperationReceiptStore(_receiptDirectory, _auditAnchor));
 
         // Choosing a snapshot and restoring it are two operations, and each registers a run of its
         // own. Between them the repository is unheld, so a retention run - which takes the
@@ -188,7 +193,7 @@ public sealed class ProvenRestore
             ?? throw new RestoreProofFailedException(
                 "This repository holds no snapshots, so there is nothing to prove a recovery from.");
 
-        long estimatedBytes = await EstimateSnapshotSizeAsync(repository.Id.ToString(), cancellationToken);
+        long estimatedBytes = await EstimateSnapshotSizeAsync(repository.Id.ToString(), latest.Id, cancellationToken);
         long requiredSpace = Math.Max(_freeSpaceFloor, (long)(estimatedBytes * 1.1) + 10L * 1024 * 1024 * 1024);
 
         // Restored somewhere disposable, not over the source. A proof that overwrote live files would
@@ -327,34 +332,34 @@ public sealed class ProvenRestore
         }
     }
 
-    private async Task<long> EstimateSnapshotSizeAsync(string repositoryId, CancellationToken cancellationToken)
+    /// <summary>
+    /// How many bytes restoring <paramref name="snapshotId"/> is expected to write, or 0 when the
+    /// receipts do not say.
+    /// </summary>
+    /// <remarks>
+    /// The lookup used to ask for <c>backup.total_bytes_processed</c> and <c>backup.data_added</c>,
+    /// which are the engine's field names rather than the receipt's. Nothing wrote them, so it missed
+    /// every time and every drill silently used the fixed floor - a space check that had never once
+    /// consulted a real size. <see cref="RestoreSpaceEstimate"/> holds the choice it makes now.
+    /// </remarks>
+    private async Task<long> EstimateSnapshotSizeAsync(
+        string repositoryId,
+        string snapshotId,
+        CancellationToken cancellationToken)
     {
         try
         {
-            var store = new FileSystemOperationReceiptStore(_receiptDirectory);
+            var store = new FileSystemOperationReceiptStore(_receiptDirectory, _auditAnchor);
             var receipts = await store.LoadAllReceiptsAsync(repositoryId, cancellationToken);
-            var lastBackup = receipts.Where(r => r.Operation == OperationKind.Backup && r.EngineResult == EngineResult.Succeeded)
-                .OrderByDescending(r => r.CompletedAt)
-                .FirstOrDefault();
-
-            if (lastBackup is not null)
-            {
-                if (lastBackup.Metrics.TryGetValue("backup.total_bytes_processed", out var totalBytes) && totalBytes > 0)
-                {
-                    return totalBytes;
-                }
-                if (lastBackup.Metrics.TryGetValue("backup.data_added", out var addedBytes) && addedBytes > 0)
-                {
-                    return addedBytes;
-                }
-            }
+            return RestoreSpaceEstimate.ForSnapshot(receipts, snapshotId);
         }
-        catch
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            // Best effort size estimation
+            // An unreadable receipt directory is not a reason to refuse to prove recovery. The caller
+            // falls back to a fixed floor, which is what this method existed to improve on rather than
+            // to replace.
+            return 0;
         }
-
-        return 0;
     }
 
     private static (ulong Files, ulong Bytes) Measure(string directory)

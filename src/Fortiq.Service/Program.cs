@@ -1,5 +1,6 @@
 ﻿using System.Runtime.Versioning;
 using Fortiq.Infrastructure.ObjectStorage;
+using Fortiq.Infrastructure.Receipts;
 using Fortiq.Operations;
 using Fortiq.Application;
 using Fortiq.Infrastructure.Updates;
@@ -50,6 +51,11 @@ public static class Program
         // and the same runs.
         var paths = FortiqStatePaths.Resolve(builder.Configuration["Fortiq:StateDirectory"]);
 
+        // Every operation that writes a receipt records its ledger head here as well. One anchor for
+        // the process, so backups, retention and drills all advance the same record - three anchors
+        // would be three partial histories, and reconciling them would be a new thing to get wrong.
+        var auditAnchor = AuditAnchors.ForState(paths);
+
         var engineRoot = builder.Configuration["Fortiq:EngineRoot"]
             ?? Path.Combine(AppContext.BaseDirectory, "engines");
 
@@ -95,7 +101,8 @@ public static class Program
                 paths.Working,
                 runDirectory: paths.Runs,
                 receiptDirectory: paths.Receipts,
-                storage: provider.GetRequiredService<IObjectStorageCredentialProvider>()));
+                storage: provider.GetRequiredService<IObjectStorageCredentialProvider>(),
+                auditAnchor: auditAnchor));
         builder.Services.AddSingleton(provider => new ScheduledBackupRunner(
             provider.GetRequiredService<IScheduleStore>(),
             provider.GetRequiredService<IScheduledBackup>()));
@@ -105,7 +112,8 @@ public static class Program
             paths.Working,
             runDirectory: paths.Runs,
             receiptDirectory: paths.Receipts,
-            storage: provider.GetRequiredService<IObjectStorageCredentialProvider>()));
+            storage: provider.GetRequiredService<IObjectStorageCredentialProvider>(),
+            auditAnchor: auditAnchor));
 
         // Restore drills share the working directory, and therefore the receipt store, with backups.
         // A drill's receipt is what turns a repository from backed up into proven, and monitoring
@@ -121,7 +129,8 @@ public static class Program
                 paths.Working,
                 runDirectory: paths.Runs,
                 receiptDirectory: paths.Receipts,
-                storage: provider.GetRequiredService<IObjectStorageCredentialProvider>()));
+                storage: provider.GetRequiredService<IObjectStorageCredentialProvider>(),
+                auditAnchor: auditAnchor));
         builder.Services.AddSingleton(provider => new ScheduledRetentionRunner(
             provider.GetRequiredService<IScheduleStore>(),
             provider.GetRequiredService<IScheduledRetention>()));

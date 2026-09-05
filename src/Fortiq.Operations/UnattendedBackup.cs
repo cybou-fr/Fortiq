@@ -47,6 +47,9 @@ public sealed class UnattendedBackup : IScheduledBackup
     private readonly string _workingDirectory;
     private readonly string _runDirectory;
     private readonly string _receiptDirectory;
+
+    /// <summary>Where this operation records its ledger head, outside the receipt directory.</summary>
+    private readonly IAuditLedgerAnchor? _auditAnchor;
     private readonly IObjectStorageCredentialProvider _storage;
 
     public UnattendedBackup(
@@ -55,7 +58,8 @@ public sealed class UnattendedBackup : IScheduledBackup
         string? passwordHelperPath = null,
         string? runDirectory = null,
         string? receiptDirectory = null,
-        IObjectStorageCredentialProvider? storage = null)
+        IObjectStorageCredentialProvider? storage = null,
+        IAuditLedgerAnchor? auditAnchor = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(engineRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
@@ -68,6 +72,7 @@ public sealed class UnattendedBackup : IScheduledBackup
         // with FortiqStatePaths when that is where the working directory came from. Callers that
         // share evidence across processes pass the directory explicitly rather than relying on this.
         _receiptDirectory = receiptDirectory ?? Path.Combine(_workingDirectory, "receipts");
+        _auditAnchor = auditAnchor;
         _storage = storage ?? new NoObjectStorageCredentials();
     }
 
@@ -106,7 +111,7 @@ public sealed class UnattendedBackup : IScheduledBackup
         var adapter = new ReceiptRecordingBackupRepository(
             new RegisteredRunBackupRepository(restic, new FileSystemRepositoryRunRegistry(_runDirectory)),
             new EngineIdentity(engine.Name, engine.Version, engine.Sha256),
-            new FileSystemOperationReceiptStore(_receiptDirectory));
+            new FileSystemOperationReceiptStore(_receiptDirectory, _auditAnchor));
 
         return await adapter.CreateSnapshotAsync(
             new CreateSnapshot(repository, schedule.SourcePath, schedule.SourceStableId, schedule.Consistency),
