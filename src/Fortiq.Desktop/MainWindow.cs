@@ -1231,29 +1231,22 @@ public sealed class MainWindow : Window
         return button;
     }
 
-    private static Button Primary(string label) => new()
+    // Shared with the wizard and the installer, so the hover behaviour is decided once. Painting a
+    // colour onto the button alone left the Fluent theme free to repaint the presenter underneath on
+    // hover, and the button disappeared under the cursor.
+    private static Button Primary(string label)
     {
-        Content = label,
-        Background = Brand,
-        Foreground = Brushes.White,
-        BorderThickness = new Thickness(0),
-        CornerRadius = new CornerRadius(6),
-        Padding = new Thickness(18, 9),
-        HorizontalAlignment = HorizontalAlignment.Left,
-        FontWeight = FontWeight.SemiBold
-    };
+        var button = FortiqButton.Primary(label);
+        button.HorizontalAlignment = HorizontalAlignment.Left;
+        return button;
+    }
 
-    private static Button Secondary(string label) => new()
+    private static Button Secondary(string label)
     {
-        Content = label,
-        Background = Surface,
-        Foreground = Ink,
-        BorderBrush = Line,
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(6),
-        Padding = new Thickness(14, 8),
-        HorizontalAlignment = HorizontalAlignment.Left
-    };
+        var button = FortiqButton.Secondary(label);
+        button.HorizontalAlignment = HorizontalAlignment.Left;
+        return button;
+    }
 
     private static Button Tab(string label, bool selected, Action action)
     {

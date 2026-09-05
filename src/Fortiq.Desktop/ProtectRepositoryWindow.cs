@@ -587,27 +587,11 @@ public sealed class ProtectRepositoryWindow : Window
         Child = Text(text, 11, FontWeight.SemiBold, Brand)
     };
 
-    private static Button Primary(string label) => new()
-    {
-        Content = label,
-        Background = Brand,
-        Foreground = Brushes.White,
-        BorderThickness = new Thickness(0),
-        CornerRadius = new CornerRadius(6),
-        Padding = new Thickness(18, 9),
-        FontWeight = FontWeight.SemiBold
-    };
+    // Both delegate to FortiqButton, which styles the states rather than assigning a colour once.
+    // Assigning it once is what made these disappear under the cursor.
+    private static Button Primary(string label) => FortiqButton.Primary(label);
 
-    private static Button Secondary(string label) => new()
-    {
-        Content = label,
-        Background = Surface,
-        Foreground = Ink,
-        BorderBrush = Line,
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(6),
-        Padding = new Thickness(14, 8)
-    };
+    private static Button Secondary(string label) => FortiqButton.Secondary(label);
 
     private static Border Card(Control child, IBrush? background = null, IBrush? border = null, Thickness? padding = null) => new()
     {

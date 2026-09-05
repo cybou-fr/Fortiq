@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Fortiq.Desktop.Controls;
 using Fortiq.Desktop.ViewModels;
 using static Fortiq.Desktop.DesignTokens;
 
@@ -73,29 +74,13 @@ public sealed class InstallWindow : Window
             Child = _errorText
         };
 
-        _portableButton = new Button
-        {
-            Content = "Run as Portable",
-            Padding = new Thickness(18, 10),
-            Background = Surface,
-            BorderBrush = Line,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            Foreground = Ink,
-            FontWeight = FontWeight.Medium
-        };
+        _portableButton = FortiqButton.Secondary("Run as Portable");
         _portableButton.Click += (_, _) => _model.RunPortable();
 
-        _installButton = new Button
-        {
-            Content = "Install Fortiq ➔",
-            Padding = new Thickness(24, 10),
-            Background = Brand,
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(6),
-            Foreground = Brushes.White,
-            FontWeight = FontWeight.SemiBold
-        };
+        // Shared styling, so this one keeps its fill when the pointer is over it. Set locally, the
+        // Fluent theme repainted the presenter underneath on hover and the button vanished.
+        _installButton = FortiqButton.Primary("Install Fortiq ➔");
+
         _installButton.Click += async (_, _) => await _model.InstallAsync();
 
         // The action bar is docked, not scrolled. It used to sit at the bottom of the same
