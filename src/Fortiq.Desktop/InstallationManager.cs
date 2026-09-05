@@ -347,6 +347,8 @@ public sealed class InstallationManager : IInstallationOperations
         string Schema,
         string Version,
         string Rid,
+        /// <summary>Which Fortiq this bundle holds, as opposed to which manifest format it uses.</summary>
+        string? ProductVersion,
         string? Created,
         IReadOnlyList<BundleComponentManifest> Components,
         IReadOnlyList<BundleFileManifest>? Files = null);

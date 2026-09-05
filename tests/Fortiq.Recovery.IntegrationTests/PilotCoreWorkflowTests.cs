@@ -86,6 +86,7 @@ public sealed class PilotCoreWorkflowTests
             "fortiq.bundle-manifest",
             "1.0.0",
             "win-x64",
+            "0.1.0-test",
             DateTimeOffset.UtcNow.ToString("O"),
             new[]
             {

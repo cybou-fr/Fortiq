@@ -125,6 +125,7 @@ public sealed class BundleIntegrityTests : IDisposable
             "fortiq.bundle-manifest",
             "1.0",
             "win-x64",
+            "0.1.0-test",
             null,
             [
                 new("desktop", "desktop", "desktop/Fortiq.Desktop.exe", true, HashOf("desktop/Fortiq.Desktop.exe")),

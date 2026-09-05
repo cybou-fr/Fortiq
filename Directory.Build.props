@@ -1,4 +1,20 @@
 <Project>
+  <!--
+    The one place a Fortiq version is decided. Everything that shows or records a version reads it
+    from here: the assemblies, the version on the Settings screen, the deployment bundle's manifest
+    and the name of the release archive. It was decided in none of those places before, so the ZIP
+    said 0.1.0 while the application said 1.0.0 - the default nobody chose.
+
+    VersionPrefix is the release. VersionSuffix marks a pre-release ("beta.1") and is empty for a
+    final one; scripts/Get-FortiqVersion.ps1 reads both.
+  -->
+  <PropertyGroup>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix>beta.1</VersionSuffix>
+    <Product>Fortiq Community Edition</Product>
+    <Company>Fortiq</Company>
+  </PropertyGroup>
+
   <PropertyGroup>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>

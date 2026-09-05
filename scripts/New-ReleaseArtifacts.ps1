@@ -62,8 +62,14 @@ $bundleDirectory = Join-Path $OutputDirectory 'bundle'
 & (Join-Path $PSScriptRoot 'New-DeploymentBundle.ps1') -OutputDirectory $bundleDirectory -Configuration $Configuration
 if ($LASTEXITCODE -ne 0) { throw 'Building deployment bundle failed.' }
 
-Write-Host 'Packaging Fortiq-Community-0.1.0-win-x64.zip'
-$communityZip = Join-Path $OutputDirectory 'Fortiq-Community-0.1.0-win-x64.zip'
+# Read, never repeated. The name used to carry 0.1.0 written here by hand while the assemblies
+# carried 1.0.0 by default, so the archive and the application it contained disagreed about what
+# they were.
+$version = & (Join-Path $PSScriptRoot 'Get-FortiqVersion.ps1')
+$archiveName = "Fortiq-Community-$($version.Archive)-$Runtime.zip"
+
+Write-Host "Packaging $archiveName"
+$communityZip = Join-Path $OutputDirectory $archiveName
 Compress-Archive -Path "$bundleDirectory\*" -DestinationPath $communityZip -Force
 
 Move-Item (Join-Path $sbomDirectory 'sbom.json') (Join-Path $OutputDirectory 'sbom.json')

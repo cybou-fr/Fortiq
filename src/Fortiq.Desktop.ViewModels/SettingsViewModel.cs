@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Linq;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
@@ -126,7 +127,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         DataDirectory = dataDirectory ?? string.Empty;
         LogsDirectory = logsDirectory ?? (string.IsNullOrEmpty(dataDirectory) ? string.Empty : Path.Combine(dataDirectory, "logs"));
-        AppVersion = typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
+        AppVersion = ReadVersion();
         RuntimeVersion = Environment.Version.ToString(3);
 
         if (startWithWindows is { } given)
@@ -137,6 +138,30 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         {
             _startWithWindows = Fortiq.Platform.Windows.WindowsAutostartController.IsAutostartEnabled();
         }
+    }
+
+    /// <summary>The version this build actually is, pre-release marker included.</summary>
+    /// <remarks>
+    /// The informational version, not <c>Assembly.GetName().Version</c>. The latter is a four-part
+    /// number with nowhere to put "beta.1", so a beta would have shown as 0.1.0 and been
+    /// indistinguishable from the release - on the one screen a person looks at to answer "which
+    /// build am I running". The build stamps a commit onto the end after a '+'; that belongs in a
+    /// diagnostic, not beside the product name.
+    /// </remarks>
+    private static string ReadVersion()
+    {
+        var informational = typeof(SettingsViewModel).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(informational))
+        {
+            var build = informational.IndexOf('+', StringComparison.Ordinal);
+            return build < 0 ? informational : informational[..build];
+        }
+
+        return typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
     }
 
     public async Task RefreshServiceStatusAsync()

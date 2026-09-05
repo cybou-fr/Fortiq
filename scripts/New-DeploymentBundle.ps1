@@ -56,9 +56,17 @@ foreach ($component in @(@{Folder='desktop'; Project='Fortiq.Desktop'}, @{Folder
 # Once, into the bundle root - not once per component. The brace above was lost, which put every line
 # from here to the end of the file inside the component loop and left the script unparseable, so no
 # bundle could be built at all.
-Copy-Item -LiteralPath (Join-Path $repositoryRoot 'SECURITY.md') -Destination $destination
-if (Test-Path (Join-Path $repositoryRoot 'README-FIRST.txt')) {
-    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'README-FIRST.txt') -Destination $destination
+# The bundle has to stand on its own: somebody who unzips it on a machine with no network, no
+# repository checkout and no Fortiq installed must be able to read what it is, what they may do with
+# it, and how to get their files back. Each of these is required rather than optional - a package
+# that silently ships without its licence or its recovery guide is not one to release.
+foreach ($document in @('SECURITY.md', 'README-FIRST.txt', 'LICENSE', 'RECOVERY-GUIDE.md')) {
+    $source = Join-Path $repositoryRoot $document
+    if (-not (Test-Path -LiteralPath $source)) {
+        throw "'$document' is missing from the repository; the bundle would ship without it."
+    }
+
+    Copy-Item -LiteralPath $source -Destination $destination
 }
 
 $desktopExe = Join-Path $destination 'desktop/Fortiq.Desktop.exe'
@@ -66,9 +74,15 @@ $serviceExe = Join-Path $destination 'service/Fortiq.Service.exe'
 $recoverExe = Join-Path $destination 'recover/Fortiq.Recover.exe'
 $helperExe = Join-Path $destination 'desktop/Fortiq.PasswordHelper.exe'
 
+# 'version' is the manifest format's version and stays 1.0 until the format changes.
+# 'productVersion' is which Fortiq this bundle holds, read from the one place that decides it - two
+# different questions that were previously answered by one field, and only by accident.
+$version = & (Join-Path $PSScriptRoot 'Get-FortiqVersion.ps1')
+
 $bundleManifest = [ordered]@{
     schema = 'fortiq.bundle-manifest'
     version = '1.0'
+    productVersion = $version.Full
     rid = 'win-x64'
     created = (Get-Date).ToUniversalTime().ToString('O')
     components = @(

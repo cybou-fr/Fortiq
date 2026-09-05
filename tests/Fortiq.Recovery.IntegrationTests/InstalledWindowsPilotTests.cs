@@ -218,6 +218,7 @@ public sealed class InstalledWindowsPilotTests
             "fortiq.bundle-manifest",
             "1.0",
             "win-x64",
+            "0.1.0-test",
             DateTimeOffset.UtcNow.ToString("O"),
             [
                 new("desktop", "desktop", "desktop/Fortiq.Desktop.exe", true, HashOf("desktop/Fortiq.Desktop.exe")),
