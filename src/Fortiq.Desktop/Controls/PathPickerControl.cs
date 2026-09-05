@@ -58,18 +58,11 @@ public sealed class PathPickerControl : StackPanel
             TextWrapping = TextWrapping.Wrap
         };
 
-        _textBox = new TextBox
-        {
-            Text = initialPath,
-            PlaceholderText = placeholder,
-            CornerRadius = new CornerRadius(6),
-            BorderBrush = Line,
-            BorderThickness = new Thickness(1),
-            Background = Surface,
-            Foreground = Ink,
-            Padding = new Thickness(10, 8),
-            VerticalContentAlignment = VerticalAlignment.Center
-        };
+        // Styled for every state, not just at rest: clicking into a path field used to hand it to the
+        // theme, which painted it dark and left the path unreadable inside it.
+        _textBox = FortiqTextBox.Create(placeholder);
+        _textBox.Text = initialPath;
+        _textBox.VerticalContentAlignment = VerticalAlignment.Center;
         _textBox.TextChanged += (_, _) => PathChanged?.Invoke(_textBox.Text ?? string.Empty);
 
         _browseButton = new Button

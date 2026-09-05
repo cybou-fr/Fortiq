@@ -43,6 +43,7 @@ public sealed class InstallWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = CanvasBackground;
 
+        FortiqTextBox.Style(_pathTextBox);
         _pathTextBox.Text = _model.InstallDirectory;
         _pathTextBox.VerticalContentAlignment = VerticalAlignment.Center;
         _pathTextBox.TextChanged += (_, _) => _model.InstallDirectory = _pathTextBox.Text ?? string.Empty;

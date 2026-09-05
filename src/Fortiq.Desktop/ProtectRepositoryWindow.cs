@@ -267,18 +267,10 @@ public sealed class ProtectRepositoryWindow : Window
             // "s3:https://s3.amazonaws.com/my-fortiq-backup", which is a real-looking address for a
             // bucket nobody owns: it satisfies the "is this filled in?" check, so Next lights up and
             // the wizard fails much later, after the recovery phrase has been shown.
-            var bucketBox = new TextBox
-            {
-                Text = _model.RepositoryLocation.StartsWith("s3:", StringComparison.OrdinalIgnoreCase)
-                    ? _model.RepositoryLocation
-                    : string.Empty,
-                PlaceholderText = "s3:https://s3.eu-west-4.example.com/my-bucket",
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(10, 8),
-                Background = Surface,
-                Foreground = Ink,
-                BorderBrush = Line
-            };
+            var bucketBox = FortiqTextBox.Create("s3:https://s3.eu-west-4.example.com/my-bucket");
+            bucketBox.Text = _model.RepositoryLocation.StartsWith("s3:", StringComparison.OrdinalIgnoreCase)
+                ? _model.RepositoryLocation
+                : string.Empty;
             // Attached after the initial Text is set, and it does not re-render. Both matter: setting
             // Text raises TextChanged, so a handler attached first and calling Render() rebuilds this
             // very box, which sets Text again - the window hung solid the moment S3 was selected.
@@ -453,16 +445,8 @@ public sealed class ProtectRepositoryWindow : Window
         var requested = string.Join(", ", _model.RequestedWordNumbers.Select(number => $"#{number}"));
         _content.Children.Add(SectionTitle("Verify your recovery phrase", "Type the requested words in order to prove that your offline paper backup is accurate."));
 
-        var verifyBox = new TextBox
-        {
-            Text = _model.ConfirmationInput,
-            PlaceholderText = $"Enter words {requested} separated by spaces...",
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(10, 8),
-            Background = Surface,
-            Foreground = Ink,
-            BorderBrush = Line
-        };
+        var verifyBox = FortiqTextBox.Create($"Enter words {requested} separated by spaces...");
+        verifyBox.Text = _model.ConfirmationInput;
         verifyBox.TextChanged += (_, _) => _model.ConfirmationInput = verifyBox.Text ?? string.Empty;
 
         _content.Children.Add(new StackPanel
@@ -565,21 +549,8 @@ public sealed class ProtectRepositoryWindow : Window
         bool masked = false,
         string? placeholder = null)
     {
-        var box = new TextBox
-        {
-            Text = value,
-            PlaceholderText = placeholder ?? string.Empty,
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(10, 8),
-            Background = Surface,
-            Foreground = Ink,
-            BorderBrush = Line
-        };
-
-        if (masked)
-        {
-            box.PasswordChar = '•';
-        }
+        var box = FortiqTextBox.Create(placeholder, masked);
+        box.Text = value;
 
         // Attached after Text is assigned above, so the initial value does not raise this.
         box.TextChanged += (_, _) =>

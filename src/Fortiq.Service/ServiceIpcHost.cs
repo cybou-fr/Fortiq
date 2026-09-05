@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
@@ -167,7 +168,62 @@ public sealed class ServiceIpcHost : BackgroundService
         }
         catch (Exception ex)
         {
-            return new ServiceIpcProtocol.Response(false, ex.Message);
+            // The caller gets no detail and the machine's administrator gets all of it. Returning
+            // ex.Message alone dropped the inner exception and the stack on the floor, so a failed
+            // provision reached the screen as the single word "UnlockFailed" - which is deliberately
+            // uninformative, being the unified message that keeps an attacker from learning which
+            // unlock factor failed - and there was nowhere at all to find out why. A product whose
+            // value is trustworthy diagnostics cannot answer "it did not work" and nothing else.
+            LogFailure(requestJson, ex);
+            return new ServiceIpcProtocol.Response(false, Explain(ex));
+        }
+    }
+
+    /// <summary>A sentence the person can act on, without saying more than the caller may know.</summary>
+    private static string Explain(Exception error) => error switch
+    {
+        UnlockFailedException => "Fortiq could not unlock the repository it just created, so nothing was " +
+            "kept. The reason is recorded in the Windows event log under the 'Fortiq' source - open " +
+            "Event Viewer, or ask an administrator to.",
+        _ => error.Message
+    };
+
+    /// <summary>
+    /// Records why a request failed where an administrator of this machine can read it.
+    /// </summary>
+    /// <remarks>
+    /// The event log and not a file: it is already the place Windows services report to, it survives
+    /// the service being reinstalled, and it is not writable by the accounts this service refuses.
+    /// The command is recorded, never the payload - a provision payload names paths, and a failure
+    /// report is not a reason to copy them somewhere with different permissions.
+    /// </remarks>
+    private static void LogFailure(string requestJson, Exception error)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var command = "unknown";
+        try
+        {
+            command = JsonSerializer.Deserialize<ServiceIpcProtocol.Request>(requestJson, JsonOptions)?.Command ?? "unknown";
+        }
+        catch (JsonException)
+        {
+            // The request could not be read, which the entry below still records as a failure.
+        }
+
+        try
+        {
+            using var log = new EventLog("Application") { Source = "Fortiq" };
+            log.WriteEntry(
+                $"IPC command '{command}' failed.{Environment.NewLine}{error}",
+                EventLogEntryType.Error);
+        }
+        catch (Exception logging) when (logging is System.Security.SecurityException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // A service that cannot write its log must still answer the request it was given.
         }
     }
 
