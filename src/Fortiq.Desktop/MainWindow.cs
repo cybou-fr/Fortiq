@@ -37,7 +37,7 @@ public sealed class MainWindow : Window
     private bool _historySelected;
     private RepositoryRowViewModel? _recoverySource;
     private RepositoryRowViewModel? _kitSource;
-    private string? _auditLedgerStatus;
+    private AuditChainStatus _auditChain = AuditChainStatus.NotChecked;
     private bool _auditLedgerVerifying;
     private readonly Action<string>? _updateTrayStatus;
     private readonly Action? _disposeTray;
@@ -405,8 +405,13 @@ public sealed class MainWindow : Window
         var total = _model.Repositories.Count;
         var backedUpRecently = _model.Repositories.Count(r =>
             r.Health.Facts.LastBackupAt is { } dt && (DateTimeOffset.UtcNow - dt) <= TimeSpan.FromDays(2));
-        var recoveryProven = _model.Repositories.Count(r => r.Health.Verdict == HealthVerdict.Recoverable);
-        var needsAttention = _model.Repositories.Count(r => r.Health.Verdict != HealthVerdict.Recoverable);
+        // "Recovery proven" is a fact about this repository - something was restored from it - not a
+        // synonym for the overall verdict. A repository whose integrity check has gone stale is
+        // Unproven overall while its restore drill still happened, and counting the verdict here told
+        // the person their restore had somehow un-happened.
+        var recoveryProven = _model.Repositories.Count(r => r.Health.Facts.LastProvenRestoreAt is not null);
+        var atRisk = _model.Repositories.Count(r => r.Health.Verdict == HealthVerdict.AtRisk);
+        var unproven = _model.Repositories.Count(r => r.Health.Verdict == HealthVerdict.Unproven);
 
         var grid = new Grid
         {
@@ -437,13 +442,22 @@ public sealed class MainWindow : Window
             total == 0 ? Muted : provenAllGood ? Recoverable : Unproven,
             total == 0 ? InfoSurface : provenAllGood ? RecoverableSurface : UnprovenSurface), 2);
 
-        var hasAttention = needsAttention > 0;
+        // At risk and unproven are different situations and must not be added into one red number.
+        // "At risk" means a recovery would fail today. "Unproven" means nothing has demonstrated that
+        // it would succeed - a repository waiting for its first restore drill has done nothing wrong,
+        // and calling that at risk teaches people to ignore the word by the time it is true.
+        var needsAttention = atRisk + unproven;
         Add(grid, new KpiStatCard(
             "Needs attention",
             total == 0 ? "0" : needsAttention.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            total == 0 ? "None" : hasAttention ? $"{needsAttention} source(s) at risk" : "All healthy",
-            hasAttention ? Failure : Recoverable,
-            hasAttention ? AtRiskSurface : RecoverableSurface), 3);
+            total == 0
+                ? "Nothing protected yet"
+                : atRisk > 0 && unproven > 0 ? $"{atRisk} at risk, {unproven} unproven"
+                : atRisk > 0 ? $"{atRisk} source(s) at risk"
+                : unproven > 0 ? $"{unproven} awaiting a restore drill"
+                : "All proven recoverable",
+            total == 0 ? Muted : atRisk > 0 ? Failure : unproven > 0 ? Unproven : Recoverable,
+            total == 0 ? InfoSurface : atRisk > 0 ? AtRiskSurface : unproven > 0 ? UnprovenSurface : RecoverableSurface), 3);
 
         return grid;
     }
@@ -595,9 +609,7 @@ public sealed class MainWindow : Window
 
         leftStack.Children.Add(badgeStack);
 
-        var descText = Text(
-            _auditLedgerStatus ?? "Operation receipts are monotonic and cryptographically chained. Verification validates each receipt hash and sequence continuity on disk.",
-            12, FontWeight.Normal, Muted, wrap: true);
+        var descText = Text(AuditStatus().Detail, 12, FontWeight.Normal, Muted, wrap: true);
         leftStack.Children.Add(descText);
 
         grid.Children.Add(leftStack);
@@ -611,19 +623,11 @@ public sealed class MainWindow : Window
             try
             {
                 var dir = FortiqStatePaths.Resolve().Receipts;
-                var res = await AuditLedgerVerifier.VerifyLedgerAsync(dir);
-                if (res.IsValid)
-                {
-                    _auditLedgerStatus = $"Verified: {res.TotalReceiptsVerified} receipt(s) across {res.Repositories.Count} repository ledger(s). Unbroken hash chain, 0 gaps, 0 tampering detected.";
-                }
-                else
-                {
-                    _auditLedgerStatus = $"Warning: {res.AllAnomalies.Count} anomaly(ies) detected: {res.AllAnomalies[0].Description}";
-                }
+                _auditChain = AuditChainStatus.From(await AuditLedgerVerifier.VerifyLedgerAsync(dir));
             }
             catch (Exception ex)
             {
-                _auditLedgerStatus = $"Verification error: {ex.Message}";
+                _auditChain = AuditChainStatus.Failed(ex.Message);
             }
             finally
             {
@@ -693,12 +697,13 @@ public sealed class MainWindow : Window
             var recovery = repository.Health.Facts.LastProvenRestoreAt is null ? "Not proven" : Relative(repository.Health.Facts.LastProvenRestoreAt);
             row.Children.Add(At(Text(recovery, 12, FontWeight.Normal, Muted), 2));
 
-            var statusColor = repository.Health.Verdict == HealthVerdict.Recoverable ? Recoverable : Unproven;
-            var statusLabel = repository.Health.Verdict switch
+            // The label and the colour have to agree. An at-risk row used to be painted the same
+            // amber as an unproven one, so the only row that meant "act now" looked like the rest.
+            var (statusLabel, statusColor) = repository.Health.Verdict switch
             {
-                HealthVerdict.Recoverable => "Recoverable",
-                HealthVerdict.Unproven => "Unproven",
-                _ => "At risk"
+                HealthVerdict.Recoverable => ("Recoverable", Recoverable),
+                HealthVerdict.Unproven => ("Unproven", Unproven),
+                _ => ("At risk", AtRisk)
             };
             row.Children.Add(At(Text(statusLabel, 12, FontWeight.SemiBold, statusColor), 3));
 
@@ -1128,33 +1133,21 @@ public sealed class MainWindow : Window
         _ => string.Empty
     };
 
-    private string AuditBadgeText()
-    {
-        if (_model.Repositories.Count == 0) return "Audit chain: nothing recorded yet";
-        if (_auditLedgerStatus is not null)
-        {
-            return _auditLedgerStatus.Contains("anomaly", StringComparison.OrdinalIgnoreCase) ||
-                   _auditLedgerStatus.Contains("tampering", StringComparison.OrdinalIgnoreCase) ||
-                   _auditLedgerStatus.Contains("failed", StringComparison.OrdinalIgnoreCase)
-                ? "Audit chain: anomaly detected"
-                : "Audit chain: verified";
-        }
-        return "Audit chain: not checked yet";
-    }
+    /// <summary>What the card is showing, with no repository standing in for no check.</summary>
+    private AuditChainStatus AuditStatus() =>
+        _model.Repositories.Count == 0 ? AuditChainStatus.NothingRecorded : _auditChain;
 
-    private (IBrush Background, IBrush Foreground) AuditBadgeColors()
+    private string AuditBadgeText() => AuditStatus().Badge;
+
+    private (IBrush Background, IBrush Foreground) AuditBadgeColors() => AuditStatus().State switch
     {
-        if (_model.Repositories.Count == 0) return (InfoSurface, Muted);
-        if (_auditLedgerStatus is not null)
-        {
-            return _auditLedgerStatus.Contains("anomaly", StringComparison.OrdinalIgnoreCase) ||
-                   _auditLedgerStatus.Contains("tampering", StringComparison.OrdinalIgnoreCase) ||
-                    _auditLedgerStatus.Contains("failed", StringComparison.OrdinalIgnoreCase)
-                ? (AtRiskSurface, Failure)
-                : (RecoverableSurface, Recoverable);
-        }
-        return (UnprovenSurface, Unproven);
-    }
+        AuditChainState.Verified => (RecoverableSurface, Recoverable),
+        AuditChainState.Anomaly => (AtRiskSurface, Failure),
+        AuditChainState.LegacyUnverified => (UnprovenSurface, Unproven),
+        AuditChainState.Error => (UnprovenSurface, Caution),
+        AuditChainState.NotChecked => (UnprovenSurface, Unproven),
+        _ => (InfoSurface, Muted)
+    };
 
     private static Grid Header(string title, string subtitle, string? action = null, Func<Task>? handler = null)
     {

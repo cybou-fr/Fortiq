@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Fortiq.Desktop.Controls;
 using Fortiq.Desktop.ViewModels;
 
@@ -35,6 +36,18 @@ public sealed class FileRecoveryWindow : Window
     private readonly RadioButton _restoreAllRadio = new() { Content = "Restore entire backup", IsChecked = true, GroupName = "RestoreMode" };
     private readonly RadioButton _restoreSpecificRadio = new() { Content = "Restore specific file or folder", IsChecked = false, GroupName = "RestoreMode" };
     private readonly TextBox _fileSearch = new() { PlaceholderText = "Search files in this backup (name or path)..." };
+
+    /// <summary>
+    /// Holds the search back until typing pauses.
+    /// </summary>
+    /// <remarks>
+    /// Filtering scans every path in the snapshot, on the UI thread, and a backup of a documents
+    /// folder is easily six figures of them. Running that per keystroke meant the window stopped
+    /// repainting while somebody typed a filename - the letters appeared behind the cursor and the
+    /// list lagged several characters back. One pass after the last keystroke is the same answer for
+    /// a fraction of the work.
+    /// </remarks>
+    private readonly DispatcherTimer _searchDebounce = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly ListBox _fileList = new() { Height = 220, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _fileListStatus = new() { FontSize = 12, Foreground = Brushes.Gray };
     private readonly StackPanel _explorerPanel = new() { Spacing = 8 };
@@ -123,10 +136,19 @@ public sealed class FileRecoveryWindow : Window
             }
         };
 
-        _fileSearch.TextChanged += (_, _) =>
+        _searchDebounce.Tick += (_, _) =>
         {
+            _searchDebounce.Stop();
             _model.SetSearchQuery(_fileSearch.Text ?? string.Empty);
             UpdateFileList();
+        };
+
+        _fileSearch.TextChanged += (_, _) =>
+        {
+            // Restarting on every keystroke is what makes this a debounce rather than a delay: the
+            // filter runs once, after the person stops typing.
+            _searchDebounce.Stop();
+            _searchDebounce.Start();
         };
 
         _fileList.ItemTemplate = CreateFileItemTemplate();
@@ -232,6 +254,8 @@ public sealed class FileRecoveryWindow : Window
         };
         Closed += (_, _) =>
         {
+            // A tick left pending would rebuild the list of a window that is gone.
+            _searchDebounce.Stop();
             _model.PropertyChanged -= ModelChanged;
             _model.Clear();
             _lastLoadedSnapshot = null;
