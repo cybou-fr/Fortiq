@@ -74,11 +74,17 @@ public sealed class InstallationManager : IInstallationOperations
         progress?.Report(new("Preparing installation directories...", 10));
         Directory.CreateDirectory(targetDir);
 
-        progress?.Report(new("Copying application binaries...", 25));
-        CopyBinaries(sourceDir, targetDir);
-
-        progress?.Report(new("Copying storage engines and manifests...", 45));
-        CopyEngines(sourceDir, targetDir);
+        var (bundleRoot, manifest) = DiscoverManifest(sourceDir);
+        if (manifest is not null && bundleRoot is not null)
+        {
+            progress?.Report(new("Verifying and copying deployment bundle components...", 25));
+            CopyBundle(bundleRoot, manifest, targetDir);
+        }
+        else
+        {
+            progress?.Report(new("Copying application binaries...", 25));
+            CopyLocalSource(sourceDir, targetDir);
+        }
 
         if (OperatingSystem.IsWindows())
         {
@@ -89,61 +95,56 @@ public sealed class InstallationManager : IInstallationOperations
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("Warning setting program files ACL: " + ex.Message);
+                throw new InvalidOperationException($"Security provisioning failed: could not set Program Files ACLs on '{targetDir}': {ex.Message}", ex);
             }
 
+            var statePaths = FortiqStatePaths.Resolve();
             try
             {
-                var statePaths = FortiqStatePaths.Resolve();
                 DirectoryAclProvisioner.ProvisionStateDirectoryAcls(statePaths);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("Warning setting state ACL: " + ex.Message);
+                throw new InvalidOperationException($"Security provisioning failed: could not set state directory ACLs on '{statePaths.Root}': {ex.Message}", ex);
             }
 
             if (options.InstallService)
             {
                 progress?.Report(new("Registering Windows Service 'Fortiq'...", 75));
                 var serviceExePath = Path.Combine(targetDir, "Fortiq.Service.exe");
-                if (File.Exists(serviceExePath))
+                if (!File.Exists(serviceExePath))
                 {
-                    try
+                    throw new FileNotFoundException($"Cannot install Windows Service: '{serviceExePath}' is missing from target directory. Deployment is incomplete.");
+                }
+
+                try
+                {
+                    var status = WindowsServiceController.QueryStatus(WindowsServiceController.DefaultServiceName);
+                    if (status.Running)
                     {
-                        var status = WindowsServiceController.QueryStatus(WindowsServiceController.DefaultServiceName);
-                        if (status.Running)
-                        {
-                            WindowsServiceController.StopService(WindowsServiceController.DefaultServiceName, TimeSpan.FromSeconds(5));
-                        }
-
-                        if (status.Exists)
-                        {
-                            WindowsServiceController.DeleteService(WindowsServiceController.DefaultServiceName);
-                            Thread.Sleep(500); // Give SCM time to finalize deletion
-                        }
-
-                        WindowsServiceController.CreateAndConfigureService(
-                            WindowsServiceController.DefaultServiceName,
-                            WindowsServiceController.DefaultDisplayName,
-                            serviceExePath,
-                            WindowsServiceController.DefaultDescription,
-                            WindowsServiceController.ServiceAutoStart,
-                            setServiceSidUnrestricted: true);
-
-                        progress?.Report(new("Starting Windows Service 'Fortiq'...", 85));
-                        try
-                        {
-                            WindowsServiceController.StartService(WindowsServiceController.DefaultServiceName, TimeSpan.FromSeconds(10));
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine("Warning starting service during install: " + ex.Message);
-                        }
+                        WindowsServiceController.StopService(WindowsServiceController.DefaultServiceName, TimeSpan.FromSeconds(5));
                     }
-                    catch (Exception ex)
+
+                    if (status.Exists)
                     {
-                        throw new InvalidOperationException($"Failed to register Windows Service: {ex.Message}", ex);
+                        WindowsServiceController.DeleteService(WindowsServiceController.DefaultServiceName);
+                        Thread.Sleep(500); // Give SCM time to finalize deletion
                     }
+
+                    WindowsServiceController.CreateAndConfigureService(
+                        WindowsServiceController.DefaultServiceName,
+                        WindowsServiceController.DefaultDisplayName,
+                        serviceExePath,
+                        WindowsServiceController.DefaultDescription,
+                        WindowsServiceController.ServiceAutoStart,
+                        setServiceSidUnrestricted: true);
+
+                    progress?.Report(new("Starting Windows Service 'Fortiq'...", 85));
+                    WindowsServiceController.StartService(WindowsServiceController.DefaultServiceName, TimeSpan.FromSeconds(10));
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException($"Failed to register or start Windows Service: {ex.Message}", ex);
                 }
             }
 
@@ -248,7 +249,129 @@ public sealed class InstallationManager : IInstallationOperations
         }
     }
 
-    private static void CopyBinaries(string sourceDir, string targetDir)
+    public sealed record BundleComponentManifest(
+        string Name,
+        string Folder,
+        string MainExecutable,
+        bool Required,
+        string Sha256);
+
+    public sealed record BundleManifest(
+        string Schema,
+        string Version,
+        string Rid,
+        string? Created,
+        IReadOnlyList<BundleComponentManifest> Components);
+
+    public static (string? BundleRoot, BundleManifest? Manifest) DiscoverManifest(string sourceDir)
+    {
+        var directPath = Path.Combine(sourceDir, "bundle-manifest.json");
+        if (File.Exists(directPath))
+        {
+            var manifest = LoadManifest(directPath);
+            if (manifest is not null) return (sourceDir, manifest);
+        }
+
+        var parent = Directory.GetParent(sourceDir);
+        if (parent is not null)
+        {
+            var parentPath = Path.Combine(parent.FullName, "bundle-manifest.json");
+            if (File.Exists(parentPath))
+            {
+                var manifest = LoadManifest(parentPath);
+                if (manifest is not null) return (parent.FullName, manifest);
+            }
+        }
+
+        return (null, null);
+    }
+
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private static BundleManifest? LoadManifest(string path)
+    {
+        try
+        {
+            var json = File.ReadAllText(path);
+            var doc = JsonSerializer.Deserialize<BundleManifest>(json, ManifestJsonOptions);
+            return doc is not null && doc.Schema == "fortiq.bundle-manifest" ? doc : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static void ValidateBundle(string bundleRoot, BundleManifest manifest)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentException.ThrowIfNullOrWhiteSpace(bundleRoot);
+
+        foreach (var component in manifest.Components)
+        {
+            var exePath = Path.Combine(bundleRoot, component.MainExecutable);
+            if (!File.Exists(exePath))
+            {
+                if (component.Required)
+                {
+                    throw new FileNotFoundException($"Deployment bundle integrity error: required component '{component.Name}' is missing at '{exePath}'. Installation cannot proceed.");
+                }
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(component.Sha256))
+            {
+                using var stream = File.OpenRead(exePath);
+                var hashBytes = System.Security.Cryptography.SHA256.HashData(stream);
+                var computedHash = Convert.ToHexStringLower(hashBytes);
+                if (!string.Equals(computedHash, component.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException($"Deployment bundle integrity error: component '{component.Name}' at '{exePath}' failed SHA-256 validation (expected: {component.Sha256}, actual: {computedHash}). Installation cannot proceed.");
+                }
+            }
+        }
+    }
+
+    private static void CopyBundle(string bundleRoot, BundleManifest manifest, string targetDir)
+    {
+        ValidateBundle(bundleRoot, manifest);
+
+        foreach (var component in manifest.Components)
+        {
+            var componentFolder = Path.Combine(bundleRoot, component.Folder);
+            if (Directory.Exists(componentFolder))
+            {
+                foreach (var file in Directory.EnumerateFiles(componentFolder, "*.*", SearchOption.TopDirectoryOnly))
+                {
+                    var ext = Path.GetExtension(file);
+                    if (BinaryExtensions.Any(valid => string.Equals(ext, valid, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var dest = Path.Combine(targetDir, Path.GetFileName(file));
+                        File.Copy(file, dest, overwrite: true);
+                    }
+                }
+            }
+        }
+
+        var candidates = new[]
+        {
+            Path.Combine(bundleRoot, "desktop", "engines"),
+            Path.Combine(bundleRoot, "service", "engines"),
+            Path.Combine(bundleRoot, "engines")
+        };
+        var enginesDir = candidates.FirstOrDefault(Directory.Exists);
+        if (enginesDir is not null)
+        {
+            var targetEngines = Path.Combine(targetDir, "engines");
+            Directory.CreateDirectory(targetEngines);
+            CopyDirectoryRecursive(enginesDir, targetEngines);
+        }
+    }
+
+    private static void CopyLocalSource(string sourceDir, string targetDir)
     {
         var sourceFiles = Directory.EnumerateFiles(sourceDir, "*.*", SearchOption.TopDirectoryOnly);
         foreach (var file in sourceFiles)
@@ -263,56 +386,11 @@ public sealed class InstallationManager : IInstallationOperations
                 }
                 catch (IOException)
                 {
-                    // If target file is locked, ignore or retry
                 }
             }
         }
 
-        // If Fortiq.Service or Fortiq.Recover are missing from sourceDir (e.g. running from project bin/ in dev),
-        // resolve and copy them from sibling build directories so the installed environment is complete.
-        CopySiblingComponentIfMissing("Fortiq.Service", sourceDir, targetDir);
-        CopySiblingComponentIfMissing("Fortiq.Recover", sourceDir, targetDir);
-    }
-
-    private static void CopySiblingComponentIfMissing(string componentName, string sourceDir, string targetDir)
-    {
-        var targetExe = Path.Combine(targetDir, $"{componentName}.exe");
-        if (File.Exists(targetExe)) return;
-
-        var parent = new DirectoryInfo(sourceDir).Parent;
-        while (parent is not null)
-        {
-            var siblingDir = Path.Combine(parent.FullName, componentName);
-            if (Directory.Exists(siblingDir))
-            {
-                var candidateFiles = Directory.EnumerateFiles(siblingDir, $"{componentName}.*", SearchOption.AllDirectories)
-                    .Where(f => BinaryExtensions.Any(ext => string.Equals(Path.GetExtension(f), ext, StringComparison.OrdinalIgnoreCase)))
-                    .ToList();
-
-                var releaseCandidate = candidateFiles.FirstOrDefault(f => f.Contains("Release", StringComparison.OrdinalIgnoreCase) && Path.GetFileName(f).Equals($"{componentName}.exe", StringComparison.OrdinalIgnoreCase));
-                var exeToUse = releaseCandidate ?? candidateFiles.FirstOrDefault(f => Path.GetFileName(f).Equals($"{componentName}.exe", StringComparison.OrdinalIgnoreCase));
-
-                if (exeToUse is not null)
-                {
-                    var componentDir = Path.GetDirectoryName(exeToUse)!;
-                    foreach (var file in Directory.EnumerateFiles(componentDir, "*.*", SearchOption.TopDirectoryOnly))
-                    {
-                        var ext = Path.GetExtension(file);
-                        if (BinaryExtensions.Any(valid => string.Equals(ext, valid, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            var destFile = Path.Combine(targetDir, Path.GetFileName(file));
-                            try
-                            {
-                                File.Copy(file, destFile, overwrite: true);
-                            }
-                            catch (IOException) { }
-                        }
-                    }
-                    break;
-                }
-            }
-            parent = parent.Parent;
-        }
+        CopyEngines(sourceDir, targetDir);
     }
 
     private static void CopyEngines(string sourceDir, string targetDir)

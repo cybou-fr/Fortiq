@@ -238,4 +238,107 @@ public sealed class AuditLedgerChainingTests : IDisposable
         Assert.Equal(count, report.TotalReceiptsVerified);
         Assert.Empty(report.AllAnomalies);
     }
+
+    [Fact]
+    public async Task StaleLedgerReconcilesWithOnDiskReceiptsAfterCrash()
+    {
+        var store = new FileSystemOperationReceiptStore(_directory);
+        for (int i = 0; i < 4; i++)
+        {
+            await store.SaveAsync(CreateReceipt("repo-crash"), CancellationToken.None);
+        }
+
+        var ledgerPath = Path.Combine(_directory, "repo-crash.ledger");
+        Assert.True(File.Exists(ledgerPath));
+
+        // Simulate crash right before ledger update: revert .ledger to sequence 2
+        var receipts = await store.LoadAllReceiptsAsync("repo-crash");
+        var receipt2 = receipts[1];
+        var staleLedgerJson = JsonSerializer.Serialize(new
+        {
+            schema = "fortiq.audit-ledger-state",
+            version = 1,
+            repositoryId = "repo-crash",
+            sequenceNumber = 2,
+            lastReceiptHash = receipt2.ReceiptHash,
+            updatedAt = DateTimeOffset.UtcNow
+        });
+        await File.WriteAllTextAsync(ledgerPath, staleLedgerJson);
+
+        // Next save must reconcile on-disk receipts (which reached seq 4) and produce seq 5
+        var receipt5 = CreateReceipt("repo-crash");
+        await store.SaveAsync(receipt5, CancellationToken.None);
+
+        var allReceipts = await store.LoadAllReceiptsAsync("repo-crash");
+        Assert.Equal(5, allReceipts.Count);
+        Assert.Equal(5, allReceipts[^1].SequenceNumber);
+        Assert.Equal(allReceipts[3].ReceiptHash, allReceipts[4].PreviousReceiptHash);
+
+        var report = await AuditLedgerVerifier.VerifyLedgerAsync(_directory);
+        Assert.True(report.IsValid);
+        Assert.Equal(5, report.TotalReceiptsVerified);
+    }
+
+    [Fact]
+    public async Task AuditLedgerAnchorIsInvokedOnLedgerAdvance()
+    {
+        var mockAnchor = new TestAuditAnchor();
+        var store = new FileSystemOperationReceiptStore(_directory, anchor: mockAnchor);
+
+        await store.SaveAsync(CreateReceipt("repo-anchor"), CancellationToken.None);
+
+        Assert.Single(mockAnchor.Events);
+        var evt = mockAnchor.Events[0];
+        Assert.Equal("repo-anchor", evt.RepositoryId);
+        Assert.Equal(1, evt.Sequence);
+        Assert.False(string.IsNullOrWhiteSpace(evt.ReceiptHash));
+    }
+
+    [Fact]
+    public async Task LegacyReceiptsAreToleratedAsUnchainedEvidence()
+    {
+        // Write an unchained legacy v1 receipt directly to disk
+        var legacyId = Guid.NewGuid();
+        var legacyPath = Path.Combine(_directory, $"{legacyId:D}.json");
+        var legacyJson = JsonSerializer.Serialize(new
+        {
+            schema = OperationReceipt.Schema,
+            version = 1,
+            operationId = legacyId,
+            operation = "backup",
+            repositoryId = "repo-legacy",
+            engine = Engine,
+            startedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            completedAt = DateTimeOffset.UtcNow.AddMinutes(-4),
+            engineResult = "succeeded",
+            sequenceNumber = 0,
+            metrics = new Dictionary<string, long>(),
+            warnings = Array.Empty<string>()
+        });
+        await File.WriteAllTextAsync(legacyPath, legacyJson);
+
+        // Add 2 chained v2 receipts via store
+        var store = new FileSystemOperationReceiptStore(_directory);
+        await store.SaveAsync(CreateReceipt("repo-legacy"), CancellationToken.None);
+        await store.SaveAsync(CreateReceipt("repo-legacy"), CancellationToken.None);
+
+        var report = await AuditLedgerVerifier.VerifyLedgerAsync(_directory);
+        Assert.True(report.IsValid);
+        Assert.Equal(3, report.TotalReceiptsVerified);
+        var repoReport = Assert.Single(report.Repositories);
+        Assert.Equal(1, repoReport.LegacyReceiptCount);
+        Assert.Equal(3, repoReport.TotalReceipts);
+        Assert.True(repoReport.IsValid);
+    }
+
+    private sealed class TestAuditAnchor : IAuditLedgerAnchor
+    {
+        public List<(string RepositoryId, long Sequence, string ReceiptHash)> Events { get; } = new();
+
+        public Task AnchorHeadAsync(string repositoryId, long sequenceNumber, string receiptHash, CancellationToken cancellationToken = default)
+        {
+            Events.Add((repositoryId, sequenceNumber, receiptHash));
+            return Task.CompletedTask;
+        }
+    }
 }

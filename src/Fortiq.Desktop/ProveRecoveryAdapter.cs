@@ -1,4 +1,4 @@
-using System.Runtime.Versioning;
+﻿using System.Runtime.Versioning;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Infrastructure.Keys;
 using Fortiq.Operations;
@@ -9,32 +9,37 @@ namespace Fortiq.Desktop;
 /// <summary>
 /// The button that turns "backed up" into "known to come back". It restores the newest snapshot to a
 /// scratch directory, checks what came out, writes a receipt, and republishes the health report.
+/// In installed mode with the Fortiq Service running, delegates the drill to the privileged service
+/// via Service IPC so standard desktop users do not write to %ProgramData%\Fortiq\work\receipts directly.
 /// </summary>
-/// <remarks>
-/// The report is republished here on purpose. The receipt is what makes the repository proven, but
-/// the screen reads the published report, and a proof that would not show until the service's next
-/// pass would leave someone pressing the button again believing it had done nothing.
-/// </remarks>
 public sealed class ProveRecoveryAdapter : IProveRecovery
 {
     private readonly FileSystemScheduleStore _schedules;
     private readonly ProvenRestore _restore;
     private readonly HealthPublisher _health;
+    private readonly IServiceIpcClient? _serviceClient;
 
     public ProveRecoveryAdapter(
         FileSystemScheduleStore schedules,
         ProvenRestore restore,
-        HealthPublisher health)
+        HealthPublisher health,
+        IServiceIpcClient? serviceClient = null)
     {
         _schedules = schedules ?? throw new ArgumentNullException(nameof(schedules));
         _restore = restore ?? throw new ArgumentNullException(nameof(restore));
         _health = health ?? throw new ArgumentNullException(nameof(health));
+        _serviceClient = serviceClient;
     }
 
     [SupportedOSPlatform("windows")]
     public async Task<bool> ProveAsync(string repositoryId, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+
+        if (_serviceClient is not null && await _serviceClient.IsServiceAvailableAsync(cancellationToken))
+        {
+            return await _serviceClient.ProveRecoveryAsync(repositoryId, cancellationToken);
+        }
 
         var schedule = await FindAsync(repositoryId, cancellationToken)
             ?? throw new InvalidOperationException(

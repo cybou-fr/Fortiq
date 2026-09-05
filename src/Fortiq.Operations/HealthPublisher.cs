@@ -43,6 +43,9 @@ public sealed class HealthPublisher
     public async Task<HealthReport> PublishAsync(CancellationToken cancellationToken)
     {
         var now = _clock.GetUtcNow();
+        var audit = await Fortiq.Infrastructure.Receipts.AuditLedgerVerifier.VerifyLedgerAsync(_receiptDirectory, null, cancellationToken);
+        var auditByRepo = audit.Repositories.ToDictionary(r => r.RepositoryId, StringComparer.OrdinalIgnoreCase);
+
         var evidence = (await ReceiptHistory.ReadAsync(_receiptDirectory, cancellationToken))
             .ToDictionary(entry => entry.RepositoryId, StringComparer.OrdinalIgnoreCase);
 
@@ -55,22 +58,35 @@ public sealed class HealthPublisher
             evidence.TryGetValue(repositoryId, out var seen);
             var drillFailure = await ReadDrillFailureAsync(schedule, seen?.LastProvenRestoreAt, cancellationToken);
 
+            string? auditLedgerFailure = null;
+            if (auditByRepo.TryGetValue(repositoryId, out var repoAudit) && !repoAudit.IsValid)
+            {
+                var anomaly = repoAudit.Anomalies.Count > 0 ? repoAudit.Anomalies[0] : null;
+                auditLedgerFailure = anomaly?.Description ?? "Cryptographic audit chain verification failed";
+            }
+
+            // If the audit chain is tampered or broken, receipt evidence cannot be trusted
+            var lastBackup = auditLedgerFailure is null ? (seen?.LastBackupAt ?? state.LastSuccessAt) : null;
+            var lastCheck = auditLedgerFailure is null ? seen?.LastHealthyCheckAt : null;
+            var lastRestore = auditLedgerFailure is null ? seen?.LastProvenRestoreAt : null;
+
             repositories.Add(HealthAssessor.Assess(
                 new RepositoryFacts(
                     repositoryId,
                     schedule.Id,
-                    seen?.LastBackupAt ?? state.LastSuccessAt,
-                    seen?.LastHealthyCheckAt,
-                    seen?.LastProvenRestoreAt,
+                    lastBackup,
+                    lastCheck,
+                    lastRestore,
                     KitPresent: kit is not null,
                     StorageImmutable: kit?.Manifest.StorageProtection?.Immutable ?? false,
                     drillFailure ?? state.LastFailure ?? seen?.LastFailure,
-                    await InspectAsync(schedule.RepositoryLocation, cancellationToken)),
+                    await InspectAsync(schedule.RepositoryLocation, cancellationToken),
+                    AuditLedgerFailure: auditLedgerFailure),
                 now,
                 thresholds: null,
                 // Compared against this repository's own history, which is why it is read from the
                 // receipts rather than from anything the schedule declares.
-                BackupAnomalyDetector.Inspect(seen?.Backups ?? [])));
+                BackupAnomalyDetector.Inspect(auditLedgerFailure is null ? (seen?.Backups ?? []) : [])));
         }
 
         var report = new HealthReport(now, repositories);

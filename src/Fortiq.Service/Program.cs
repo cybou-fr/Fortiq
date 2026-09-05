@@ -1,3 +1,4 @@
+﻿using System.Runtime.Versioning;
 using Fortiq.Infrastructure.ObjectStorage;
 using Fortiq.Operations;
 using Fortiq.Application;
@@ -14,6 +15,7 @@ namespace Fortiq.Service;
 /// </summary>
 public static class Program
 {
+    [SupportedOSPlatform("windows")]
     public static async Task<int> Main(string[] args)
     {
         if (!OperatingSystem.IsWindows())
@@ -91,17 +93,19 @@ public static class Program
             provider.GetRequiredService<IScheduleStore>(),
             provider.GetRequiredService<IScheduledBackup>()));
 
+        builder.Services.AddSingleton(provider => new ProvenRestore(
+            engineRoot,
+            paths.Working,
+            runDirectory: paths.Runs,
+            receiptDirectory: paths.Receipts,
+            storage: provider.GetRequiredService<IObjectStorageCredentialProvider>()));
+
         // Restore drills share the working directory, and therefore the receipt store, with backups.
         // A drill's receipt is what turns a repository from backed up into proven, and monitoring
         // reads the same directory: three components have to agree on one path or the proof is
         // written somewhere nobody looks.
         builder.Services.AddSingleton<IScheduledDrill>(provider =>
-            new UnattendedRestoreDrill(new ProvenRestore(
-                engineRoot,
-                paths.Working,
-                runDirectory: paths.Runs,
-                receiptDirectory: paths.Receipts,
-                storage: provider.GetRequiredService<IObjectStorageCredentialProvider>())));
+            new UnattendedRestoreDrill(provider.GetRequiredService<ProvenRestore>()));
         // Retention is the only scheduled operation that destroys anything, and it is opt-in per
         // schedule: a schedule file that says nothing about retention keeps everything forever.
         builder.Services.AddSingleton<IScheduledRetention>(provider =>
@@ -128,7 +132,17 @@ public static class Program
             paths.HealthMetrics,
             protection: new S3StorageProtectionInspector(
                 provider.GetRequiredService<IObjectStorageCredentialProvider>())));
+
+        builder.Services.AddSingleton(provider => new ServiceIpcHost(
+            paths,
+            engineRoot,
+            provider.GetRequiredService<IObjectStorageCredentialProvider>(),
+            provider.GetRequiredService<IScheduleStore>(),
+            provider.GetRequiredService<ProvenRestore>(),
+            provider.GetRequiredService<HealthPublisher>()));
+
         builder.Services.AddHostedService<SchedulerWorker>();
+        builder.Services.AddHostedService(provider => provider.GetRequiredService<ServiceIpcHost>());
 
         await builder.Build().RunAsync();
         return 0;

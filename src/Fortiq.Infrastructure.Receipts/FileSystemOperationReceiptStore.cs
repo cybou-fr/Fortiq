@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Fortiq.Application;
@@ -30,11 +31,13 @@ public sealed class FileSystemOperationReceiptStore : IOperationReceiptStore
         new(StringComparer.OrdinalIgnoreCase);
 
     private readonly string _directory;
+    private readonly IAuditLedgerAnchor? _anchor;
 
-    public FileSystemOperationReceiptStore(string directory)
+    public FileSystemOperationReceiptStore(string directory, IAuditLedgerAnchor? anchor = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         _directory = Path.GetFullPath(directory);
+        _anchor = anchor;
     }
 
     public async Task<string> SaveAsync(OperationReceipt receipt, CancellationToken cancellationToken)
@@ -113,6 +116,18 @@ public sealed class FileSystemOperationReceiptStore : IOperationReceiptStore
                     await JsonSerializer.SerializeAsync(ledgerStream, new LedgerState(nextSequence, receiptHash), SerializerOptions, cancellationToken);
                 }
                 File.Move(ledgerTemp, ledgerPath, overwrite: true);
+
+                if (_anchor is not null)
+                {
+                    try
+                    {
+                        await _anchor.AnchorHeadAsync(receipt.RepositoryId, nextSequence, receiptHash, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Audit anchor error: {ex.Message}");
+                    }
+                }
             }
 
             return path;
@@ -167,7 +182,8 @@ public sealed class FileSystemOperationReceiptStore : IOperationReceiptStore
             doc.Warnings ?? Array.Empty<string>(),
             doc.SequenceNumber,
             doc.PreviousReceiptHash,
-            doc.ReceiptHash);
+            doc.ReceiptHash,
+            doc.Version);
     }
 
     public async Task<IReadOnlyList<OperationReceipt>> LoadAllReceiptsAsync(string? repositoryId = null, CancellationToken cancellationToken = default)
@@ -197,12 +213,30 @@ public sealed class FileSystemOperationReceiptStore : IOperationReceiptStore
         CancellationToken cancellationToken)
     {
         var ledger = await LoadLedgerStateAsync(directory, repositoryId, cancellationToken);
+        var discovered = await DiscoverLatestReceiptStateAsync(directory, repositoryId, cancellationToken);
+
+        // Crash recovery & reconciliation:
+        // If receipts on disk have advanced past the ledger head file (e.g. system crashed between
+        // writing receipt.json and committing repository.ledger), heal and advance the ledger file
+        // immediately to avoid duplicate sequence numbers.
+        if (discovered.Sequence > (ledger?.SequenceNumber ?? 0))
+        {
+            var ledgerPath = GetLedgerPath(directory, repositoryId);
+            var ledgerTemp = ledgerPath + ".partial";
+            await using (var ledgerStream = new FileStream(ledgerTemp, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                await JsonSerializer.SerializeAsync(ledgerStream, new LedgerState(discovered.Sequence, discovered.LastHash), SerializerOptions, cancellationToken);
+            }
+            File.Move(ledgerTemp, ledgerPath, overwrite: true);
+            return (discovered.Sequence, discovered.LastHash);
+        }
+
         if (ledger is not null && ledger.SequenceNumber > 0 && !string.IsNullOrWhiteSpace(ledger.LastReceiptHash))
         {
             return (ledger.SequenceNumber, ledger.LastReceiptHash);
         }
 
-        return await DiscoverLatestReceiptStateAsync(directory, repositoryId, cancellationToken);
+        return discovered;
     }
 
     private static async Task<(long Sequence, string LastHash)> DiscoverLatestReceiptStateAsync(

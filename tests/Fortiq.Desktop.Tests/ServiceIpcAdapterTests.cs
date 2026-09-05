@@ -1,0 +1,123 @@
+﻿using System.Runtime.Versioning;
+using Fortiq.Application;
+using Fortiq.Desktop;
+using Fortiq.Desktop.ViewModels;
+using Fortiq.Infrastructure.Keys;
+using Fortiq.Operations;
+using Fortiq.Provisioning;
+using Fortiq.Scheduling;
+
+namespace Fortiq.Desktop.Tests;
+
+[SupportedOSPlatform("windows")]
+public sealed class ServiceIpcAdapterTests
+{
+    [Fact]
+    public async Task ProtectAdapterDelegatesToServiceIpcWhenServiceIsAvailable()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "fortiq-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        try
+        {
+            var paths = FortiqStatePaths.Resolve(temp);
+            var mockClient = new StubServiceIpcClient
+            {
+                IsAvailable = true,
+                ProvisionResult = new ServiceIpcProtocol.ProvisionResponse(
+                    "repo-123",
+                    "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray",
+                    DeviceUnlockAvailable: true,
+                    BackupScheduled: true)
+            };
+
+            var dummyProvisioner = new RepositoryProvisioner(temp);
+            var adapter = new ProtectRepositoryAdapter(dummyProvisioner, paths, serviceClient: mockClient);
+
+            var request = new ProtectRepositoryRequest(
+                Path.Combine(temp, "repo"),
+                Path.Combine(temp, "kit"),
+                Path.Combine(temp, "source"));
+
+            var result = await adapter.CreateAsync(request, CancellationToken.None);
+
+            Assert.True(mockClient.ProvisionCalled);
+            Assert.Equal("repo-123", result.RepositoryId);
+            Assert.True(result.DeviceUnlockAvailable);
+            Assert.True(result.BackupScheduled);
+            Assert.Equal(mockClient.ProvisionResult.Mnemonic, result.RecoveryMnemonic);
+        }
+        finally
+        {
+            if (Directory.Exists(temp))
+            {
+                Directory.Delete(temp, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ProveAdapterDelegatesToServiceIpcWhenServiceIsAvailable()
+    {
+        var temp = Path.Combine(Path.GetTempPath(), "fortiq-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        try
+        {
+            var paths = FortiqStatePaths.Resolve(temp);
+            var mockClient = new StubServiceIpcClient
+            {
+                IsAvailable = true,
+                ProveResult = true
+            };
+
+            var schedules = new FileSystemScheduleStore(paths.Schedules);
+            var dummyRestore = new ProvenRestore(temp, paths.Working, paths.Runs, paths.Receipts);
+            var dummyHealth = new HealthPublisher(schedules, paths.Receipts, paths.HealthReport, paths.HealthMetrics);
+
+            var adapter = new ProveRecoveryAdapter(schedules, dummyRestore, dummyHealth, serviceClient: mockClient);
+
+            var proven = await adapter.ProveAsync("repo-456", CancellationToken.None);
+
+            Assert.True(mockClient.ProveCalled);
+            Assert.Equal("repo-456", mockClient.LastRepositoryId);
+            Assert.True(proven);
+        }
+        finally
+        {
+            if (Directory.Exists(temp))
+            {
+                Directory.Delete(temp, recursive: true);
+            }
+        }
+    }
+
+    private sealed class StubServiceIpcClient : IServiceIpcClient
+    {
+        public bool IsAvailable { get; set; } = true;
+        public bool ProvisionCalled { get; private set; }
+        public bool ProveCalled { get; private set; }
+        public string? LastRepositoryId { get; private set; }
+        public ServiceIpcProtocol.ProvisionResponse? ProvisionResult { get; set; }
+        public bool ProveResult { get; set; } = true;
+
+        public Task<bool> IsServiceAvailableAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(IsAvailable);
+
+        public Task<ServiceIpcProtocol.ProvisionResponse> ProvisionAsync(
+            string repositoryLocation,
+            string kitDirectory,
+            string sourcePath,
+            CancellationToken cancellationToken = default)
+        {
+            ProvisionCalled = true;
+            return Task.FromResult(ProvisionResult ?? new ServiceIpcProtocol.ProvisionResponse(
+                "mock-id", "mock-mnemonic", true, true));
+        }
+
+        public Task<bool> ProveRecoveryAsync(string repositoryId, CancellationToken cancellationToken = default)
+        {
+            ProveCalled = true;
+            LastRepositoryId = repositoryId;
+            return Task.FromResult(ProveResult);
+        }
+    }
+}

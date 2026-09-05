@@ -83,12 +83,15 @@ public sealed class FortiqApplication : Avalonia.Application
                 new EnvironmentObjectStorageCredentialProvider())
             : new EnvironmentObjectStorageCredentialProvider();
 
+        var serviceClient = OperatingSystem.IsWindows() ? new ServiceIpcClient() : null;
+
         var protect = new ProtectRepositoryAdapter(
             new RepositoryProvisioner(
                 engineRoot,
                 storage: storage,
                 protection: new S3StorageProtectionInspector(storage)),
-            paths);
+            paths,
+            serviceClient: serviceClient);
 
         var schedules = new FileSystemScheduleStore(paths.Schedules);
         var prove = new ProveRecoveryAdapter(
@@ -104,7 +107,8 @@ public sealed class FortiqApplication : Avalonia.Application
                 paths.Receipts,
                 paths.HealthReport,
                 paths.HealthMetrics,
-                protection: new S3StorageProtectionInspector(storage)));
+                protection: new S3StorageProtectionInspector(storage)),
+            serviceClient: serviceClient);
 
         var settings = new SettingsViewModel(paths.Root, Path.Combine(paths.Root, "logs"));
         if (OperatingSystem.IsWindows())

@@ -35,10 +35,11 @@ public sealed record OperationReceipt(
     IReadOnlyList<string> Warnings,
     long SequenceNumber = 0,
     string? PreviousReceiptHash = null,
-    string? ReceiptHash = null)
+    string? ReceiptHash = null,
+    int Version = OperationReceipt.SchemaVersion)
 {
     public const string Schema = "fortiq.operation-receipt";
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
     public const string GenesisHash = "GENESIS";
 
     /// <summary>
@@ -57,14 +58,15 @@ public sealed record OperationReceipt(
         IReadOnlyDictionary<string, long> metrics,
         IReadOnlyList<string> warnings,
         long sequenceNumber,
-        string previousReceiptHash)
+        string previousReceiptHash,
+        int version = SchemaVersion)
     {
         using var stream = new System.IO.MemoryStream();
         using var writer = new System.Text.Json.Utf8JsonWriter(stream);
 
         writer.WriteStartObject();
         writer.WriteString("schema", Schema);
-        writer.WriteNumber("version", SchemaVersion);
+        writer.WriteNumber("version", version);
         writer.WriteString("operationId", operationId);
         writer.WriteString("operation", operation.ToString());
         writer.WriteString("repositoryId", repositoryId);

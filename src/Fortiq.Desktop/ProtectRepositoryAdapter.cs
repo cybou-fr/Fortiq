@@ -1,32 +1,33 @@
-using System.Globalization;
-using System.Text.Json;
-using System.Text.Json.Nodes;
+﻿using System.Globalization;
 using Fortiq.Application;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Provisioning;
+using Fortiq.Scheduling;
 
 namespace Fortiq.Desktop;
 
 /// <summary>
 /// Turns the wizard's three answers into a repository, a recovery kit and, when possible, a nightly schedule.
+/// In installed mode with the Fortiq Service running, provisions via Service IPC to bind to the machine TPM
+/// key and isolate %ProgramData%\Fortiq\work from standard user writes.
 /// </summary>
-/// <remarks>
-/// Once provisioning returns, the recovery mnemonic cannot be reproduced. A later schedule failure
-/// therefore returns a degraded success: the UI must show the mnemonic and explicitly say that
-/// unattended backup was not configured. Throwing at that point would strand a repository whose
-/// only disaster secret never reached the person who created it.
-/// </remarks>
 public sealed class ProtectRepositoryAdapter : IProtectRepository
 {
     private readonly RepositoryProvisioner _provisioner;
     private readonly FortiqStatePaths _paths;
     private readonly TimeOnly _nightly;
+    private readonly IServiceIpcClient? _serviceClient;
 
-    public ProtectRepositoryAdapter(RepositoryProvisioner provisioner, FortiqStatePaths paths, TimeOnly? nightly = null)
+    public ProtectRepositoryAdapter(
+        RepositoryProvisioner provisioner,
+        FortiqStatePaths paths,
+        TimeOnly? nightly = null,
+        IServiceIpcClient? serviceClient = null)
     {
         _provisioner = provisioner ?? throw new ArgumentNullException(nameof(provisioner));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _nightly = nightly ?? new TimeOnly(2, 30);
+        _serviceClient = serviceClient;
     }
 
     public async Task<ProtectedRepositoryResult> CreateAsync(
@@ -34,6 +35,22 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        if (_serviceClient is not null && await _serviceClient.IsServiceAvailableAsync(cancellationToken))
+        {
+            var ipcResponse = await _serviceClient.ProvisionAsync(
+                request.RepositoryLocation,
+                request.KitDirectory,
+                request.SourcePath,
+                cancellationToken);
+
+            return new ProtectedRepositoryResult(
+                ipcResponse.RepositoryId,
+                ipcResponse.Mnemonic,
+                ipcResponse.DeviceUnlockAvailable,
+                ipcResponse.BackupScheduled,
+                ipcResponse.SchedulingFailure);
+        }
 
         var working = _paths.Working;
         Directory.CreateDirectory(working);
@@ -63,11 +80,10 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
     }
 
     /// <summary>
-    /// Writes the schedule file the service reads. Public and static so a test can write one and read
-    /// it back through <c>FileSystemScheduleStore</c>: this file is a contract between two projects
-    /// that never call each other, and nothing else would notice the two drifting apart.
+    /// Writes the schedule file the service reads. Public and static so tests can write one and read
+    /// it back through <c>FileSystemScheduleStore</c>.
     /// </summary>
-    public static async Task WriteScheduleAsync(
+    public static Task WriteScheduleAsync(
         string directory,
         string repositoryId,
         ProtectRepositoryRequest request,
@@ -76,45 +92,14 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         ArgumentNullException.ThrowIfNull(request);
-        Directory.CreateDirectory(directory);
 
-        var document = new JsonObject
-        {
-            ["schema"] = "fortiq.backup-schedule",
-            ["version"] = 1,
-            ["id"] = repositoryId,
-            ["repository"] = request.RepositoryLocation,
-            ["kit"] = Path.GetFullPath(request.KitDirectory),
-            ["source"] = Path.GetFullPath(request.SourcePath),
-            ["sourceStableId"] = Path.GetFullPath(request.SourcePath),
-            ["recurrence"] = new JsonObject
-            {
-                ["kind"] = "dailyAt",
-                ["timeOfDay"] = nightly.ToString("HH:mm", CultureInfo.InvariantCulture),
-                ["timeZone"] = TimeZoneInfo.Local.Id
-            },
-            // Live rather than snapshot: a volume snapshot needs elevation, and a schedule that is
-            // silently unable to run is worse than one that copies files as they are.
-            // A restore drill every seven days. The health model stops calling a repository proven
-            // after thirty-one days without one, so weekly leaves room for several failed attempts
-            // before anyone is told the repository is unproven again.
-            ["drillRecurrence"] = new JsonObject
-            {
-                ["kind"] = "interval",
-                ["period"] = "7.00:00:00"
-            },
-            ["consistency"] = "live",
-            ["catchUp"] = "once",
-            ["enabled"] = true
-        };
-
-        var path = Path.Combine(directory, repositoryId + ".json");
-        var temporary = path + ".partial";
-        await File.WriteAllTextAsync(
-            temporary,
-            document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
+        return FileSystemScheduleStore.WriteDefaultScheduleAsync(
+            directory,
+            repositoryId,
+            request.RepositoryLocation,
+            request.KitDirectory,
+            request.SourcePath,
+            nightly,
             cancellationToken);
-
-        File.Move(temporary, path, overwrite: true);
     }
 }

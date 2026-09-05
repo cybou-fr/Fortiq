@@ -53,6 +53,52 @@ foreach ($component in @(@{Folder='desktop'; Project='Fortiq.Desktop'}, @{Folder
     }
 }
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'SECURITY.md') -Destination $destination
+
+$desktopExe = Join-Path $destination 'desktop/Fortiq.Desktop.exe'
+$serviceExe = Join-Path $destination 'service/Fortiq.Service.exe'
+$recoverExe = Join-Path $destination 'recover/Fortiq.Recover.exe'
+$helperExe = Join-Path $destination 'desktop/Fortiq.PasswordHelper.exe'
+
+$bundleManifest = [ordered]@{
+    schema = 'fortiq.bundle-manifest'
+    version = '1.0'
+    rid = 'win-x64'
+    created = (Get-Date).ToUniversalTime().ToString('O')
+    components = @(
+        [ordered]@{
+            name = 'desktop'
+            folder = 'desktop'
+            mainExecutable = 'desktop/Fortiq.Desktop.exe'
+            required = $true
+            sha256 = (Get-FileHash -LiteralPath $desktopExe -Algorithm SHA256).Hash.ToLowerInvariant()
+        },
+        [ordered]@{
+            name = 'service'
+            folder = 'service'
+            mainExecutable = 'service/Fortiq.Service.exe'
+            required = $true
+            sha256 = (Get-FileHash -LiteralPath $serviceExe -Algorithm SHA256).Hash.ToLowerInvariant()
+        },
+        [ordered]@{
+            name = 'recover'
+            folder = 'recover'
+            mainExecutable = 'recover/Fortiq.Recover.exe'
+            required = $true
+            sha256 = (Get-FileHash -LiteralPath $recoverExe -Algorithm SHA256).Hash.ToLowerInvariant()
+        },
+        [ordered]@{
+            name = 'passwordHelper'
+            folder = 'desktop'
+            mainExecutable = 'desktop/Fortiq.PasswordHelper.exe'
+            required = $true
+            sha256 = (Get-FileHash -LiteralPath $helperExe -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    )
+}
+$manifestJson = $bundleManifest | ConvertTo-Json -Depth 5
+$manifestJson | Set-Content -LiteralPath (Join-Path $destination 'bundle-manifest.json') -Encoding utf8
+$manifestJson | Set-Content -LiteralPath (Join-Path (Join-Path $destination 'desktop') 'bundle-manifest.json') -Encoding utf8
+
 $hashes = Get-ChildItem -LiteralPath $destination -Recurse -File | Sort-Object FullName | ForEach-Object {
     $relative = [IO.Path]::GetRelativePath($destination, $_.FullName).Replace('\', '/')
     "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $relative"

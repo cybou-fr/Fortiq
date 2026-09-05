@@ -256,4 +256,58 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
     private static string Required(JsonNode document, string name, string fileName) =>
         document[name]?.GetValue<string>()
         ?? throw new InvalidDataException($"The schedule in {fileName} is missing '{name}'.");
+
+    /// <summary>
+    /// Writes a default backup and restore drill schedule file for a newly provisioned repository.
+    /// </summary>
+    public static async Task WriteDefaultScheduleAsync(
+        string directory,
+        string repositoryId,
+        string repositoryLocation,
+        string kitDirectory,
+        string sourcePath,
+        TimeOnly nightly,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryLocation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(kitDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        Directory.CreateDirectory(directory);
+
+        var document = new JsonObject
+        {
+            ["schema"] = Schema,
+            ["version"] = Version,
+            ["id"] = repositoryId,
+            ["repository"] = repositoryLocation,
+            ["kit"] = Path.GetFullPath(kitDirectory),
+            ["source"] = Path.GetFullPath(sourcePath),
+            ["sourceStableId"] = Path.GetFullPath(sourcePath),
+            ["recurrence"] = new JsonObject
+            {
+                ["kind"] = "dailyAt",
+                ["timeOfDay"] = nightly.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+                ["timeZone"] = TimeZoneInfo.Local.Id
+            },
+            ["drillRecurrence"] = new JsonObject
+            {
+                ["kind"] = "interval",
+                ["period"] = "7.00:00:00"
+            },
+            ["consistency"] = "live",
+            ["catchUp"] = "once",
+            ["enabled"] = true
+        };
+
+        var path = Path.Combine(directory, repositoryId + ".json");
+        var temporary = path + ".partial";
+        await File.WriteAllTextAsync(
+            temporary,
+            document.ToJsonString(Options),
+            cancellationToken);
+
+        File.Move(temporary, path, overwrite: true);
+    }
 }

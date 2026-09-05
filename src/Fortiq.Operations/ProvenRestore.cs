@@ -108,7 +108,9 @@ public sealed class ProvenRestore
         // share evidence across processes pass the directory explicitly rather than relying on this.
         _receiptDirectory = receiptDirectory ?? Path.Combine(_workingDirectory, "receipts");
         _storage = storage ?? new NoObjectStorageCredentials();
-        _workspaceRoot = workspaceRoot is null ? null : Path.GetFullPath(workspaceRoot);
+        var effectiveWorkspace = workspaceRoot
+            ?? (Environment.GetEnvironmentVariable("FORTIQ_DRILL_WORKSPACE") is { Length: > 0 } env ? env : null);
+        _workspaceRoot = effectiveWorkspace is null ? null : Path.GetFullPath(effectiveWorkspace);
         _freeSpaceFloor = freeSpaceFloor;
     }
 
@@ -186,9 +188,12 @@ public sealed class ProvenRestore
             ?? throw new RestoreProofFailedException(
                 "This repository holds no snapshots, so there is nothing to prove a recovery from.");
 
+        long estimatedBytes = await EstimateSnapshotSizeAsync(repository.Id.ToString(), cancellationToken);
+        long requiredSpace = Math.Max(_freeSpaceFloor, (long)(estimatedBytes * 1.1) + 10L * 1024 * 1024 * 1024);
+
         // Restored somewhere disposable, not over the source. A proof that overwrote live files would
         // make the check more dangerous than the failure it is looking for.
-        var target = CreateWorkspace();
+        var target = CreateWorkspace(requiredSpace);
         try
         {
             var receipt = await adapter.RestoreAsync(
@@ -275,26 +280,30 @@ public sealed class ProvenRestore
     /// disk that was already nearly full. Refusing is reported as a failed drill, which is honest:
     /// recovery was not proven, and the reason names the volume and the space it had.
     /// </remarks>
-    private DirectoryInfo CreateWorkspace()
+    private DirectoryInfo CreateWorkspace(long? requiredBytes = null)
     {
         if (_workspaceRoot is null)
         {
             var temporary = Directory.CreateTempSubdirectory("fortiq-proof-");
-            RequireRoom(temporary.FullName);
+            RequireRoom(temporary.FullName, requiredBytes);
             return temporary;
         }
 
         Directory.CreateDirectory(_workspaceRoot);
-        RequireRoom(_workspaceRoot);
+        RequireRoom(_workspaceRoot, requiredBytes);
 
         // Named from a fresh GUID rather than a counter: two drills may overlap, and a drill must
         // never restore into a directory another one is already using.
         return Directory.CreateDirectory(Path.Combine(_workspaceRoot, "fortiq-proof-" + Guid.NewGuid().ToString("N")));
     }
 
-    private void RequireRoom(string path)
+    private void RequireRoom(string path, long? requiredBytes = null)
     {
-        if (_freeSpaceFloor <= 0)
+        var floor = requiredBytes.HasValue && requiredBytes.Value > _freeSpaceFloor
+            ? requiredBytes.Value
+            : _freeSpaceFloor;
+
+        if (floor <= 0)
         {
             return;
         }
@@ -302,12 +311,12 @@ public sealed class ProvenRestore
         try
         {
             var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(path))!);
-            if (drive.AvailableFreeSpace < _freeSpaceFloor)
+            if (drive.AvailableFreeSpace < floor)
             {
                 throw new DrillWorkspaceUnavailableException(
                     $"A restore drill needs room to put the data back. {drive.Name} has "
                     + $"{drive.AvailableFreeSpace / (1024 * 1024)} MB free, below the "
-                    + $"{_freeSpaceFloor / (1024 * 1024)} MB this drill requires before it will start.");
+                    + $"{floor / (1024 * 1024)} MB this drill requires before it will start.");
             }
         }
         catch (Exception error) when (error is ArgumentException or IOException or UnauthorizedAccessException)
@@ -316,6 +325,36 @@ public sealed class ProvenRestore
             // location the drill may still be perfectly affordable, and refusing every drill because
             // free space is unknowable would quietly stop proving recovery at all.
         }
+    }
+
+    private async Task<long> EstimateSnapshotSizeAsync(string repositoryId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var store = new FileSystemOperationReceiptStore(_receiptDirectory);
+            var receipts = await store.LoadAllReceiptsAsync(repositoryId, cancellationToken);
+            var lastBackup = receipts.Where(r => r.Operation == OperationKind.Backup && r.EngineResult == EngineResult.Succeeded)
+                .OrderByDescending(r => r.CompletedAt)
+                .FirstOrDefault();
+
+            if (lastBackup is not null)
+            {
+                if (lastBackup.Metrics.TryGetValue("backup.total_bytes_processed", out var totalBytes) && totalBytes > 0)
+                {
+                    return totalBytes;
+                }
+                if (lastBackup.Metrics.TryGetValue("backup.data_added", out var addedBytes) && addedBytes > 0)
+                {
+                    return addedBytes;
+                }
+            }
+        }
+        catch
+        {
+            // Best effort size estimation
+        }
+
+        return 0;
     }
 
     private static (ulong Files, ulong Bytes) Measure(string directory)

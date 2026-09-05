@@ -24,7 +24,8 @@ public sealed record AuditRepositoryLedgerReport(
     long LastSequenceNumber,
     string? GenesisHash,
     string? HeadHash,
-    IReadOnlyList<AuditLedgerAnomaly> Anomalies);
+    IReadOnlyList<AuditLedgerAnomaly> Anomalies,
+    int LegacyReceiptCount = 0);
 
 /// <summary>
 /// Comprehensive verification result for all repositories audited in a receipt directory.
@@ -90,20 +91,22 @@ public static class AuditLedgerVerifier
         foreach (var group in repoGroups)
         {
             var repoKey = group.Key;
-            var groupReceipts = group.OrderBy(r => r.SequenceNumber).ThenBy(r => r.StartedAt).ToList();
+            var legacyReceipts = group.Where(r => r.Version < 2 && r.SequenceNumber == 0).ToList();
+            var chainedReceipts = group.Where(r => r.Version >= 2 || r.SequenceNumber > 0)
+                .OrderBy(r => r.SequenceNumber).ThenBy(r => r.StartedAt).ToList();
             var repoAnomalies = new List<AuditLedgerAnomaly>();
 
-            if (groupReceipts.Count > 0)
+            if (chainedReceipts.Count > 0)
             {
                 // 1. Verify Genesis start
-                var first = groupReceipts[0];
+                var first = chainedReceipts[0];
                 if (first.SequenceNumber != 1)
                 {
                     repoAnomalies.Add(new AuditLedgerAnomaly(
                         repoKey,
                         first.SequenceNumber,
                         "SequenceStartMismatch",
-                        $"First receipt has sequence {first.SequenceNumber} (expected 1). Leading receipts may have been deleted.",
+                        $"First chained receipt has sequence {first.SequenceNumber} (expected 1). Leading receipts may have been deleted.",
                         first.OperationId));
                 }
 
@@ -118,15 +121,15 @@ public static class AuditLedgerVerifier
                 }
 
                 // 2. Iterate and verify continuity, tamper resistance, and chaining
-                for (var i = 0; i < groupReceipts.Count; i++)
+                for (var i = 0; i < chainedReceipts.Count; i++)
                 {
-                    var current = groupReceipts[i];
+                    var current = chainedReceipts[i];
                     var expectedSeq = (long)(i + 1);
 
                     // Check monotonic numbering
                     if (current.SequenceNumber != expectedSeq)
                     {
-                        if (i > 0 && current.SequenceNumber == groupReceipts[i - 1].SequenceNumber)
+                        if (i > 0 && current.SequenceNumber == chainedReceipts[i - 1].SequenceNumber)
                         {
                             repoAnomalies.Add(new AuditLedgerAnomaly(
                                 repoKey,
@@ -160,7 +163,8 @@ public static class AuditLedgerVerifier
                         current.Metrics,
                         current.Warnings,
                         current.SequenceNumber,
-                        current.PreviousReceiptHash ?? OperationReceipt.GenesisHash);
+                        current.PreviousReceiptHash ?? OperationReceipt.GenesisHash,
+                        current.Version);
 
                     if (!string.Equals(computedHash, current.ReceiptHash, StringComparison.OrdinalIgnoreCase))
                     {
@@ -175,7 +179,7 @@ public static class AuditLedgerVerifier
                     // Check previous hash linkage
                     if (i > 0)
                     {
-                        var previous = groupReceipts[i - 1];
+                        var previous = chainedReceipts[i - 1];
                         if (!string.Equals(current.PreviousReceiptHash, previous.ReceiptHash, StringComparison.OrdinalIgnoreCase))
                         {
                             repoAnomalies.Add(new AuditLedgerAnomaly(
@@ -203,7 +207,7 @@ public static class AuditLedgerVerifier
                 var ledgerState = await FileSystemOperationReceiptStore.LoadLedgerStateAsync(receiptsDirectory, repoKey, cancellationToken);
                 if (ledgerState is not null)
                 {
-                    var maxPresentSequence = groupReceipts.Max(r => r.SequenceNumber);
+                    var maxPresentSequence = chainedReceipts.Max(r => r.SequenceNumber);
                     if (ledgerState.SequenceNumber > maxPresentSequence)
                     {
                         repoAnomalies.Add(new AuditLedgerAnomaly(
@@ -213,25 +217,39 @@ public static class AuditLedgerVerifier
                             $"Ledger state tracks sequence {ledgerState.SequenceNumber} (hash '{ledgerState.LastReceiptHash}'), but latest receipt found is sequence {maxPresentSequence}. Trailing receipts have been truncated or deleted."));
                     }
                     else if (ledgerState.SequenceNumber == maxPresentSequence &&
-                             !string.Equals(ledgerState.LastReceiptHash, groupReceipts.Last().ReceiptHash, StringComparison.OrdinalIgnoreCase))
+                             !string.Equals(ledgerState.LastReceiptHash, chainedReceipts.Last().ReceiptHash, StringComparison.OrdinalIgnoreCase))
                     {
                         repoAnomalies.Add(new AuditLedgerAnomaly(
                             repoKey,
                             maxPresentSequence,
                             "LedgerHeadMismatch",
-                            $"Ledger state head hash '{ledgerState.LastReceiptHash}' does not match last receipt hash '{groupReceipts.Last().ReceiptHash}'."));
+                            $"Ledger state head hash '{ledgerState.LastReceiptHash}' does not match last receipt hash '{chainedReceipts.Last().ReceiptHash}'."));
                     }
                 }
 
                 repoReports.Add(new AuditRepositoryLedgerReport(
                     repoKey,
                     repoAnomalies.Count == 0,
-                    groupReceipts.Count,
+                    chainedReceipts.Count + legacyReceipts.Count,
                     first.SequenceNumber,
-                    groupReceipts.Last().SequenceNumber,
+                    chainedReceipts.Last().SequenceNumber,
                     first.PreviousReceiptHash,
-                    groupReceipts.Last().ReceiptHash,
-                    repoAnomalies));
+                    chainedReceipts.Last().ReceiptHash,
+                    repoAnomalies,
+                    legacyReceipts.Count));
+            }
+            else if (legacyReceipts.Count > 0)
+            {
+                repoReports.Add(new AuditRepositoryLedgerReport(
+                    repoKey,
+                    true,
+                    legacyReceipts.Count,
+                    0,
+                    0,
+                    null,
+                    null,
+                    repoAnomalies,
+                    legacyReceipts.Count));
             }
         }
 

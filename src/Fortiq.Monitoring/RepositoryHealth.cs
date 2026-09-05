@@ -33,7 +33,9 @@ public sealed record RepositoryFacts(
     bool StorageImmutable,
     string? LastFailure = null,
     /// <summary>What the storage says today. Defaults to unknown: nothing is claimed unasked.</summary>
-    StorageProtectionStatus StorageProtectionNow = StorageProtectionStatus.Unknown);
+    StorageProtectionStatus StorageProtectionNow = StorageProtectionStatus.Unknown,
+    /// <summary>Failure or anomaly detected during cryptographic audit ledger verification.</summary>
+    string? AuditLedgerFailure = null);
 
 /// <summary>How old each kind of evidence may be before it stops counting.</summary>
 public sealed record HealthThresholds(
@@ -127,6 +129,11 @@ public static class HealthAssessor
             findings.Add(new HealthFinding("last-run-failed", failure));
         }
 
+        if (facts.AuditLedgerFailure is { Length: > 0 } ledgerAnomaly)
+        {
+            findings.Add(new HealthFinding("audit-ledger-tampered", ledgerAnomaly));
+        }
+
         // Unproven: backed up, but nothing has demonstrated that it comes back.
         if (facts.LastHealthyCheckAt is null)
         {
@@ -205,7 +212,7 @@ public static class HealthAssessor
         // A missing kit, a repository with no backup, a stale backup or a failed run are all things
         // that would hurt today; everything else means the backup exists but nothing has shown it
         // works.
-        if (findings.Any(finding => finding.Code is "kit-missing" or "never-backed-up" or "backup-stale" or "last-run-failed"))
+        if (findings.Any(finding => finding.Code is "kit-missing" or "never-backed-up" or "backup-stale" or "last-run-failed" or "audit-ledger-tampered"))
         {
             return HealthVerdict.AtRisk;
         }

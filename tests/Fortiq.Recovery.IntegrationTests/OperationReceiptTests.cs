@@ -26,7 +26,7 @@ public sealed class OperationReceiptTests : IDisposable
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(SingleReceipt()));
         var root = document.RootElement;
         Assert.Equal("fortiq.operation-receipt", root.GetProperty("schema").GetString());
-        Assert.Equal(1, root.GetProperty("version").GetInt32());
+        Assert.Equal(OperationReceipt.SchemaVersion, root.GetProperty("version").GetInt32());
         Assert.Equal("backup", root.GetProperty("operation").GetString());
         Assert.Equal("succeeded", root.GetProperty("engineResult").GetString());
         Assert.Equal(repository.Id.ToString(), root.GetProperty("repositoryId").GetString());
