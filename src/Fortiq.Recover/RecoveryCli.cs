@@ -1,12 +1,11 @@
 using System.Text.Json;
 using Fortiq.Application;
 using Fortiq.Infrastructure.Keys;
-
 using Fortiq.Domain;
 
 namespace Fortiq.Recover;
 
-public enum RecoveryOperation { Inspect, Snapshots, Check, Restore }
+public enum RecoveryOperation { Inspect, Snapshots, Files, Check, Restore }
 
 public sealed record RecoveryCommand(
     RecoveryOperation Operation,
@@ -100,7 +99,7 @@ public static class RecoveryCli
         ArgumentNullException.ThrowIfNull(args);
         if (args.Count == 0 || !Enum.TryParse<RecoveryOperation>(args[0], true, out var operation))
         {
-            throw new ArgumentException("Expected inspect, snapshots, check, or restore.", nameof(args));
+            throw new ArgumentException("Expected inspect, snapshots, files, check, or restore.", nameof(args));
         }
 
         var options = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -130,7 +129,12 @@ public static class RecoveryCli
             throw new ArgumentException("Restore requires --snapshot and --target.", nameof(args));
         }
 
-        if (operation != RecoveryOperation.Restore && (snapshot is not null || target is not null || source is not null))
+        if (operation == RecoveryOperation.Files && string.IsNullOrWhiteSpace(snapshot))
+        {
+            throw new ArgumentException("Files requires --snapshot.", nameof(args));
+        }
+
+        if (operation != RecoveryOperation.Restore && operation != RecoveryOperation.Files && (snapshot is not null || target is not null || source is not null))
         {
             throw new ArgumentException("Snapshot, target and source are restore-only.", nameof(args));
         }

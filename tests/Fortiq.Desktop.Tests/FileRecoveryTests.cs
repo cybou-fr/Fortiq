@@ -136,7 +136,9 @@ public sealed class FileRecoveryTests
         public bool WaitForCancellation { get; set; }
         public Task<IReadOnlyList<RecoverySnapshot>> ListAsync(FileRecoveryAccess access, CancellationToken token) =>
             Task.FromResult<IReadOnlyList<RecoverySnapshot>>([Snapshot]);
-        public async Task<FileRecoveryResult> RestoreAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, string target, CancellationToken token)
+        public Task<IReadOnlyList<SnapshotFileItem>> ListFilesAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, CancellationToken token) =>
+            Task.FromResult<IReadOnlyList<SnapshotFileItem>>([]);
+        public async Task<FileRecoveryResult> RestoreAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, string target, string? specificPath = null, CancellationToken token = default)
         {
             RestoreCalls++;
             if (WaitForCancellation) await Task.Delay(Timeout.Infinite, token);

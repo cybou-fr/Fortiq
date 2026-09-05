@@ -60,6 +60,18 @@ public sealed record RestoreSnapshot(
     string? SourcePath = null,
     Guid OperationId = default) : IOperationCommand;
 
+public sealed record SnapshotFileEntry(
+    string Name,
+    string Path,
+    string Type,
+    ulong Size,
+    DateTimeOffset? ModifiedAt);
+
+public sealed record ListSnapshotFiles(
+    RepositoryDescriptor Repository,
+    string SnapshotId,
+    Guid OperationId = default) : IOperationCommand;
+
 /// <summary>
 /// Reads the identity the repository states about itself. A path is not an identity: two paths can
 /// hold different repositories, and the same repository can be reached by several paths.
@@ -81,6 +93,10 @@ public interface IBackupRepository
 
     Task<IReadOnlyList<SnapshotDescriptor>> ListSnapshotsAsync(
         ListSnapshots query,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<SnapshotFileEntry>> ListFilesAsync(
+        ListSnapshotFiles query,
         CancellationToken cancellationToken);
 
     Task<CheckReceipt> CheckAsync(

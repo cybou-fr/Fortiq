@@ -87,6 +87,39 @@ public sealed class ResticJsonParserTests
         Assert.Throws<InvalidDataException>(() => ResticJsonParser.ParseCheck(Success(unhealthy)));
     }
 
+    [Fact]
+    public void ParsesFileEntriesFromJsonlOutput()
+    {
+        const string output =
+            """
+            {"struct_type":"snapshot","id":"c3b482...","time":"2026-09-05T12:00:00Z"}
+            {"name":"Documents","path":"/C/Users/cybou/Documents","type":"dir","mode":2147484141,"mtime":"2026-09-05T10:00:00Z"}
+            {"name":"report.pdf","path":"/C/Users/cybou/Documents/report.pdf","type":"file","size":1048576,"mode":438,"mtime":"2026-09-05T11:30:00Z"}
+            """;
+
+        var entries = ResticJsonParser.ParseFileEntries(Success(output));
+
+        Assert.Equal(2, entries.Count);
+        Assert.Equal("Documents", entries[0].Name);
+        Assert.Equal("/C/Users/cybou/Documents", entries[0].Path);
+        Assert.Equal("dir", entries[0].Type);
+        Assert.Equal(0UL, entries[0].Size);
+
+        Assert.Equal("report.pdf", entries[1].Name);
+        Assert.Equal("/C/Users/cybou/Documents/report.pdf", entries[1].Path);
+        Assert.Equal("file", entries[1].Type);
+        Assert.Equal(1048576UL, entries[1].Size);
+        Assert.Equal(DateTimeOffset.Parse("2026-09-05T11:30:00Z", System.Globalization.CultureInfo.InvariantCulture), entries[1].ModifiedAt);
+    }
+
+    [Fact]
+    public void RejectsFileEntriesWhenExitCodeIsFailure()
+    {
+        var result = new ResticProcessResult(1, string.Empty, "error listing snapshot");
+
+        Assert.Throws<InvalidDataException>(() => ResticJsonParser.ParseFileEntries(result));
+    }
+
     private static ResticProcessResult Success(string stdout) => new(0, stdout, string.Empty);
 
     private static string Read(string name) => File.ReadAllText(Path.Combine(FixtureRoot, name));

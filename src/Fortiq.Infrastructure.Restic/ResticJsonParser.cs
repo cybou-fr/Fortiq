@@ -204,6 +204,57 @@ public static partial class ResticJsonParser
         return groups;
     }
 
+    public static IReadOnlyList<SnapshotFileEntry> ParseFileEntries(ResticProcessResult result)
+    {
+        EnsureSuccessfulExit(result);
+        var entries = new List<SnapshotFileEntry>();
+        var lines = NonEmptyLines(result.StandardOutput);
+
+        foreach (var line in lines)
+        {
+            using var doc = ParseLine(line);
+            var root = RequireObject(doc.RootElement);
+
+            if (root.TryGetProperty("message_type", out var msgType) && msgType.GetString() == "snapshot")
+            {
+                continue;
+            }
+
+            if (!root.TryGetProperty("name", out var nameProp) || nameProp.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var name = nameProp.GetString() ?? string.Empty;
+            var path = root.TryGetProperty("path", out var pathProp) && pathProp.ValueKind == JsonValueKind.String
+                ? pathProp.GetString() ?? string.Empty
+                : name;
+
+            var type = root.TryGetProperty("type", out var typeProp) && typeProp.ValueKind == JsonValueKind.String
+                ? typeProp.GetString() ?? "file"
+                : "file";
+
+            ulong size = 0;
+            if (root.TryGetProperty("size", out var sizeProp) && sizeProp.ValueKind == JsonValueKind.Number)
+            {
+                size = sizeProp.GetUInt64();
+            }
+
+            DateTimeOffset? mtime = null;
+            if (root.TryGetProperty("mtime", out var mtimeProp) && mtimeProp.ValueKind == JsonValueKind.String)
+            {
+                if (DateTimeOffset.TryParse(mtimeProp.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedMtime))
+                {
+                    mtime = parsedMtime;
+                }
+            }
+
+            entries.Add(new SnapshotFileEntry(name, path, type, size, mtime));
+        }
+
+        return entries;
+    }
+
     private static List<string> SnapshotIds(JsonElement group, string name)
     {
         var ids = new List<string>();

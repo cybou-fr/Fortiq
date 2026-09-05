@@ -84,6 +84,7 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
             return command.Operation switch
             {
                 RecoveryOperation.Snapshots => await SnapshotsAsync(adapter, repository, engineAgreement, token),
+                RecoveryOperation.Files => await FilesAsync(adapter, repository, command, engineAgreement, token),
                 RecoveryOperation.Check => await CheckAsync(adapter, repository, engineAgreement, token),
                 RecoveryOperation.Restore => await RestoreAsync(adapter, repository, command, engineAgreement, token),
                 _ => throw new InvalidDataException("Unsupported recovery operation.")
@@ -172,6 +173,37 @@ public sealed class RecoveryCommandExecutor : IRecoveryCommandExecutor
                     pointInTime = snapshot.PointInTime
                 })
                 .ToArray()
+        };
+    }
+
+    private static async Task<object> FilesAsync(
+        RegisteredRunBackupRepository adapter,
+        RepositoryDescriptor repository,
+        RecoveryCommand command,
+        EngineAgreement engineAgreement,
+        CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(command.SnapshotId))
+        {
+            throw new ArgumentException("Listing files requires a snapshot identifier.", nameof(command));
+        }
+
+        var files = await adapter.ListFilesAsync(new ListSnapshotFiles(repository, command.SnapshotId), token);
+        return new
+        {
+            schema = "fortiq.recovery-files",
+            version = 1,
+            repositoryId = repository.Id.ToString(),
+            snapshotId = command.SnapshotId,
+            engineAgreement = engineAgreement.ToString(),
+            files = files.Select(file => new
+            {
+                name = file.Name,
+                path = file.Path,
+                type = file.Type,
+                size = file.Size,
+                mtime = file.ModifiedAt
+            }).ToArray()
         };
     }
 

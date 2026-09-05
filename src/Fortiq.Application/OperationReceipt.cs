@@ -1,6 +1,6 @@
 namespace Fortiq.Application;
 
-public enum OperationKind { Initialize, Backup, Snapshots, Check, Restore, Reconcile, Retention, RestoreProof }
+public enum OperationKind { Initialize, Backup, Snapshots, Files, Check, Restore, Reconcile, Retention, RestoreProof }
 
 /// <summary>What the engine itself did. It is not affected by what the caller did afterwards.</summary>
 public enum EngineResult { Succeeded, Failed, Cancelled }

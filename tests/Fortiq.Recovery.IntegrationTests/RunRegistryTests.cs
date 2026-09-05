@@ -245,5 +245,8 @@ epo");
 
         public Task<RetentionReceipt> ApplyRetentionAsync(ApplyRetention command, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public Task<IReadOnlyList<SnapshotFileEntry>> ListFilesAsync(ListSnapshotFiles query, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

@@ -100,6 +100,19 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<SnapshotFileEntry>> ListFilesAsync(ListSnapshotFiles query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var operationId = OperationId(query);
+        var result = await RunAsync(
+            ResticOperation.Ls,
+            [query.SnapshotId, "--json", "--no-cache", "--repo", RepositoryLocation.Normalize(query.Repository.Location)],
+            operationId,
+            cancellationToken,
+            query.Repository.Location);
+        return ResticJsonParser.ParseFileEntries(result);
+    }
+
     public async Task<CheckReceipt> CheckAsync(CheckRepository command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -342,6 +355,11 @@ internal sealed class ResticRepositoryEngine : IRepositoryEngine
         if (command.SourcePath is null)
         {
             return command.SnapshotId;
+        }
+
+        if (command.SourcePath.StartsWith('/'))
+        {
+            return $"{command.SnapshotId}:{command.SourcePath}";
         }
 
         var full = NormalizePath(command.SourcePath);

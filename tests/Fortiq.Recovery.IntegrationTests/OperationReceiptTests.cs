@@ -208,6 +208,9 @@ public sealed class OperationReceiptTests : IDisposable
 
         public Task<RetentionReceipt> ApplyRetentionAsync(ApplyRetention command, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public Task<IReadOnlyList<SnapshotFileEntry>> ListFilesAsync(ListSnapshotFiles query, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 
     private sealed class RecordingObserver : IOperationEvidenceObserver
@@ -249,6 +252,9 @@ public sealed class OperationReceiptTests : IDisposable
             throw new NotSupportedException();
 
         public Task<RetentionReceipt> ApplyRetentionAsync(ApplyRetention command, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<SnapshotFileEntry>> ListFilesAsync(ListSnapshotFiles query, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
     }
 }

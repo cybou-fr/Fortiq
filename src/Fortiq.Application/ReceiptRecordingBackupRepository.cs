@@ -97,6 +97,22 @@ public sealed class ReceiptRecordingBackupRepository : IBackupRepository
             cancellationToken);
     }
 
+    public Task<IReadOnlyList<SnapshotFileEntry>> ListFilesAsync(ListSnapshotFiles query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var identified = Identify(query, id => query with { OperationId = id });
+        return RecordAsync(
+            identified.OperationId,
+            OperationKind.Files,
+            () => _inner.ListFilesAsync(identified, cancellationToken),
+            _ => identified.Repository.Id.ToString(),
+            _ => null,
+            files => new Dictionary<string, long>(StringComparer.Ordinal) { ["files"] = files.Count },
+            source: null,
+            identified.Repository.Id.ToString(),
+            cancellationToken);
+    }
+
     public Task<CheckReceipt> CheckAsync(CheckRepository command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);

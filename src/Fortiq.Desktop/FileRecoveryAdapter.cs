@@ -12,7 +12,7 @@ public sealed class FileRecoveryAdapter(string engineRoot, string runDirectory,
 {
     public async Task<IReadOnlyList<RecoverySnapshot>> ListAsync(FileRecoveryAccess access, CancellationToken token)
     {
-        var result = await ExecuteAsync(access, RecoveryOperation.Snapshots, null, null, token);
+        var result = await ExecuteAsync(access, RecoveryOperation.Snapshots, null, null, null, token);
         RequireSchema(result, "fortiq.recovery-snapshots");
         return result.GetProperty("snapshots").EnumerateArray().Select(item => new RecoverySnapshot(
             item.GetProperty("id").GetString() ?? throw new InvalidDataException("A backup has no identifier."),
@@ -20,10 +20,26 @@ public sealed class FileRecoveryAdapter(string engineRoot, string runDirectory,
             item.GetProperty("path").GetString() ?? throw new InvalidDataException("A backup has no source path."))).ToArray();
     }
 
-    public async Task<FileRecoveryResult> RestoreAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, string target, CancellationToken token)
+    public async Task<IReadOnlyList<SnapshotFileItem>> ListFilesAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, CancellationToken token)
+    {
+        var result = await ExecuteAsync(access, RecoveryOperation.Files, snapshot, null, null, token);
+        RequireSchema(result, "fortiq.recovery-files");
+        return result.GetProperty("files").EnumerateArray().Select(item => new SnapshotFileItem(
+            item.GetProperty("name").GetString() ?? "",
+            item.GetProperty("path").GetString() ?? "",
+            item.GetProperty("type").GetString() ?? "file",
+            item.TryGetProperty("size", out var size) ? size.GetUInt64() : 0,
+            item.TryGetProperty("mtime", out var mtime) && mtime.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(mtime.GetString(), out var parsedMtime) ? parsedMtime : null
+        )).ToArray();
+    }
+
+    public Task<FileRecoveryResult> RestoreAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, string target, CancellationToken token = default) =>
+        RestoreAsync(access, snapshot, target, null, token);
+
+    public async Task<FileRecoveryResult> RestoreAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, string target, string? specificPath, CancellationToken token = default)
     {
         ValidateDestination(access, snapshot, target);
-        var result = await ExecuteAsync(access, RecoveryOperation.Restore, snapshot, Path.GetFullPath(target), token);
+        var result = await ExecuteAsync(access, RecoveryOperation.Restore, snapshot, Path.GetFullPath(target), specificPath, token);
         RequireSchema(result, "fortiq.recovery-restore");
         return new FileRecoveryResult(result.GetProperty("target").GetString()
             ?? throw new InvalidDataException("Recovery returned no destination."), result.GetProperty("bytesRestored").GetUInt64());
@@ -53,15 +69,16 @@ public sealed class FileRecoveryAdapter(string engineRoot, string runDirectory,
     }
 
     private Task<JsonElement> ExecuteAsync(FileRecoveryAccess access, RecoveryOperation operation,
-        RecoverySnapshot? snapshot, string? target, CancellationToken token) => Task.Run(async () =>
+        RecoverySnapshot? snapshot, string? target, string? specificSource, CancellationToken token) => Task.Run(async () =>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(access.Mnemonic);
         ArgumentException.ThrowIfNullOrWhiteSpace(access.Kit);
         ArgumentException.ThrowIfNullOrWhiteSpace(access.Repository);
         var storage = new SessionStorage(access);
         var executor = executorFactory?.Invoke(storage) ?? new RecoveryCommandExecutor(runDirectory: runDirectory, storage: storage);
+        var sourcePath = specificSource ?? snapshot?.SourcePath;
         var command = new RecoveryCommand(operation, RepositoryLocation.Normalize(access.Repository), engineRoot,
-            Path.GetFullPath(access.Kit), snapshot?.Id, target, snapshot?.SourcePath);
+            Path.GetFullPath(access.Kit), snapshot?.Id, target, sourcePath);
         var result = await executor.ExecuteAsync(command, new SessionMaterial(access.Mnemonic), token);
         return JsonSerializer.SerializeToElement(result);
     }, token);

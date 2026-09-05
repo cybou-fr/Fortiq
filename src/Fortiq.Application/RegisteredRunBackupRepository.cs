@@ -56,6 +56,18 @@ public sealed class RegisteredRunBackupRepository : IBackupRepository
             cancellationToken);
     }
 
+    public Task<IReadOnlyList<SnapshotFileEntry>> ListFilesAsync(ListSnapshotFiles query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return RunAsync(
+            query.Repository.Id,
+            OperationKind.Files,
+            query.OperationId,
+            RunExclusivity.Shared,
+            () => _inner.ListFilesAsync(query, cancellationToken),
+            cancellationToken);
+    }
+
     public Task<CheckReceipt> CheckAsync(CheckRepository command, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);

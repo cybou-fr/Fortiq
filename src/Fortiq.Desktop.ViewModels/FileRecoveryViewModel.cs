@@ -8,6 +8,32 @@ public sealed record RecoverySnapshot(string Id, DateTimeOffset CreatedAt, strin
     public override string ToString() => $"{CreatedAt.ToLocalTime():g} | {SourcePath} | {Id[..Math.Min(12, Id.Length)]}";
 }
 
+public sealed record SnapshotFileItem(
+    string Name,
+    string Path,
+    string Type,
+    ulong Size,
+    DateTimeOffset? ModifiedAt)
+{
+    public bool IsDirectory => string.Equals(Type, "dir", StringComparison.OrdinalIgnoreCase);
+
+    public string DisplayName => IsDirectory ? $"{Name}/" : Name;
+
+    public string FormattedSize => IsDirectory ? "<DIR>" : FormatBytes(Size);
+
+    public string FormattedTime => ModifiedAt.HasValue
+        ? ModifiedAt.Value.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture)
+        : string.Empty;
+
+    private static string FormatBytes(ulong bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return FormattableString.Invariant($"{(double)bytes / 1024:F1} KB");
+        if (bytes < 1024 * 1024 * 1024) return FormattableString.Invariant($"{(double)bytes / (1024 * 1024):F1} MB");
+        return FormattableString.Invariant($"{(double)bytes / (1024 * 1024 * 1024):F1} GB");
+    }
+}
+
 public sealed record FileRecoveryAccess(string Repository, string Kit, string Mnemonic,
     string AccessKey = "", string SecretKey = "", string Region = "")
 {
@@ -19,7 +45,10 @@ public sealed record FileRecoveryResult(string Target, ulong BytesRestored);
 public interface IFileRecovery
 {
     Task<IReadOnlyList<RecoverySnapshot>> ListAsync(FileRecoveryAccess access, CancellationToken token);
-    Task<FileRecoveryResult> RestoreAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, string target, CancellationToken token);
+    Task<IReadOnlyList<SnapshotFileItem>> ListFilesAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, CancellationToken token);
+    Task<FileRecoveryResult> RestoreAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, string target, CancellationToken token = default) =>
+        RestoreAsync(access, snapshot, target, null, token);
+    Task<FileRecoveryResult> RestoreAsync(FileRecoveryAccess access, RecoverySnapshot snapshot, string target, string? specificPath, CancellationToken token = default);
 }
 
 /// <summary>A recovery session keeps its access material only until success or closing.</summary>
@@ -29,6 +58,12 @@ public sealed class FileRecoveryViewModel(IFileRecovery recovery) : INotifyPrope
     private FileRecoveryAccess? _access;
     public event PropertyChangedEventHandler? PropertyChanged;
     public IReadOnlyList<RecoverySnapshot> Snapshots { get; private set; } = [];
+    public IReadOnlyList<SnapshotFileItem> Files { get; private set; } = [];
+    public IReadOnlyList<SnapshotFileItem> FilteredFiles { get; private set; } = [];
+    public SnapshotFileItem? SelectedFile { get; set; }
+    public string SearchQuery { get; private set; } = string.Empty;
+    public bool RestoreSpecificItem { get; set; }
+    public bool FilesLoading { get; private set; }
     public bool Busy { get; private set; }
     public bool Completed { get; private set; }
     public string Status { get; private set; } = "Enter the recovery material to find your backups.";
@@ -39,6 +74,11 @@ public sealed class FileRecoveryViewModel(IFileRecovery recovery) : INotifyPrope
         if (Busy) return;
         _access = null;
         Snapshots = [];
+        Files = [];
+        FilteredFiles = [];
+        SelectedFile = null;
+        SearchQuery = string.Empty;
+        RestoreSpecificItem = false;
         Completed = false;
         RestoredTarget = null;
         await RunAsync("Opening the repository and reading backups...", async token =>
@@ -47,18 +87,72 @@ public sealed class FileRecoveryViewModel(IFileRecovery recovery) : INotifyPrope
             token.ThrowIfCancellationRequested();
             Snapshots = snapshots.OrderByDescending(item => item.CreatedAt).ToArray();
             if (Snapshots.Count > 0) _access = access;
-            Status = Snapshots.Count == 0 ? "This repository contains no backups." : "Choose a backup and a destination. All files in that backup's source folder will be restored.";
+            Status = Snapshots.Count == 0 ? "This repository contains no backups." : "Choose a backup and a destination to restore.";
         });
     }
 
-    public async Task RestoreAsync(RecoverySnapshot snapshot, string target)
+    public async Task LoadFilesAsync(RecoverySnapshot snapshot)
+    {
+        if (Busy || _access is null) return;
+        Files = [];
+        FilteredFiles = [];
+        SelectedFile = null;
+        FilesLoading = true;
+        Changed(nameof(FilesLoading));
+        Changed(nameof(Files));
+        Changed(nameof(FilteredFiles));
+
+        try
+        {
+            var access = _access;
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var files = await recovery.ListFilesAsync(access, snapshot, cts.Token);
+            Files = files;
+            ApplyFilter();
+        }
+        catch (Exception error)
+        {
+            Status = "Could not load file list from backup: " + error.Message;
+            Changed(nameof(Status));
+        }
+        finally
+        {
+            FilesLoading = false;
+            Changed(nameof(FilesLoading));
+        }
+    }
+
+    public void SetSearchQuery(string query)
+    {
+        SearchQuery = query ?? string.Empty;
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        if (string.IsNullOrWhiteSpace(SearchQuery))
+        {
+            FilteredFiles = Files;
+        }
+        else
+        {
+            FilteredFiles = Files
+                .Where(f => f.Name.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase) ||
+                            f.Path.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+        Changed(nameof(FilteredFiles));
+    }
+
+    public async Task RestoreAsync(RecoverySnapshot snapshot, string target, string? specificPath = null)
     {
         if (Busy || Completed || _access is null) return;
         if (!Snapshots.Contains(snapshot)) throw new ArgumentException("Select a backup from this recovery session.", nameof(snapshot));
         var access = _access;
+        var pathToRestore = specificPath ?? (RestoreSpecificItem && SelectedFile is not null ? SelectedFile.Path : null);
         await RunAsync("Restoring files. Keep this window open...", async token =>
         {
-            var result = await recovery.RestoreAsync(access, snapshot, target, token);
+            var result = await recovery.RestoreAsync(access, snapshot, target, pathToRestore, token);
             RestoredTarget = result.Target;
             Completed = true;
             _access = null;
@@ -79,6 +173,12 @@ public sealed class FileRecoveryViewModel(IFileRecovery recovery) : INotifyPrope
         if (Busy) throw new InvalidOperationException("Wait for recovery to stop before closing the session.");
         _access = null;
         Snapshots = [];
+        Files = [];
+        FilteredFiles = [];
+        SelectedFile = null;
+        SearchQuery = string.Empty;
+        RestoreSpecificItem = false;
+        FilesLoading = false;
         Completed = false;
         RestoredTarget = null;
         Status = "Enter the recovery material to find your backups.";
