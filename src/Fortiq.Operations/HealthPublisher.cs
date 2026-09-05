@@ -53,6 +53,7 @@ public sealed class HealthPublisher
             var repositoryId = kit?.Manifest.RepositoryId ?? schedule.Id;
             var state = await _schedules.ReadStateAsync(schedule.Id, cancellationToken);
             evidence.TryGetValue(repositoryId, out var seen);
+            var drillFailure = await ReadDrillFailureAsync(schedule, seen?.LastProvenRestoreAt, cancellationToken);
 
             repositories.Add(HealthAssessor.Assess(
                 new RepositoryFacts(
@@ -63,7 +64,7 @@ public sealed class HealthPublisher
                     seen?.LastProvenRestoreAt,
                     KitPresent: kit is not null,
                     StorageImmutable: kit?.Manifest.StorageProtection?.Immutable ?? false,
-                    state.LastFailure ?? seen?.LastFailure,
+                    drillFailure ?? state.LastFailure ?? seen?.LastFailure,
                     await InspectAsync(schedule.RepositoryLocation, cancellationToken)),
                 now,
                 thresholds: null,
@@ -76,6 +77,23 @@ public sealed class HealthPublisher
         await HealthPublication.WriteJsonAsync(report, _reportPath, cancellationToken);
         await HealthPublication.WritePrometheusAsync(report, _metricsPath, cancellationToken);
         return report;
+    }
+
+    private async Task<string?> ReadDrillFailureAsync(
+        BackupSchedule schedule, DateTimeOffset? lastProof, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var drill = await _schedules.ReadStateAsync(schedule.DrillStateId, cancellationToken);
+            return drill.LastFailure is { Length: > 0 } failure
+                && (lastProof is null || drill.LastAttemptAt is null || drill.LastAttemptAt >= lastProof)
+                ? "Restore drill failed: " + failure
+                : null;
+        }
+        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return "Restore drill history could not be read: " + error.Message;
+        }
     }
 
     /// <summary>

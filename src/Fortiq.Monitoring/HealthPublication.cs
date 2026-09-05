@@ -45,6 +45,9 @@ public static class HealthPublication
     {
         ArgumentNullException.ThrowIfNull(report);
         var text = new StringBuilder();
+        text.AppendLine("# HELP fortiq_health_report_timestamp_seconds Unix time when this evidence was published; alert when time() minus this exceeds 300.");
+        text.AppendLine("# TYPE fortiq_health_report_timestamp_seconds gauge");
+        text.AppendLine(CultureInfo.InvariantCulture, $"fortiq_health_report_timestamp_seconds {report.ProducedAt.ToUnixTimeSeconds()}");
 
         text.AppendLine("# HELP fortiq_repository_recoverable Whether Fortiq can currently claim this repository is recoverable.");
         text.AppendLine("# TYPE fortiq_repository_recoverable gauge");

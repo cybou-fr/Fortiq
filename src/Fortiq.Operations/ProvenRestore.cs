@@ -125,9 +125,23 @@ public sealed class ProvenRestore
     {
         ArgumentNullException.ThrowIfNull(schedule);
 
-        using var engine = await VerifyEngineAsync(cancellationToken);
         var kit = await RecoveryKitStore.ReadAsync(schedule.KitDirectory, cancellationToken);
-        RecoveryKitPolicy.CompareEngine(kit.Manifest, engine.Name, engine.Version, engine.Sha256);
+
+        return await new RestoreProofRecorder(new FileSystemOperationReceiptStore(_receiptDirectory)).RecordAsync(
+            kit.Manifest.RepositoryId,
+            new EngineIdentity(kit.Manifest.Engine.Name, kit.Manifest.Engine.Version, kit.Manifest.Engine.Sha256),
+            async () =>
+            {
+                using var engine = await VerifyEngineAsync(cancellationToken);
+                RecoveryKitPolicy.CompareEngine(kit.Manifest, engine.Name, engine.Version, engine.Sha256);
+                return await ProveCoreAsync(schedule, engine, kit, cancellationToken);
+            });
+    }
+
+    [SupportedOSPlatform("windows")]
+    private async Task<RestoreProof> ProveCoreAsync(
+        BackupSchedule schedule, VerifiedEngine engine, OpenedRecoveryKit kit, CancellationToken cancellationToken)
+    {
 
         var device = kit.Envelopes.SingleOrDefault(envelope => envelope.Suite == WindowsTpmEnvelope.SuiteId)
             ?? throw new UnattendedUnlockUnavailableException(

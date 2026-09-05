@@ -103,7 +103,7 @@ public sealed class HealthTests : IDisposable
     {
         await WriteReceiptAsync("backup", "succeeded", Now.AddHours(-2));
         await WriteReceiptAsync("check", "failed", Now.AddHours(-1), "the repository contains errors");
-        await WriteReceiptAsync("restore", "succeeded", Now.AddDays(-3));
+        await WriteReceiptAsync("restoreProof", "succeeded", Now.AddDays(-3));
 
         var evidence = Assert.Single(await ReceiptHistory.ReadAsync(_directory, CancellationToken.None));
 
@@ -126,6 +126,26 @@ public sealed class HealthTests : IDisposable
 
         Assert.Null(evidence.LastFailure);
         Assert.Equal(Now.AddHours(-1), evidence.LastBackupAt);
+    }
+
+    [Fact]
+    public async Task AnEngineRestoreIsNotACompletedVerification()
+    {
+        await WriteReceiptAsync("restore", "succeeded", Now);
+        var evidence = Assert.Single(await ReceiptHistory.ReadAsync(_directory, CancellationToken.None));
+        Assert.Null(evidence.LastProvenRestoreAt);
+    }
+
+    [Theory]
+    [InlineData("check")]
+    [InlineData("restoreProof")]
+    public async Task ANewBackupCannotEraseAnUnresolvedVerificationFailure(string operation)
+    {
+        await WriteReceiptAsync(operation, "failed", Now.AddHours(-2), "verification failed");
+        await WriteReceiptAsync("backup", "succeeded", Now.AddHours(-1));
+        Assert.Equal("verification failed", Assert.Single(await ReceiptHistory.ReadAsync(_directory, CancellationToken.None)).LastFailure);
+        await WriteReceiptAsync(operation, "succeeded", Now);
+        Assert.Null(Assert.Single(await ReceiptHistory.ReadAsync(_directory, CancellationToken.None)).LastFailure);
     }
 
     [Fact]
@@ -161,6 +181,7 @@ public sealed class HealthTests : IDisposable
         ]);
 
         var text = HealthPublication.ToPrometheusText(report);
+        Assert.Contains($"fortiq_health_report_timestamp_seconds {Now.ToUnixTimeSeconds()}", text, StringComparison.Ordinal);
 
         Assert.Contains("fortiq_repository_recoverable{repository=\"a\",schedule=\"documents\"} 0", text, StringComparison.Ordinal);
         Assert.Contains("fortiq_repository_last_backup_age_seconds{repository=\"a\",schedule=\"documents\"} 3600", text, StringComparison.Ordinal);

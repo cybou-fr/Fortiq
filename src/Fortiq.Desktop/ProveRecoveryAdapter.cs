@@ -45,11 +45,18 @@ public sealed class ProveRecoveryAdapter : IProveRecovery
             await _restore.ProveAsync(schedule, cancellationToken);
             return true;
         }
-        catch (RestoreProofFailedException)
+        catch (Exception error) when (error is not OperationCanceledException)
         {
-            // A restore that ran and produced the wrong thing is the answer to the question the
-            // button asked; it is reported as "no", not as an error in Fortiq.
-            return false;
+            // Keep preflight failures and evidence-write failures visible to the next service pass,
+            // even when no receipt could be written. This shares the scheduled drill's state.
+            var state = await _schedules.ReadStateAsync(schedule.DrillStateId, CancellationToken.None);
+            await _schedules.WriteStateAsync(state with
+            {
+                LastAttemptAt = DateTimeOffset.UtcNow,
+                LastFailure = error.Message
+            }, CancellationToken.None);
+            if (error is RestoreProofFailedException) return false;
+            throw;
         }
         finally
         {

@@ -87,7 +87,8 @@ public static class ReceiptHistory
         private DateTimeOffset? _backup;
         private DateTimeOffset? _check;
         private DateTimeOffset? _restore;
-        private (DateTimeOffset At, string Message)? _failure;
+        private readonly Dictionary<string, (DateTimeOffset At, string Message)> _failures = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, DateTimeOffset> _successes = new(StringComparer.Ordinal);
 
         internal void Add(JsonElement receipt)
         {
@@ -102,15 +103,22 @@ public static class ReceiptHistory
             if (result != "succeeded")
             {
                 var message = receipt.TryGetProperty("warnings", out var warnings) && warnings.ValueKind == JsonValueKind.Array
-                    ? warnings.EnumerateArray().FirstOrDefault().GetString()
+                    && warnings.GetArrayLength() > 0 ? warnings[0].GetString()
                     : null;
 
-                if (_failure is null || at > _failure.Value.At)
+                var operationKey = operation ?? "unknown";
+                if (!_failures.TryGetValue(operationKey, out var previous) || at > previous.At)
                 {
-                    _failure = (at, message ?? $"The last {operation} did not succeed.");
+                    _failures[operationKey] = (at, message ?? $"The last {operation} did not succeed.");
                 }
 
                 return;
+            }
+
+            if (operation is not null)
+            {
+                _successes[operation] = _successes.TryGetValue(operation, out var previous)
+                    && previous > at ? previous : at;
             }
 
             switch (operation)
@@ -127,7 +135,7 @@ public static class ReceiptHistory
                 case "check":
                     _check = Later(_check, at);
                     break;
-                case "restore":
+                case "restoreProof":
                     _restore = Later(_restore, at);
                     break;
                 default:
@@ -137,11 +145,12 @@ public static class ReceiptHistory
 
         internal RepositoryEvidence ToEvidence(string repositoryId)
         {
-            // A failure older than the last success is history, not a current problem.
-            var newestSuccess = new[] { _backup, _check, _restore }.Where(at => at is not null).Max();
-            var failure = _failure is { } recorded && (newestSuccess is null || recorded.At > newestSuccess)
-                ? recorded.Message
-                : null;
+            // A successful backup cannot clear a failed check or failed restore verification.
+            var failure = _failures
+                .Where(pair => !_successes.TryGetValue(pair.Key, out var success) || pair.Value.At >= success)
+                .OrderByDescending(pair => pair.Value.At)
+                .Select(pair => pair.Value.Message)
+                .FirstOrDefault();
 
             return new RepositoryEvidence(repositoryId, _backup, _check, _restore, failure)
             {
