@@ -13,7 +13,8 @@ public sealed record InstallOptions(
     string TargetDirectory,
     bool InstallService = true,
     bool AddToPath = true,
-    string? SourceDirectory = null);
+    string? SourceDirectory = null,
+    bool ProvisionAcls = true);
 
 public sealed record UninstallOptions(
     bool PurgeData = false,
@@ -86,7 +87,7 @@ public sealed class InstallationManager : IInstallationOperations
             CopyLocalSource(sourceDir, targetDir);
         }
 
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() && options.ProvisionAcls)
         {
             progress?.Report(new("Configuring secure directory ACLs...", 60));
             try
@@ -269,21 +270,41 @@ public sealed class InstallationManager : IInstallationOperations
         if (File.Exists(directPath))
         {
             var manifest = LoadManifest(directPath);
-            if (manifest is not null) return (sourceDir, manifest);
+            if (manifest is not null)
+            {
+                if (AreComponentsInDirectory(sourceDir, manifest))
+                {
+                    return (sourceDir, manifest);
+                }
+
+                var parent = Directory.GetParent(sourceDir);
+                if (parent is not null && AreComponentsInDirectory(parent.FullName, manifest))
+                {
+                    return (parent.FullName, manifest);
+                }
+
+                return (sourceDir, manifest);
+            }
         }
 
-        var parent = Directory.GetParent(sourceDir);
-        if (parent is not null)
+        var parentDir = Directory.GetParent(sourceDir);
+        if (parentDir is not null)
         {
-            var parentPath = Path.Combine(parent.FullName, "bundle-manifest.json");
+            var parentPath = Path.Combine(parentDir.FullName, "bundle-manifest.json");
             if (File.Exists(parentPath))
             {
                 var manifest = LoadManifest(parentPath);
-                if (manifest is not null) return (parent.FullName, manifest);
+                if (manifest is not null) return (parentDir.FullName, manifest);
             }
         }
 
         return (null, null);
+    }
+
+    private static bool AreComponentsInDirectory(string root, BundleManifest manifest)
+    {
+        if (manifest.Components.Count == 0) return true;
+        return manifest.Components.Where(c => c.Required).All(c => File.Exists(Path.Combine(root, c.MainExecutable)));
     }
 
     private static readonly JsonSerializerOptions ManifestJsonOptions = new()
@@ -368,6 +389,18 @@ public sealed class InstallationManager : IInstallationOperations
             var targetEngines = Path.Combine(targetDir, "engines");
             Directory.CreateDirectory(targetEngines);
             CopyDirectoryRecursive(enginesDir, targetEngines);
+        }
+
+        var manifestPath = Path.Combine(bundleRoot, "bundle-manifest.json");
+        if (File.Exists(manifestPath))
+        {
+            File.Copy(manifestPath, Path.Combine(targetDir, "bundle-manifest.json"), overwrite: true);
+        }
+
+        var securityDoc = Path.Combine(bundleRoot, "SECURITY.md");
+        if (File.Exists(securityDoc))
+        {
+            File.Copy(securityDoc, Path.Combine(targetDir, "SECURITY.md"), overwrite: true);
         }
     }
 

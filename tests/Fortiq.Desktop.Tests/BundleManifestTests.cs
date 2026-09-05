@@ -116,4 +116,114 @@ public sealed class BundleManifestTests : IDisposable
 
         Assert.Contains("failed SHA-256 validation", ex.Message);
     }
+
+    [Fact]
+    public void DiscoverManifestResolvesParentWhenRunningFromChildFolder()
+    {
+        var desktopDir = Path.Combine(_tempDir, "desktop");
+        var serviceDir = Path.Combine(_tempDir, "service");
+        Directory.CreateDirectory(desktopDir);
+        Directory.CreateDirectory(serviceDir);
+
+        var desktopExe = Path.Combine(desktopDir, "Fortiq.Desktop.exe");
+        var serviceExe = Path.Combine(serviceDir, "Fortiq.Service.exe");
+        File.WriteAllBytes(desktopExe, "desktop"u8.ToArray());
+        File.WriteAllBytes(serviceExe, "service"u8.ToArray());
+
+        var manifestJson = JsonSerializer.Serialize(new
+        {
+            schema = "fortiq.bundle-manifest",
+            version = "1.0.0",
+            rid = "win-x64",
+            created = DateTimeOffset.UtcNow.ToString("O"),
+            components = new[]
+            {
+                new
+                {
+                    name = "desktop",
+                    folder = "desktop",
+                    mainExecutable = "desktop/Fortiq.Desktop.exe",
+                    required = true,
+                    sha256 = Convert.ToHexStringLower(SHA256.HashData("desktop"u8.ToArray()))
+                },
+                new
+                {
+                    name = "service",
+                    folder = "service",
+                    mainExecutable = "service/Fortiq.Service.exe",
+                    required = true,
+                    sha256 = Convert.ToHexStringLower(SHA256.HashData("service"u8.ToArray()))
+                }
+            }
+        });
+
+        File.WriteAllText(Path.Combine(_tempDir, "bundle-manifest.json"), manifestJson);
+        File.WriteAllText(Path.Combine(desktopDir, "bundle-manifest.json"), manifestJson);
+
+        // When queried from desktop subfolder, it must resolve to _tempDir (the bundle root)
+        var (discoveredRoot, manifest) = InstallationManager.DiscoverManifest(desktopDir);
+        Assert.NotNull(discoveredRoot);
+        Assert.NotNull(manifest);
+        Assert.Equal(Path.GetFullPath(_tempDir), Path.GetFullPath(discoveredRoot));
+        Assert.Equal(2, manifest.Components.Count);
+    }
+
+    [Fact]
+    public async Task InstallAsyncWithBundleDeploysAllComponentsAndManifest()
+    {
+        var desktopDir = Path.Combine(_tempDir, "bundle", "desktop");
+        var serviceDir = Path.Combine(_tempDir, "bundle", "service");
+        Directory.CreateDirectory(desktopDir);
+        Directory.CreateDirectory(serviceDir);
+
+        var desktopExe = Path.Combine(desktopDir, "Fortiq.Desktop.exe");
+        var serviceExe = Path.Combine(serviceDir, "Fortiq.Service.exe");
+        var desktopBytes = "desktop-binary"u8.ToArray();
+        var serviceBytes = "service-binary"u8.ToArray();
+        File.WriteAllBytes(desktopExe, desktopBytes);
+        File.WriteAllBytes(serviceExe, serviceBytes);
+
+        var bundleRoot = Path.Combine(_tempDir, "bundle");
+        var manifestJson = JsonSerializer.Serialize(new
+        {
+            schema = "fortiq.bundle-manifest",
+            version = "1.0.0",
+            rid = "win-x64",
+            created = DateTimeOffset.UtcNow.ToString("O"),
+            components = new[]
+            {
+                new
+                {
+                    name = "desktop",
+                    folder = "desktop",
+                    mainExecutable = "desktop/Fortiq.Desktop.exe",
+                    required = true,
+                    sha256 = Convert.ToHexStringLower(SHA256.HashData(desktopBytes))
+                },
+                new
+                {
+                    name = "service",
+                    folder = "service",
+                    mainExecutable = "service/Fortiq.Service.exe",
+                    required = true,
+                    sha256 = Convert.ToHexStringLower(SHA256.HashData(serviceBytes))
+                }
+            }
+        });
+        File.WriteAllText(Path.Combine(bundleRoot, "bundle-manifest.json"), manifestJson);
+
+        var targetDir = Path.Combine(_tempDir, "installed");
+        var options = new InstallOptions(
+            targetDir,
+            InstallService: false,
+            AddToPath: false,
+            SourceDirectory: desktopDir,
+            ProvisionAcls: false);
+
+        await InstallationManager.InstallAsync(options);
+
+        Assert.True(File.Exists(Path.Combine(targetDir, "Fortiq.Desktop.exe")));
+        Assert.True(File.Exists(Path.Combine(targetDir, "Fortiq.Service.exe")));
+        Assert.True(File.Exists(Path.Combine(targetDir, "bundle-manifest.json")));
+    }
 }

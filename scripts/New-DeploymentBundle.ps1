@@ -100,7 +100,7 @@ $manifestJson | Set-Content -LiteralPath (Join-Path $destination 'bundle-manifes
 $manifestJson | Set-Content -LiteralPath (Join-Path (Join-Path $destination 'desktop') 'bundle-manifest.json') -Encoding utf8
 
 $hashes = Get-ChildItem -LiteralPath $destination -Recurse -File | Sort-Object FullName | ForEach-Object {
-    $relative = [IO.Path]::GetRelativePath($destination, $_.FullName).Replace('\', '/')
+    $relative = $_.FullName.Substring($destination.Length).TrimStart('\', '/') -replace '\\', '/'
     "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $relative"
 }
 $hashes | Set-Content -LiteralPath (Join-Path $destination 'SHA256SUMS') -Encoding utf8

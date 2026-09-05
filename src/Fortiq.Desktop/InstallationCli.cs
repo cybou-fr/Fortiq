@@ -149,7 +149,9 @@ public static class InstallationCli
         var targetDir = InstallationManager.DefaultInstallPath;
         var installService = true;
         var addToPath = true;
+        var provisionAcls = true;
         var silent = false;
+        string? sourceDir = null;
 
         for (var i = 1; i < args.Length; i++)
         {
@@ -157,6 +159,10 @@ public static class InstallationCli
             if ((arg.Equals("--dir", StringComparison.OrdinalIgnoreCase) || arg.Equals("-d", StringComparison.OrdinalIgnoreCase)) && i + 1 < args.Length)
             {
                 targetDir = args[++i];
+            }
+            else if ((arg.Equals("--source", StringComparison.OrdinalIgnoreCase) || arg.Equals("--bundle", StringComparison.OrdinalIgnoreCase)) && i + 1 < args.Length)
+            {
+                sourceDir = args[++i];
             }
             else if (arg.Equals("--no-service", StringComparison.OrdinalIgnoreCase))
             {
@@ -166,16 +172,21 @@ public static class InstallationCli
             {
                 addToPath = false;
             }
+            else if (arg.Equals("--no-acls", StringComparison.OrdinalIgnoreCase))
+            {
+                provisionAcls = false;
+            }
             else if (arg.Equals("--silent", StringComparison.OrdinalIgnoreCase) || arg.Equals("-s", StringComparison.OrdinalIgnoreCase))
             {
                 silent = true;
             }
         }
 
-        var options = new InstallOptions(targetDir, installService, addToPath);
+        var options = new InstallOptions(targetDir, installService, addToPath, sourceDir, provisionAcls);
 
-        // Check if already elevated
-        if (!OperatingSystem.IsWindows() || WindowsPrivilegeChecker.IsElevated())
+        // Check if already elevated or unprivileged install requested
+        var requiresElevation = OperatingSystem.IsWindows() && (installService || provisionAcls || addToPath);
+        if (!requiresElevation || (OperatingSystem.IsWindows() && WindowsPrivilegeChecker.IsElevated()))
         {
             var progress = silent ? null : new Progress<InstallProgressReport>(p =>
             {
@@ -401,12 +412,14 @@ Commands:
                                            ledger for tampering, deletion, or sequence gaps.
 
 Options:
-  --dir <path>     Custom destination folder (default: %ProgramFiles%\Fortiq).
-  --no-service     Do not install or start the background Windows Service.
-  --no-path        Do not modify the system PATH environment variable.
-  --purge-data     Destructive: remove %ProgramData%\Fortiq state and receipts audit trail.
-  --silent, -s     Suppress informational console output.
-  --json           Format output as JSON.
+  --dir <path>             Custom destination folder (default: %ProgramFiles%\Fortiq).
+  --source, --bundle <dir> Source directory or deployment bundle containing binaries.
+  --no-service             Do not install or start the background Windows Service.
+  --no-path                Do not modify the system PATH environment variable.
+  --no-acls                Skip ACL provisioning (for unprivileged/test environments).
+  --purge-data             Destructive: remove %ProgramData%\Fortiq state and receipts audit trail.
+  --silent, -s             Suppress informational console output.
+  --json                   Format output as JSON.
 ");
     }
 }
