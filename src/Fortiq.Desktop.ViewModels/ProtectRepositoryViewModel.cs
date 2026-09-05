@@ -82,7 +82,20 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
     private string _sourcePath = string.Empty;
     private string _storageAccessKeyId = string.Empty;
     private string _storageSecretKey = string.Empty;
-    private string _storageRegion = string.Empty;
+    /// <summary>
+    /// The region a new repository starts with.
+    /// </summary>
+    /// <remarks>
+    /// Prefilled on request, to save retyping it during testing. It is worth being clear that this
+    /// is one provider's region baked into the product: for anyone not on iDrive e2 it is a wrong
+    /// value they have to notice and change, and a wrong region fails at the first request rather
+    /// than at provisioning. Remembering the last one used would serve the same purpose without
+    /// naming a provider in the source.
+    /// </remarks>
+    private string _storageRegion = DefaultStorageRegion;
+
+    /// <summary>The region offered before anything else is known.</summary>
+    public const string DefaultStorageRegion = "eu-west-4";
     private string _confirmationInput = string.Empty;
     private string? _mnemonic;
     private string? _failure;

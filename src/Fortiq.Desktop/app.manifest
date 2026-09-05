@@ -1,6 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <assemblyIdentity version="1.0.0.0" name="Fortiq.Desktop" />
+  <!--
+    Stated, not left to Windows to guess. A manifest with no trustInfo is treated as legacy, and
+    Windows' installer-detection heuristic is then free to raise a UAC prompt on its own - which it
+    did, on every start of a backup client that needs no privileges to run. Fortiq elevates one
+    operation, protecting a folder, and asks for nothing the rest of the time.
+  -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>

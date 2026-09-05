@@ -60,6 +60,22 @@ public sealed class FortiqApplication : Avalonia.Application
             desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnExplicitShutdown;
 
             var args = desktop.Args ?? Array.Empty<string>();
+
+            // Before the start-up window and before the inspection, because this instance exists to
+            // show one dialog and nothing else. It used to fall through the ordinary path first:
+            // "Checking Fortiq installation..." appeared a second time, the pinned engine was hashed
+            // again, and the wizard opened seconds later behind a window that was never closed. The
+            // unelevated instance already inspected this machine; asking again answers a question
+            // nobody asked and delays the only thing the person did ask for.
+            if (args.Contains("--protect", StringComparer.OrdinalIgnoreCase))
+            {
+                var wizard = CreateProtectWindow();
+                desktop.MainWindow = wizard;
+                wizard.Closed += (_, _) => desktop.Shutdown();
+                wizard.Show();
+                return;
+            }
+
             var isPortable = args.Contains("--portable", StringComparer.OrdinalIgnoreCase);
             var isTrayLaunch = args.Contains("--tray", StringComparer.OrdinalIgnoreCase)
                 || args.Contains("--minimized", StringComparer.OrdinalIgnoreCase);
@@ -111,26 +127,6 @@ public sealed class FortiqApplication : Avalonia.Application
                     var inspector = new InstallationInspector();
                     var status = await Task.Run(() => inspector.InspectAsync());
                     if (closed) return;
-                    var isProtectOnly = Environment.GetCommandLineArgs()
-                        .Contains("--protect", StringComparer.OrdinalIgnoreCase);
-
-                    if (isProtectOnly)
-                    {
-                        // Started by an unelevated Fortiq that needs one privileged operation. Only
-                        // the wizard is shown; closing it ends this process and the unelevated window
-                        // the person was already looking at refreshes.
-                        var only = CreateProtectWindow();
-                        desktop.MainWindow = only;
-                        only.Show();
-                        only.Closed += (_, _) => desktop.Shutdown();
-
-                        // Closed here too. Every other branch falls through to the Close() below;
-                        // this one returns early, so the start-up window stayed on screen forever
-                        // behind the wizard.
-                        loading.Close();
-                        return;
-                    }
-
                     if (isPortable || status.IsInstalled)
                     {
                         var mainWindow = CreateMainWindow(installed: status.IsInstalled && !isPortable);
@@ -332,11 +328,40 @@ public sealed class FortiqApplication : Avalonia.Application
     /// </remarks>
     private static ProtectRepositoryWindow CreateProtectWindow()
     {
-        var host = CreateMainWindow(installed: true);
-        var wizard = host.CreateWizard()
-            ?? throw new InvalidOperationException("The protection wizard is not available in this mode.");
+        // Composed directly, not by building a MainWindow and taking the wizard off it. That built a
+        // whole application shell - a second tray icon, refresh timers, a health file read - for a
+        // process whose entire job is one dialog, and then discarded it.
+        var paths = FortiqStatePaths.Resolve();
+        var engineRoot = ResolveEngineRoot();
 
-        return new ProtectRepositoryWindow(wizard);
+        IObjectStorageCredentialProvider storage = OperatingSystem.IsWindows()
+            ? new FirstAvailableObjectStorageCredentials(
+                new StoredObjectStorageCredentials(Path.Combine(paths.Root, "credentials")),
+                new EnvironmentObjectStorageCredentialProvider())
+            : new EnvironmentObjectStorageCredentialProvider();
+
+        Func<string, ObjectStorageCredentials, CancellationToken, Task>? storeCredentials = null;
+        if (OperatingSystem.IsWindows())
+        {
+            storeCredentials = new StoredObjectStorageCredentials(Path.Combine(paths.Root, "credentials")).WriteAsync;
+        }
+
+        // Installed mode, because this window only ever exists in it - and elevated, so the service
+        // will accept the provision this time.
+        var protect = new ProtectRepositoryAdapter(
+            new RepositoryProvisioner(
+                engineRoot,
+                storage: storage,
+                protection: new S3StorageProtectionInspector(storage)),
+            paths,
+            serviceClient: OperatingSystem.IsWindows() ? new ServiceIpcClient() : null,
+            storeCredentials: storeCredentials);
+
+        var automaticAvailable = !OperatingSystem.IsWindows() || Fortiq.Infrastructure.Keys.WindowsTpmEnvelope.IsAvailable;
+
+        return new ProtectRepositoryWindow(new ProtectRepositoryViewModel(
+            protect,
+            automaticBackupsAvailable: automaticAvailable));
     }
 
     private static string ResolveEngineRoot()
