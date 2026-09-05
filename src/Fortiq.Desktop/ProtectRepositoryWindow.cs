@@ -397,37 +397,10 @@ public sealed class ProtectRepositoryWindow : Window
             _content.Children.Add(Warning(_model.SchedulingFailure ?? "Automatic scheduling needs attention."));
         }
 
-        var words = (_model.RecoveryMnemonic ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-        const int columns = 4;
-        var rows = (words.Length + columns - 1) / columns;
-
-        var grid = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions("*,*,*,*"),
-            RowSpacing = 8,
-            ColumnSpacing = 8
-        };
-
-        // The rows have to exist. A Grid with no RowDefinitions has exactly one implicit row, so
-        // Grid.SetRow(1..5) put every word after the fourth into row 0 on top of the words already
-        // there - twenty-four words drawn in four cells, and only the last four visible. Somebody
-        // would have written down four words, believed they had their recovery phrase, and found out
-        // otherwise on the one day it mattered.
-        for (var row = 0; row < rows; row++)
-        {
-            grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-        }
-
-        for (var index = 0; index < words.Length; index++)
-        {
-            var word = Card(Text($"{index + 1}.  {words[index]}", 13, FontWeight.SemiBold, Ink));
-            Grid.SetColumn(word, index % columns);
-            Grid.SetRow(word, index / columns);
-            grid.Children.Add(word);
-        }
-
-        _content.Children.Add(grid);
+        // Built by MnemonicWordGrid so a test can read back where each word landed. Inline, this
+        // grid declared four columns and no rows, and every word past the fourth was drawn on top of
+        // one already there - see the remarks on that class.
+        _content.Children.Add(MnemonicWordGrid.Build(_model.RecoveryMnemonic));
         SetActions(Footer(null, "I wrote it down", _model.WroteItDown));
     }
 
