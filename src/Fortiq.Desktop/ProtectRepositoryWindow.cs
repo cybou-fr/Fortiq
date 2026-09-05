@@ -31,6 +31,10 @@ public sealed class ProtectRepositoryWindow : Window
         Height = 680;
         MinWidth = 720;
         MinHeight = 580;
+        // CenterOwner has no owner to centre on when this window is the whole application, which is
+        // how the elevated pass runs it - and Avalonia then left it wherever it landed, half off the
+        // right of the screen with the Browse buttons past the edge. OnOpened below centres and fits
+        // it whichever way it was opened.
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = CanvasBackground;
 
@@ -107,6 +111,46 @@ public sealed class ProtectRepositoryWindow : Window
             Text("Create a verifiable, encrypted backup without hiding important recovery decisions.", 13, FontWeight.Normal, Muted)
         }
     };
+
+    /// <summary>Centres the window on its display and shrinks it to fit.</summary>
+    /// <remarks>
+    /// Opened as a dialog it centres on the window that owns it. Opened as the whole application - the
+    /// elevated pass - there is no owner, and it appeared partly off-screen with its right-hand
+    /// controls unreachable. Asking the screen covers both, and covers the small display the default
+    /// height does not fit on either.
+    /// </remarks>
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+
+        var screen = Screens.ScreenFromWindow(this);
+        if (screen is null)
+        {
+            return;
+        }
+
+        var area = screen.WorkingArea;
+        var scaling = screen.Scaling;
+
+        var fitsHigh = Math.Max(MinHeight, area.Height / scaling - 60);
+        if (Height > fitsHigh)
+        {
+            Height = fitsHigh;
+        }
+
+        var fitsWide = Math.Max(MinWidth, area.Width / scaling - 60);
+        if (Width > fitsWide)
+        {
+            Width = fitsWide;
+        }
+
+        if (Owner is null)
+        {
+            Position = new PixelPoint(
+                area.X + (int)((area.Width - Width * scaling) / 2),
+                area.Y + (int)((area.Height - Height * scaling) / 2));
+        }
+    }
 
     private Grid Stepper()
     {

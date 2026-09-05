@@ -70,9 +70,20 @@ public sealed class FortiqApplication : Avalonia.Application
                 TextWrapping = TextWrapping.Wrap
             };
             var retry = new Avalonia.Controls.Button { Content = "Retry", IsVisible = false };
+            // Painted explicitly. With no background of its own the window borrowed whatever the host
+            // put behind it, which on a dark system theme was a black rectangle with black text - the
+            // first thing anyone sees of Fortiq, and unreadable.
+            message.Foreground = DesignTokens.Ink;
+            message.FontSize = 14;
+
             var loading = new Avalonia.Controls.Window
             {
-                Title = "Fortiq", Width = 460, Height = 200,
+                Title = "Fortiq",
+                Width = 460,
+                Height = 200,
+                Background = DesignTokens.CanvasBackground,
+                Icon = FortiqBrand.WindowIcon(),
+                WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterScreen,
                 Content = new Avalonia.Controls.StackPanel
                 {
                     Margin = new Thickness(24), Spacing = 16, Children = { message, retry }
@@ -112,6 +123,11 @@ public sealed class FortiqApplication : Avalonia.Application
                         desktop.MainWindow = only;
                         only.Show();
                         only.Closed += (_, _) => desktop.Shutdown();
+
+                        // Closed here too. Every other branch falls through to the Close() below;
+                        // this one returns early, so the start-up window stayed on screen forever
+                        // behind the wizard.
+                        loading.Close();
                         return;
                     }
 
