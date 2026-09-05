@@ -77,7 +77,17 @@ Verified against a real S3 server rather than assumed:
   data untouched. It deliberately does not resurrect the engine's own locks - a healthy repository
   always carries markers over locks it removed on purpose, and restoring one would block it.
 
-## Password broker
+## Stored object storage credentials
+
+Credential writes apply a protected directory ACL granting the directory owner, SYSTEM and local
+administrators access. A newly created directory belongs to the creating identity, preserving access
+for a standard operator. Reads reject broad file and directory grants and reparse-point files or
+credential directories. Legacy files with explicit broad grants must be replaced using
+`Fortiq.Service credentials set`. This does not provide isolation from the owner, administrators,
+or SYSTEM, nor does it provision an arbitrary Windows service identity. Installer-wide service and
+state-directory permissions remain an open deployment gate.
+
+## Password broker details
 
 The handover is a one-shot challenge-response over a pipe that exists for a single operation, and it
 is now bound to a specific client: the pinned helper image, running as the expected account.
