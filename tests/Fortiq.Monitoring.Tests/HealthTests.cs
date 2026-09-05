@@ -209,13 +209,84 @@ public sealed class HealthTests : IDisposable
         StorageImmutable: true,
         StorageProtectionNow: StorageProtectionStatus.Immutable);
 
-    private async Task WriteReceiptAsync(string operation, string result, DateTimeOffset completedAt, string? warning = null)
+    [Fact]
+    public async Task LegacyReceiptsAreCountedAsHistoryAndNotUsedAsEvidence()
+    {
+        var now = DateTimeOffset.UtcNow;
+        await WriteReceiptAsync("backup", "succeeded", now.AddHours(-2), version: 1);
+        await WriteReceiptAsync("restoreProof", "succeeded", now.AddHours(-1), version: 1);
+
+        var evidence = Assert.Single(await ReceiptHistory.ReadAsync(_directory, CancellationToken.None));
+
+        // A version 1 receipt has no hash and no place in a chain, so a file claiming a restore
+        // succeeded cannot be told apart from one somebody wrote. Counting it as proof would make
+        // "Recoverable" mean "a file on this disk says so".
+        Assert.Equal(2, evidence.LegacyReceiptCount);
+        Assert.Null(evidence.LastBackupAt);
+        Assert.Null(evidence.LastProvenRestoreAt);
+    }
+
+    [Fact]
+    public async Task ARepositoryWithOnlyLegacyEvidenceIsUnprovenRatherThanRecoverable()
+    {
+        var now = DateTimeOffset.UtcNow;
+        await WriteReceiptAsync("backup", "succeeded", now.AddHours(-2), version: 1);
+
+        var evidence = Assert.Single(await ReceiptHistory.ReadAsync(_directory, CancellationToken.None));
+
+        var health = HealthAssessor.Assess(
+            Facts() with
+            {
+                LastBackupAt = now.AddMinutes(-30),
+                LastHealthyCheckAt = now.AddMinutes(-30),
+                LastProvenRestoreAt = null,
+                LegacyReceiptCount = evidence.LegacyReceiptCount
+            },
+            now);
+
+        Assert.Equal(HealthVerdict.Unproven, health.Verdict);
+        Assert.Contains(health.Findings, finding => finding.Code == "legacy-evidence-unverified");
+    }
+
+    [Fact]
+    public async Task AFreshProofClearsTheLegacyFinding()
+    {
+        var now = DateTimeOffset.UtcNow;
+        await WriteReceiptAsync("backup", "succeeded", now.AddHours(-2), version: 1);
+
+        var evidence = Assert.Single(await ReceiptHistory.ReadAsync(_directory, CancellationToken.None));
+
+        // The remedy is one drill, not a migration. Legacy receipts stay on disk as history and stop
+        // mattering the moment there is evidence that can be checked.
+        var health = HealthAssessor.Assess(
+            Facts() with
+            {
+                LastBackupAt = now.AddMinutes(-30),
+                LastHealthyCheckAt = now.AddMinutes(-30),
+                LastProvenRestoreAt = now.AddMinutes(-10),
+                LegacyReceiptCount = evidence.LegacyReceiptCount
+            },
+            now);
+
+        Assert.DoesNotContain(health.Findings, finding => finding.Code == "legacy-evidence-unverified");
+    }
+
+    /// <param name="version">
+    /// The receipt schema. Version 2 is the chained one, and is what these tests mean by evidence;
+    /// version 1 receipts carry no hash and are counted as history rather than proof.
+    /// </param>
+    private async Task WriteReceiptAsync(
+        string operation,
+        string result,
+        DateTimeOffset completedAt,
+        string? warning = null,
+        int version = 2)
     {
         Directory.CreateDirectory(_directory);
         var receipt = new
         {
             schema = "fortiq.operation-receipt",
-            version = 1,
+            version,
             operationId = Guid.NewGuid(),
             operation,
             repositoryId = "A",

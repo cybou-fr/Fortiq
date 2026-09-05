@@ -35,7 +35,11 @@ public sealed record RepositoryFacts(
     /// <summary>What the storage says today. Defaults to unknown: nothing is claimed unasked.</summary>
     StorageProtectionStatus StorageProtectionNow = StorageProtectionStatus.Unknown,
     /// <summary>Failure or anomaly detected during cryptographic audit ledger verification.</summary>
-    string? AuditLedgerFailure = null);
+    string? AuditLedgerFailure = null,
+    /// <summary>
+    /// Receipts this repository holds that predate the chained schema, and so cannot be checked.
+    /// </summary>
+    int LegacyReceiptCount = 0);
 
 /// <summary>How old each kind of evidence may be before it stops counting.</summary>
 public sealed record HealthThresholds(
@@ -132,6 +136,20 @@ public static class HealthAssessor
         if (facts.AuditLedgerFailure is { Length: > 0 } ledgerAnomaly)
         {
             findings.Add(new HealthFinding("audit-ledger-tampered", ledgerAnomaly));
+        }
+
+        // Legacy receipts are history, not proof. A version 1 receipt has no hash and no place in a
+        // chain, so a file claiming a restore succeeded cannot be told apart from one somebody wrote,
+        // and a repository must not read as Recoverable on the strength of it. This is not an
+        // accusation - it is the absence of a check - so it stops short of AtRisk. One fresh operation
+        // clears it, which is exactly the right amount of work to ask for.
+        if (facts.LegacyReceiptCount > 0 && facts.LastProvenRestoreAt is null)
+        {
+            findings.Add(new HealthFinding(
+                "legacy-evidence-unverified",
+                $"This repository holds {facts.LegacyReceiptCount} receipt(s) written before the tamper-evident " +
+                "schema, and nothing since. They record what happened but cannot be checked, so they do not " +
+                "prove recovery. Run a backup and a restore drill to establish evidence that can."));
         }
 
         // Unproven: backed up, but nothing has demonstrated that it comes back.

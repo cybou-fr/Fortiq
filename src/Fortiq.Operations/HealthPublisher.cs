@@ -81,7 +81,8 @@ public sealed class HealthPublisher
                     StorageImmutable: kit?.Manifest.StorageProtection?.Immutable ?? false,
                     drillFailure ?? state.LastFailure ?? seen?.LastFailure,
                     await InspectAsync(schedule.RepositoryLocation, cancellationToken),
-                    AuditLedgerFailure: auditLedgerFailure),
+                    AuditLedgerFailure: auditLedgerFailure,
+                    LegacyReceiptCount: auditLedgerFailure is null ? (seen?.LegacyReceiptCount ?? 0) : 0),
                 now,
                 thresholds: null,
                 // Compared against this repository's own history, which is why it is read from the

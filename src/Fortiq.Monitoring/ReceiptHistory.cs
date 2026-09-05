@@ -10,7 +10,18 @@ public sealed record RepositoryEvidence(
     DateTimeOffset? LastProvenRestoreAt,
     string? LastFailure,
     /// <summary>Successful backups newest first, for comparing one against the rest.</summary>
-    IReadOnlyList<BackupObservation>? Backups = null)
+    IReadOnlyList<BackupObservation>? Backups = null,
+    /// <summary>
+    /// Receipts written before the chained schema, which are history but not proof.
+    /// </summary>
+    /// <remarks>
+    /// A version 1 receipt carries no sequence number, no previous hash and no hash of its own, so
+    /// nothing about it can be checked: a file saying a restore succeeded is indistinguishable from
+    /// one somebody wrote. Counted rather than discarded, because a repository whose only evidence is
+    /// legacy has a different problem from one with no evidence at all, and the operator needs to be
+    /// told which they have.
+    /// </remarks>
+    int LegacyReceiptCount = 0)
 {
     public IReadOnlyList<BackupObservation> Backups { get; init; } = Backups ?? [];
 }
@@ -89,9 +100,24 @@ public static class ReceiptHistory
         private DateTimeOffset? _restore;
         private readonly Dictionary<string, (DateTimeOffset At, string Message)> _failures = new(StringComparer.Ordinal);
         private readonly Dictionary<string, DateTimeOffset> _successes = new(StringComparer.Ordinal);
+        private int _legacy;
 
         internal void Add(JsonElement receipt)
         {
+            // Version 1 receipts carry no sequence number, no previous hash and no hash of their own,
+            // so a file claiming a restore succeeded cannot be told apart from one somebody wrote. They
+            // are counted as history and never used as evidence: a repository must not be Recoverable
+            // on the strength of a claim nothing can check. A fresh operation puts it back.
+            var version = receipt.TryGetProperty("version", out var declared) && declared.TryGetInt32(out var number)
+                ? number
+                : 1;
+
+            if (version < 2)
+            {
+                _legacy++;
+                return;
+            }
+
             var operation = receipt.TryGetProperty("operation", out var kind) ? kind.GetString() : null;
             var result = receipt.TryGetProperty("engineResult", out var engine) ? engine.GetString() : null;
             if (!receipt.TryGetProperty("completedAt", out var completed)
@@ -152,7 +178,7 @@ public static class ReceiptHistory
                 .Select(pair => pair.Value.Message)
                 .FirstOrDefault();
 
-            return new RepositoryEvidence(repositoryId, _backup, _check, _restore, failure)
+            return new RepositoryEvidence(repositoryId, _backup, _check, _restore, failure, LegacyReceiptCount: _legacy)
             {
                 Backups = [.. _backups.OrderByDescending(backup => backup.CompletedAt)]
             };

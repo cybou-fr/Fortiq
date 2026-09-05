@@ -13,6 +13,22 @@ public sealed record AuditLedgerAnomaly(
     string Description,
     Guid? OperationId = null);
 
+/// <summary>How far a repository's receipts could actually be checked.</summary>
+public enum LedgerTrust
+{
+    /// <summary>A chain was verified end to end.</summary>
+    Verified,
+
+    /// <summary>
+    /// Only receipts predating the chained schema were found. Nothing here is wrong; nothing here can
+    /// be checked either, and the two must not be reported as the same answer.
+    /// </summary>
+    LegacyUnverified,
+
+    /// <summary>The chain is present and does not hold.</summary>
+    Broken
+}
+
 /// <summary>
 /// Verification report for a single repository's cryptographic receipt ledger.
 /// </summary>
@@ -25,7 +41,14 @@ public sealed record AuditRepositoryLedgerReport(
     string? GenesisHash,
     string? HeadHash,
     IReadOnlyList<AuditLedgerAnomaly> Anomalies,
-    int LegacyReceiptCount = 0);
+    int LegacyReceiptCount = 0,
+    /// <summary>
+    /// What <see cref="IsValid"/> is worth. <c>IsValid</c> means no anomaly was found, which for a
+    /// repository holding only version 1 receipts is true and says nothing: those receipts carry no
+    /// hash, so there was no chain to find fault with. Reporting that as verified would let an
+    /// unverifiable history read exactly like a proven one.
+    /// </summary>
+    LedgerTrust Trust = LedgerTrust.Verified);
 
 /// <summary>
 /// Comprehensive verification result for all repositories audited in a receipt directory.
@@ -236,7 +259,8 @@ public static class AuditLedgerVerifier
                     first.PreviousReceiptHash,
                     chainedReceipts.Last().ReceiptHash,
                     repoAnomalies,
-                    legacyReceipts.Count));
+                    legacyReceipts.Count,
+                    repoAnomalies.Count == 0 ? LedgerTrust.Verified : LedgerTrust.Broken));
             }
             else if (legacyReceipts.Count > 0)
             {
@@ -249,7 +273,8 @@ public static class AuditLedgerVerifier
                     null,
                     null,
                     repoAnomalies,
-                    legacyReceipts.Count));
+                    legacyReceipts.Count,
+                    LedgerTrust.LegacyUnverified));
             }
         }
 
