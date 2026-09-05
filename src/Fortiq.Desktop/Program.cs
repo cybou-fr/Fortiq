@@ -3,11 +3,12 @@ using System.Text.Json.Serialization;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
-using Fortiq.Desktop.ViewModels;
 using Fortiq.Application;
+using Fortiq.Desktop.ViewModels;
 using Fortiq.Infrastructure.ObjectStorage;
 using Fortiq.Monitoring;
 using Fortiq.Operations;
+using Fortiq.Platform.Windows;
 using Fortiq.Provisioning;
 using Fortiq.Scheduling;
 
@@ -21,50 +22,88 @@ public sealed class FortiqApplication : Avalonia.Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // Asked for, never composed. The desktop and the service have to mean the same
-            // directory by "receipts", or a restore proven here vanishes from the report the
-            // service publishes next.
-            var paths = FortiqStatePaths.Resolve();
+            var args = desktop.Args ?? Array.Empty<string>();
+            var isPortable = args.Contains("--portable", StringComparer.OrdinalIgnoreCase);
 
-            var engineRoot = ResolveEngineRoot();
-            // The same order the service uses, so both processes resolve one repository's storage
-            // identity the same way. The stored half is Windows-only, and on any other platform the
-            // desktop falls back to the environment rather than refusing to start.
-            IObjectStorageCredentialProvider storage = OperatingSystem.IsWindows()
-                ? new FirstAvailableObjectStorageCredentials(
-                    new StoredObjectStorageCredentials(Path.Combine(paths.Root, "credentials")),
-                    new EnvironmentObjectStorageCredentialProvider())
-                : new EnvironmentObjectStorageCredentialProvider();
+            var inspector = new InstallationInspector();
+            var status = inspector.InspectAsync().GetAwaiter().GetResult();
 
-            var protect = new ProtectRepositoryAdapter(
-                new RepositoryProvisioner(
-                    engineRoot,
-                    storage: storage,
-                    protection: new S3StorageProtectionInspector(storage)),
-                paths);
+            if (isPortable || status.IsInstalled)
+            {
+                desktop.MainWindow = CreateMainWindow();
+            }
+            else
+            {
+                var installOperations = new InstallationManager();
+                var installVm = new InstallViewModel(inspector, status, installOperations);
+                var installWindow = new InstallWindow(installVm);
 
-            var schedules = new FileSystemScheduleStore(paths.Schedules);
-            var prove = new ProveRecoveryAdapter(
-                schedules,
-                new ProvenRestore(
-                    engineRoot,
-                    paths.Working,
-                    runDirectory: paths.Runs,
-                    receiptDirectory: paths.Receipts,
-                    storage: storage),
-                new HealthPublisher(
-                    schedules,
-                    paths.Receipts,
-                    paths.HealthReport,
-                    paths.HealthMetrics,
-                    protection: new S3StorageProtectionInspector(storage)));
+                installVm.RequestCloseAndLaunchMain += () =>
+                {
+                    var mainWindow = CreateMainWindow();
+                    desktop.MainWindow = mainWindow;
+                    mainWindow.Show();
+                    installWindow.Close();
+                };
 
-            desktop.MainWindow = new MainWindow(
-                new RepositoriesViewModel(new HealthFileSource(paths.HealthReport), prove),
-                () => new ProtectRepositoryViewModel(protect));
+                installVm.RequestCloseAndLaunchPortable += () =>
+                {
+                    var mainWindow = CreateMainWindow();
+                    desktop.MainWindow = mainWindow;
+                    mainWindow.Show();
+                    installWindow.Close();
+                };
+
+                desktop.MainWindow = installWindow;
+            }
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static MainWindow CreateMainWindow()
+    {
+        // Asked for, never composed. The desktop and the service have to mean the same
+        // directory by "receipts", or a restore proven here vanishes from the report the
+        // service publishes next.
+        var paths = FortiqStatePaths.Resolve();
+
+        var engineRoot = ResolveEngineRoot();
+        // The same order the service uses, so both processes resolve one repository's storage
+        // identity the same way. The stored half is Windows-only, and on any other platform the
+        // desktop falls back to the environment rather than refusing to start.
+        IObjectStorageCredentialProvider storage = OperatingSystem.IsWindows()
+            ? new FirstAvailableObjectStorageCredentials(
+                new StoredObjectStorageCredentials(Path.Combine(paths.Root, "credentials")),
+                new EnvironmentObjectStorageCredentialProvider())
+            : new EnvironmentObjectStorageCredentialProvider();
+
+        var protect = new ProtectRepositoryAdapter(
+            new RepositoryProvisioner(
+                engineRoot,
+                storage: storage,
+                protection: new S3StorageProtectionInspector(storage)),
+            paths);
+
+        var schedules = new FileSystemScheduleStore(paths.Schedules);
+        var prove = new ProveRecoveryAdapter(
+            schedules,
+            new ProvenRestore(
+                engineRoot,
+                paths.Working,
+                runDirectory: paths.Runs,
+                receiptDirectory: paths.Receipts,
+                storage: storage),
+            new HealthPublisher(
+                schedules,
+                paths.Receipts,
+                paths.HealthReport,
+                paths.HealthMetrics,
+                protection: new S3StorageProtectionInspector(storage)));
+
+        return new MainWindow(
+            new RepositoriesViewModel(new HealthFileSource(paths.HealthReport), prove),
+            () => new ProtectRepositoryViewModel(protect));
     }
 
     private static string ResolveEngineRoot()
@@ -153,6 +192,11 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (InstallationCli.IsCliInvocation(args))
+        {
+            return InstallationCli.RunAsync(args).GetAwaiter().GetResult();
+        }
+
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         return 0;
     }

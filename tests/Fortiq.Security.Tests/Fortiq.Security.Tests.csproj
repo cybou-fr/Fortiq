@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -27,6 +27,8 @@
     <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Keys\Fortiq.Infrastructure.Keys.csproj" />
     <ProjectReference Include="..\..\src\Fortiq.PasswordHelper\Fortiq.PasswordHelper.csproj" />
     <ProjectReference Include="..\..\src\Fortiq.Infrastructure.ObjectStorage\Fortiq.Infrastructure.ObjectStorage.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Application\Fortiq.Application.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Platform.Windows\Fortiq.Platform.Windows.csproj" />
   </ItemGroup>
 
 </Project>
