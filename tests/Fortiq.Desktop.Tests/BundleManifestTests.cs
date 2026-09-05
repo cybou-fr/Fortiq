@@ -66,6 +66,12 @@ public sealed class BundleManifestTests : IDisposable
             new[]
             {
                 new InstallationManager.BundleComponentManifest("Fortiq Service", "service", svcRelative, true, dummyHash)
+            },
+            // Every installed file, not only the executable the component is named for. A bundle whose
+            // EXE hashes and whose libraries do not is one the installer used to accept.
+            new[]
+            {
+                new InstallationManager.BundleFileManifest("service/Fortiq.Service.exe", dummyBytes.Length, dummyHash)
             });
 
         // Must succeed without throwing
@@ -109,6 +115,10 @@ public sealed class BundleManifestTests : IDisposable
             new[]
             {
                 new InstallationManager.BundleComponentManifest("Fortiq Service", "service", svcRelative, true, new string('f', 64))
+            },
+            new[]
+            {
+                new InstallationManager.BundleFileManifest("service/Fortiq.Service.exe", dummyBytes.Length, new string('f', 64))
             });
 
         var ex = Assert.Throws<InvalidDataException>(() =>
@@ -206,6 +216,23 @@ public sealed class BundleManifestTests : IDisposable
                     folder = "service",
                     mainExecutable = "service/Fortiq.Service.exe",
                     required = true,
+                    sha256 = Convert.ToHexStringLower(SHA256.HashData(serviceBytes))
+                }
+            },
+            // The whole payload, which is what the installer now verifies. Listing only the two
+            // executables would leave every library in the bundle outside the integrity boundary.
+            files = new[]
+            {
+                new
+                {
+                    path = "desktop/Fortiq.Desktop.exe",
+                    length = (long)desktopBytes.Length,
+                    sha256 = Convert.ToHexStringLower(SHA256.HashData(desktopBytes))
+                },
+                new
+                {
+                    path = "service/Fortiq.Service.exe",
+                    length = (long)serviceBytes.Length,
                     sha256 = Convert.ToHexStringLower(SHA256.HashData(serviceBytes))
                 }
             }

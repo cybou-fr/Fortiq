@@ -35,7 +35,7 @@ public sealed class FortiqApplication : Avalonia.Application
 
             if (isPortable || status.IsInstalled)
             {
-                desktop.MainWindow = CreateMainWindow();
+                desktop.MainWindow = CreateMainWindow(installed: status.IsInstalled && !isPortable);
             }
             else
             {
@@ -45,7 +45,7 @@ public sealed class FortiqApplication : Avalonia.Application
 
                 installVm.RequestCloseAndLaunchMain += () =>
                 {
-                    var mainWindow = CreateMainWindow();
+                    var mainWindow = CreateMainWindow(installed: true);
                     desktop.MainWindow = mainWindow;
                     mainWindow.Show();
                     installWindow.Close();
@@ -53,7 +53,7 @@ public sealed class FortiqApplication : Avalonia.Application
 
                 installVm.RequestCloseAndLaunchPortable += () =>
                 {
-                    var mainWindow = CreateMainWindow();
+                    var mainWindow = CreateMainWindow(installed: false);
                     desktop.MainWindow = mainWindow;
                     mainWindow.Show();
                     installWindow.Close();
@@ -66,12 +66,33 @@ public sealed class FortiqApplication : Avalonia.Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    private static MainWindow CreateMainWindow()
+    /// <summary>
+    /// Composes the client for one mode. The two are separate, not one with a fallback.
+    /// </summary>
+    /// <param name="installed">
+    /// True for an installed machine, where a service holds the privileges and the desktop asks it to
+    /// act. False for portable, where there is no service and the desktop acts for itself in its own
+    /// state directory under a user-scoped key.
+    /// </param>
+    /// <remarks>
+    /// Mixing the two produces the two failures worth naming. A portable client that finds an
+    /// installed service starts driving privileged operations it was never meant to reach; an
+    /// installed client that finds its service down quietly does the work itself, with a user-scoped
+    /// key and a schedule written by whoever is logged in. Both are the boundary holding only while
+    /// nothing goes wrong.
+    /// </remarks>
+    private static MainWindow CreateMainWindow(bool installed)
     {
         // Asked for, never composed. The desktop and the service have to mean the same
         // directory by "receipts", or a restore proven here vanishes from the report the
         // service publishes next.
-        var paths = FortiqStatePaths.Resolve();
+        //
+        // Portable carries its state beside the executable, which is what portable means: a stick a
+        // recovery engineer walks to a machine with. It also must not write into the installed
+        // machine's %ProgramData%, where it has read access and nothing more.
+        var paths = installed
+            ? FortiqStatePaths.Resolve()
+            : FortiqStatePaths.Resolve(Path.Combine(AppContext.BaseDirectory, "portable-state"));
 
         var engineRoot = ResolveEngineRoot();
         // The same order the service uses, so both processes resolve one repository's storage
@@ -83,7 +104,9 @@ public sealed class FortiqApplication : Avalonia.Application
                 new EnvironmentObjectStorageCredentialProvider())
             : new EnvironmentObjectStorageCredentialProvider();
 
-        var serviceClient = OperatingSystem.IsWindows() ? new ServiceIpcClient() : null;
+        // Null in portable mode, and that is the whole of the mode's enforcement: with no client
+        // there is no path from this process to the privileged service.
+        var serviceClient = installed && OperatingSystem.IsWindows() ? new ServiceIpcClient() : null;
 
         var protect = new ProtectRepositoryAdapter(
             new RepositoryProvisioner(

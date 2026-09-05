@@ -31,6 +31,8 @@
     <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Receipts\Fortiq.Infrastructure.Receipts.csproj" />
     <ProjectReference Include="..\..\src\Fortiq.Platform.Windows\Fortiq.Platform.Windows.csproj" />
     <ProjectReference Include="..\..\src\Fortiq.Infrastructure.Updates\Fortiq.Infrastructure.Updates.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Service\Fortiq.Service.csproj" />
+    <ProjectReference Include="..\..\src\Fortiq.Desktop\Fortiq.Desktop.csproj" />
   </ItemGroup>
 
 </Project>

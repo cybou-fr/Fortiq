@@ -85,16 +85,44 @@ public sealed class DirectoryAclProvisionerTests
 
             var schedSecurity = new DirectoryInfo(schedulesDir).GetAccessControl();
             var schedRules = schedSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier));
-            var authUsersHasWriteToSchedules = false;
+            var authUsersCanReadSchedules = false;
+            var authUsersCanWriteSchedules = false;
             foreach (FileSystemAccessRule rule in schedRules)
             {
-                if (rule.IdentityReference.Equals(authUsersSid) && (rule.FileSystemRights & FileSystemRights.Write) != 0)
+                if (!rule.IdentityReference.Equals(authUsersSid))
                 {
-                    authUsersHasWriteToSchedules = true;
-                    break;
+                    continue;
+                }
+
+                if ((rule.FileSystemRights & FileSystemRights.ReadData) != 0)
+                {
+                    authUsersCanReadSchedules = true;
+                }
+
+                // The individual write bits, not Modify or FullControl. Those are composite values
+                // that include the read bits, so masking against them reports a plain read grant as
+                // a write - which is how this assertion first passed against an ACL that was correct.
+                const FileSystemRights WriteBits =
+                    FileSystemRights.WriteData |
+                    FileSystemRights.AppendData |
+                    FileSystemRights.WriteExtendedAttributes |
+                    FileSystemRights.WriteAttributes |
+                    FileSystemRights.Delete |
+                    FileSystemRights.DeleteSubdirectoriesAndFiles |
+                    FileSystemRights.ChangePermissions |
+                    FileSystemRights.TakeOwnership;
+
+                if ((rule.FileSystemRights & WriteBits) != 0)
+                {
+                    authUsersCanWriteSchedules = true;
                 }
             }
-            Assert.True(authUsersHasWriteToSchedules, "Anti-lockout invariant: Authenticated Users must have write access to schedules\\.");
+
+            Assert.True(authUsersCanReadSchedules, "The desktop shows schedules, so users must be able to read them.");
+            Assert.False(
+                authUsersCanWriteSchedules,
+                "A writable schedules directory lets any user hand the LocalSystem service a source path " +
+                "and a repository of their choosing, which is the privilege boundary the IPC check holds.");
 
             var runsSecurity = new DirectoryInfo(runsDir).GetAccessControl();
             var runsRules = runsSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier));

@@ -30,7 +30,13 @@ Every server-side named pipe instance:
 - Enforces `FILE_FLAG_FIRST_PIPE_INSTANCE` on the server listener to prevent pre-creation squatting attacks;
 - Defines restrictive read/write access rights and bounded buffer capacities;
 - Utilizes asynchronous overlapped I/O with absolute cancellation deadlines;
-- Verifies client process identity and account SID before parsing message payloads.
+- Verifies the caller before acting on a privileged payload. What that means differs by pipe, and the
+  difference matters: `PasswordPipeServer` checks the client's process, its open binary handle and,
+  optionally, its Authenticode signature, because it is handing over an unlock secret. `ServiceIpcHost`
+  checks the caller's account and whether that account is exercising administrator rights, because it
+  is being asked to act as LocalSystem. Neither can check at connection time — Windows discloses a
+  pipe client's identity only once the client has written — so both read the request, authorise, and
+  only then interpret what was asked for.
 
 ---
 

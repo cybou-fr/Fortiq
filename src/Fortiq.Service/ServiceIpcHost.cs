@@ -4,6 +4,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using Fortiq.Platform.Windows;
 using Fortiq.Application;
 using Fortiq.Domain;
 using Fortiq.Infrastructure.Keys;
@@ -114,7 +115,7 @@ public sealed class ServiceIpcHost : BackgroundService
                     var line = await reader.ReadLineAsync(stoppingToken);
                     if (line is null) break;
 
-                    var response = await ProcessRequestAsync(line, stoppingToken);
+                    var response = await ProcessRequestAsync(line, pipe, stoppingToken);
                     var responseJson = JsonSerializer.Serialize(response, JsonOptions);
                     await writer.WriteLineAsync(responseJson.AsMemory(), stoppingToken);
                 }
@@ -125,7 +126,10 @@ public sealed class ServiceIpcHost : BackgroundService
         }
     }
 
-    private async Task<ServiceIpcProtocol.Response> ProcessRequestAsync(string requestJson, CancellationToken cancellationToken)
+    private async Task<ServiceIpcProtocol.Response> ProcessRequestAsync(
+        string requestJson,
+        NamedPipeServerStream pipe,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -133,6 +137,16 @@ public sealed class ServiceIpcHost : BackgroundService
             if (req is null)
             {
                 return new ServiceIpcProtocol.Response(false, "Invalid null request.");
+            }
+
+            // Between reading the envelope and touching the payload. Windows will not disclose the
+            // client's identity until they have written something, so authorising at connection time
+            // is not available; what is available, and what matters, is authorising before the
+            // privileged payload is interpreted rather than after it has been acted on.
+            var authorization = Authorize(req.Command, pipe);
+            if (!authorization.Allowed)
+            {
+                return new ServiceIpcProtocol.Response(false, authorization.Denial);
             }
 
             switch (req.Command?.ToLowerInvariant())
@@ -291,6 +305,33 @@ public sealed class ServiceIpcHost : BackgroundService
         }
 
         return byId;
+    }
+
+    /// <summary>
+    /// Decides whether the client on <paramref name="pipe"/> may issue <paramref name="command"/>.
+    /// </summary>
+    /// <remarks>
+    /// A failure to resolve the caller is a refusal, not a pass. An identity that cannot be read is
+    /// not a trusted one, and the alternative - proceeding because the check itself broke - turns
+    /// every fault in this path into an open door.
+    /// </remarks>
+    private static ServiceIpcAuthorizationResult Authorize(string? command, NamedPipeServerStream pipe)
+    {
+        if (ServiceIpcAuthorization.TrustFor(command) == ServiceIpcCommandTrust.Public)
+        {
+            return ServiceIpcAuthorizationResult.Allow;
+        }
+
+        try
+        {
+            var principal = NamedPipeClientInspector.PrincipalOf(pipe);
+            return ServiceIpcAuthorization.Authorize(command, principal.IsAdministrator, principal.AccountName);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return ServiceIpcAuthorizationResult.Deny(
+                $"The caller of '{command}' could not be identified, so the request was refused: {error.Message}");
+        }
     }
 
     private static PipeSecurity CreatePipeSecurity()

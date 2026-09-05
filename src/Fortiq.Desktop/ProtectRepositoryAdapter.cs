@@ -36,8 +36,21 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (_serviceClient is not null && await _serviceClient.IsServiceAvailableAsync(cancellationToken))
+        // Installed mode hands the whole operation to the service and does not have a second way to
+        // do it. The fallback that used to sit here provisioned directly from the desktop process:
+        // a user-scoped key instead of a machine one, and a schedule written straight into
+        // %ProgramData% by whoever happened to be logged in. Falling back to that when the service is
+        // briefly down would mean the privilege boundary held only while nothing went wrong, which is
+        // the one condition under which a boundary does not need to hold.
+        if (_serviceClient is not null)
         {
+            if (!await _serviceClient.IsServiceAvailableAsync(cancellationToken))
+            {
+                throw new InvalidOperationException(
+                    "The Fortiq protection service is not available, so this folder cannot be protected. " +
+                    "Start the Fortiq service and try again.");
+            }
+
             var ipcResponse = await _serviceClient.ProvisionAsync(
                 request.RepositoryLocation,
                 request.KitDirectory,
@@ -52,6 +65,9 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
                 ipcResponse.SchedulingFailure);
         }
 
+        // Portable mode only. No service is running for this installation, the state directory is the
+        // one carried beside the executable, and the key is scoped to the user - which is what
+        // portable means and why it is a separate mode rather than a degraded one.
         var working = _paths.Working;
         Directory.CreateDirectory(working);
 

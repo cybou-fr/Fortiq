@@ -72,7 +72,18 @@ public static class DirectoryAclProvisioner
             sec.AddAccessRule(new(usersSid, FileSystemRights.ReadAndExecute | FileSystemRights.Traverse, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
         });
 
-        // 2. schedules\ — The protection wizard writes here
+        // 2. schedules\ — Read by everyone, written only through the service.
+        //
+        // These files are not configuration the service consults; they are instructions it carries
+        // out. A schedule names a source path, a repository and a retention policy, and the service
+        // acts on all three as LocalSystem. While Authenticated Users could write here, editing a
+        // JSON file was a second route to everything the named pipe now refuses: point SourcePath at
+        // a directory the user cannot read, point the repository somewhere the user controls, and
+        // wait for the service to do it. Locking the pipe and leaving this open would have moved the
+        // door rather than closed it.
+        //
+        // The wizard used to write here directly. It now asks the service to, which is why this can
+        // be read-only for users without taking the feature away.
         ApplyAcl(schedulesPath, sec =>
         {
             sec.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
@@ -80,9 +91,9 @@ public static class DirectoryAclProvisioner
             sec.AddAccessRule(new(adminsSid, FileSystemRights.FullControl, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
             if (canMapServiceSid)
             {
-                sec.AddAccessRule(new(serviceSid, FileSystemRights.ReadAndExecute, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
+                sec.AddAccessRule(new(serviceSid, FileSystemRights.FullControl, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
             }
-            sec.AddAccessRule(new(authUsersSid, FileSystemRights.ReadAndExecute | FileSystemRights.Write, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
+            sec.AddAccessRule(new(authUsersSid, FileSystemRights.ReadAndExecute, FullInheritance, PropagationFlags.None, AccessControlType.Allow));
         });
 
         // 3. state\ — Internal daemon state; operators read

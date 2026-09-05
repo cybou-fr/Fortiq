@@ -257,12 +257,16 @@ public sealed class InstallationManager : IInstallationOperations
         bool Required,
         string Sha256);
 
+    /// <summary>One file the bundle installs, and exactly what it must be.</summary>
+    public sealed record BundleFileManifest(string Path, long Length, string Sha256);
+
     public sealed record BundleManifest(
         string Schema,
         string Version,
         string Rid,
         string? Created,
-        IReadOnlyList<BundleComponentManifest> Components);
+        IReadOnlyList<BundleComponentManifest> Components,
+        IReadOnlyList<BundleFileManifest>? Files = null);
 
     public static (string? BundleRoot, BundleManifest? Manifest) DiscoverManifest(string sourceDir)
     {
@@ -345,16 +349,97 @@ public sealed class InstallationManager : IInstallationOperations
 
             if (!string.IsNullOrWhiteSpace(component.Sha256))
             {
-                using var stream = File.OpenRead(exePath);
-                var hashBytes = System.Security.Cryptography.SHA256.HashData(stream);
-                var computedHash = Convert.ToHexStringLower(hashBytes);
-                if (!string.Equals(computedHash, component.Sha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidDataException($"Deployment bundle integrity error: component '{component.Name}' at '{exePath}' failed SHA-256 validation (expected: {component.Sha256}, actual: {computedHash}). Installation cannot proceed.");
-                }
+                RequireHash(exePath, component.Sha256, $"component '{component.Name}'");
+            }
+        }
+
+        ValidatePayload(bundleRoot, manifest);
+    }
+
+    /// <summary>
+    /// Checks every file the bundle will install, not only the executable each component is named for.
+    /// </summary>
+    /// <remarks>
+    /// The component hashes above cover four executables. A self-contained publish is mostly DLLs, and
+    /// the installer copies those too - so a bundle whose Fortiq.Service.exe hashed correctly and whose
+    /// Fortiq.Operations.dll had been replaced used to pass, and the service would then load the
+    /// replaced library. For security software the boundary has to be every installed byte.
+    ///
+    /// The check runs both ways. A file listed and missing or altered is refused, and so is a file
+    /// present and not listed: an attacker who cannot change a hash can still add a DLL beside one,
+    /// and .NET assembly probing is happy to find it.
+    /// </remarks>
+    private static void ValidatePayload(string bundleRoot, BundleManifest manifest)
+    {
+        if (manifest.Files is not { Count: > 0 })
+        {
+            // A bundle produced before the manifest carried a file list. Refused rather than accepted
+            // on the old terms: this validation is the reason to trust a bundle at all, and a bundle
+            // that opts out of it by being old is one an attacker can also produce.
+            throw new InvalidDataException(
+                "Deployment bundle integrity error: the manifest carries no file list, so the bundle's " +
+                "libraries cannot be verified. Rebuild it with scripts/New-DeploymentBundle.ps1.");
+        }
+
+        var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in manifest.Files)
+        {
+            var relative = Normalize(file.Path);
+            listed.Add(relative);
+
+            var path = Path.Combine(bundleRoot, relative);
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException(
+                    $"Deployment bundle integrity error: '{relative}' is named by the manifest and is not in the bundle. Installation cannot proceed.");
+            }
+
+            var length = new FileInfo(path).Length;
+            if (length != file.Length)
+            {
+                throw new InvalidDataException(
+                    $"Deployment bundle integrity error: '{relative}' is {length} byte(s); the manifest says {file.Length}. Installation cannot proceed.");
+            }
+
+            RequireHash(path, file.Sha256, $"'{relative}'");
+        }
+
+        foreach (var path in Directory.EnumerateFiles(bundleRoot, "*", SearchOption.AllDirectories))
+        {
+            var relative = Normalize(Path.GetRelativePath(bundleRoot, path));
+            var name = Path.GetFileName(relative);
+
+            // The manifest cannot list itself, and SHA256SUMS is a convenience for a person reading
+            // the bundle rather than something the installer copies.
+            if (string.Equals(name, "bundle-manifest.json", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "SHA256SUMS", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!listed.Contains(relative))
+            {
+                throw new InvalidDataException(
+                    $"Deployment bundle integrity error: '{relative}' is in the bundle and not named by the manifest. Installation cannot proceed.");
             }
         }
     }
+
+    private static void RequireHash(string path, string expected, string described)
+    {
+        using var stream = File.OpenRead(path);
+        var computed = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(stream));
+
+        if (!string.Equals(computed, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                $"Deployment bundle integrity error: {described} at '{path}' failed SHA-256 validation (expected: {expected}, actual: {computed}). Installation cannot proceed.");
+        }
+    }
+
+    private static string Normalize(string relativePath) =>
+        relativePath.Replace('\\', '/').TrimStart('/');
 
     private static void CopyBundle(string bundleRoot, BundleManifest manifest, string targetDir)
     {

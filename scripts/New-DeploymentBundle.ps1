@@ -95,6 +95,27 @@ $bundleManifest = [ordered]@{
         }
     )
 }
+# Every file that will be installed, not just the four executables. A bundle whose Fortiq.Service.exe
+# hashes correctly and whose Fortiq.Operations.dll does not is a bundle the installer used to accept:
+# the EXE is the thing that gets checked, and the DLL is the thing that runs. Everything the installer
+# copies therefore has to sit inside one integrity boundary.
+#
+# The manifest carries the list rather than SHA256SUMS carrying it, because a manifest that pointed at
+# a separate file of hashes would need that file's own hash, and the file lists the manifest. The list
+# lives in one place and the cycle does not arise.
+$payload = Get-ChildItem -LiteralPath $destination -Recurse -File |
+    Where-Object { $_.Name -ne 'bundle-manifest.json' -and $_.Name -ne 'SHA256SUMS' } |
+    Sort-Object FullName |
+    ForEach-Object {
+        $relative = $_.FullName.Substring($destination.Length).TrimStart('', '/') -replace '\', '/'
+        [ordered]@{
+            path = $relative
+            length = $_.Length
+            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+$bundleManifest['files'] = @($payload)
+
 $manifestJson = $bundleManifest | ConvertTo-Json -Depth 5
 $manifestJson | Set-Content -LiteralPath (Join-Path $destination 'bundle-manifest.json') -Encoding utf8
 $manifestJson | Set-Content -LiteralPath (Join-Path (Join-Path $destination 'desktop') 'bundle-manifest.json') -Encoding utf8
