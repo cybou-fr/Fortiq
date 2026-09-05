@@ -2,9 +2,13 @@
 
 > **Implementation status: Partially implemented.** The setup wizard (`InstallWindow`, `InstallViewModel`),
 > system discovery (`InstallationInspector`), service registration (`WindowsServiceController`), bundle
-> validation and the headless CLI (`InstallationCli`) exist. **The updater does not**: there is no component
-> and updates manager, no transactional update protocol and no rollback — sections *In-App Component &
-> Updates Manager* and *Transactional Atomic Update Protocol & Rollback* remain design intent.
+> validation and the headless CLI (`InstallationCli`) exist.
+>
+> The updater is half built. Its **trust layer** exists — `TufTrustedMetadata` decides whether a binary
+> is authorised, refusing rollback, freeze and mix-and-match under [ADR-008 Revision 1](adr/ADR-008-update-trust.md).
+> Its **application layer does not**: nothing downloads, stages, swaps or rolls back a component, and
+> there is no updates manager in the desktop. The sections *In-App Component & Updates Manager* and
+> *Transactional Atomic Update Protocol & Rollback* remain design intent.
 >
 > Read the *State Directory Layout & Access* and *Device Key Scope* sections before writing any of
 > it. Both record a way this specification could be implemented exactly and still produce a machine
@@ -262,9 +266,11 @@ If a new release or updated engine is discovered:
 
 ## Transactional Atomic Update Protocol & Rollback
 
-> *Design intent, not implemented.* No updater exists. The staging, swap and rollback state machine
-> below describes what must be built; the installer's `provisioning-intent.json` pattern in
-> `Fortiq.Provisioning` is the working precedent for its crash-safety.
+> *Design intent, not implemented.* The staging, swap and rollback state machine below describes what
+> must be built. `TufTrustedMetadata` already answers the question this protocol asks first — whether a
+> given binary is authorised at all — so what remains is moving files safely once it has said yes. The
+> installer's `provisioning-intent.json` pattern in `Fortiq.Provisioning` is the working precedent for
+> that crash-safety.
 
 Updating a running disaster recovery service must never leave the machine in a broken or half-updated state. The update process executes as a transactional state machine:
 
