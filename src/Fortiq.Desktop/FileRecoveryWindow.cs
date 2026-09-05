@@ -211,6 +211,13 @@ public sealed class FileRecoveryWindow : Window
             ClearSecretFields();
         };
         AutomationProperties.SetName(_snapshots, "Backup to restore");
+        KeyDown += (_, e) =>
+        {
+            if (e.Key == Avalonia.Input.Key.Escape && !_model.Busy)
+            {
+                Close();
+            }
+        };
         Refresh();
     }
 

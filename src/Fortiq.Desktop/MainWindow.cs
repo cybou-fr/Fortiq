@@ -40,6 +40,7 @@ public sealed class MainWindow : Window
     private bool _auditLedgerVerifying;
     private readonly Action<string>? _updateTrayStatus;
     private readonly Action? _disposeTray;
+    private readonly DesktopPreferencesStore _preferences;
     private bool _isExplicitExit;
 
     public MainWindow(
@@ -52,6 +53,7 @@ public sealed class MainWindow : Window
         _model = model ?? throw new ArgumentNullException(nameof(model));
         _wizard = wizard;
         _settings = settings ?? new SettingsViewModel(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+        _preferences = DesktopPreferencesStore.Resolve(_installed);
 
         Title = "Fortiq — Data Recovery Assurance";
         Icon = FortiqBrand.WindowIcon();
@@ -94,7 +96,7 @@ public sealed class MainWindow : Window
         };
         Opened += (_, _) => refreshTimer.Start();
 
-        var trayIcon = new FortiqTrayIcon(ShowFromTray, ExplicitExit);
+        var trayIcon = new FortiqTrayIcon(ShowFromTray, ExplicitExit, OpenRecoveryFromTray, () => _ = RefreshAsync());
         _updateTrayStatus = trayIcon.UpdateStatus;
         _disposeTray = trayIcon.Dispose;
 
@@ -145,7 +147,8 @@ public sealed class MainWindow : Window
                     Children =
                     {
                         Text("Fortiq", 17, FontWeight.Bold, Ink),
-                        Text("Recovery Assurance", 10, FontWeight.Normal, Muted)
+                        Text("Community Edition", 10, FontWeight.SemiBold, Brand),
+                        Text("Recovery Assurance", 9, FontWeight.Normal, Muted)
                     }
                 }
             }
@@ -406,7 +409,7 @@ public sealed class MainWindow : Window
 
     private Border ZeroStateWelcomeCard()
     {
-        var protectBtn = Primary("Choose a folder");
+        var protectBtn = Primary("Get Started — Protect a folder");
         protectBtn.Click += async (_, _) => await ProtectAsync();
 
         return Card(new StackPanel
@@ -414,11 +417,12 @@ public sealed class MainWindow : Window
             Spacing = 16,
             Children =
             {
-                Text("Protect your first folder", 18, FontWeight.SemiBold, Ink),
-                Text("Most backup tools tell you a backup ran. Fortiq restores one on a schedule and checks what came back, so you find out your data is recoverable before the day you need it.", 13, FontWeight.Normal, Muted, true),
-                Check("1. Pick a folder - documents, photos, a project"),
-                Check("2. Fortiq encrypts it and copies it somewhere safe"),
-                Check("3. You write down 24 recovery words and keep them off this PC"),
+                Text("Welcome to Fortiq Community Edition", 19, FontWeight.SemiBold, Ink),
+                Text("Unlike traditional tools that only tell you a backup ran, Fortiq continuously proves that your data can actually be restored before the day you need it.", 13, FontWeight.Normal, Muted, true),
+                Check("1. Select a folder — personal documents, projects, photos, or databases"),
+                Check("2. Choose destination — external USB drive, secondary disk, or S3 cloud storage"),
+                Check("3. Secure your 24-word recovery phrase — guaranteed offline recovery on any computer"),
+                Check("4. Automated drills periodically prove data integrity and byte-level recoverability"),
                 protectBtn
             }
         }, Surface, Line, new Thickness(24));
@@ -611,18 +615,62 @@ public sealed class MainWindow : Window
             }, Surface, Line, new Thickness(24));
         }
 
-        var list = new StackPanel { Spacing = 4 };
-        list.Children.Add(TableRow("Source", "Last backup", "Recovery", "Status", true));
+        var list = new StackPanel { Spacing = 6 };
+        var headerRow = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("1.5*,1.1*,1.1*,Auto,Auto"),
+            ColumnSpacing = 12,
+            Margin = new Thickness(0, 4),
+            MinHeight = 24
+        };
+        headerRow.Children.Add(Text("Source", 11, FontWeight.SemiBold, Muted));
+        headerRow.Children.Add(At(Text("Last backup", 11, FontWeight.SemiBold, Muted), 1));
+        headerRow.Children.Add(At(Text("Recovery", 11, FontWeight.SemiBold, Muted), 2));
+        headerRow.Children.Add(At(Text("Status", 11, FontWeight.SemiBold, Muted), 3));
+        list.Children.Add(headerRow);
+
         foreach (var repository in _model.Repositories)
         {
-            var status = repository.Health.Verdict switch
+            var row = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("1.5*,1.1*,1.1*,Auto,Auto"),
+                ColumnSpacing = 12,
+                Margin = new Thickness(0, 6),
+                MinHeight = 32
+            };
+            row.Children.Add(new StackPanel
+            {
+                Spacing = 2,
+                Children =
+                {
+                    Text(repository.Title, 13, FontWeight.SemiBold, Ink),
+                    Text(repository.Health.RepositoryId, 10, FontWeight.Normal, Muted)
+                }
+            });
+            row.Children.Add(At(Text(Relative(repository.Health.Facts.LastBackupAt), 12, FontWeight.Normal, Muted), 1));
+            var recovery = repository.Health.Facts.LastProvenRestoreAt is null ? "Not proven" : Relative(repository.Health.Facts.LastProvenRestoreAt);
+            row.Children.Add(At(Text(recovery, 12, FontWeight.Normal, Muted), 2));
+
+            var statusColor = repository.Health.Verdict == HealthVerdict.Recoverable ? Recoverable : Unproven;
+            var statusLabel = repository.Health.Verdict switch
             {
                 HealthVerdict.Recoverable => "Recoverable",
                 HealthVerdict.Unproven => "Unproven",
                 _ => "At risk"
             };
-            var recovery = repository.Health.Facts.LastProvenRestoreAt is null ? "Not proven" : Relative(repository.Health.Facts.LastProvenRestoreAt);
-            list.Children.Add(TableRow(repository.Title, Relative(repository.Health.Facts.LastBackupAt), recovery, status));
+            row.Children.Add(At(Text(statusLabel, 12, FontWeight.SemiBold, statusColor), 3));
+
+            if (repository.CanProveRecovery && repository.Health.Verdict != HealthVerdict.Recoverable)
+            {
+                var proveBtn = Secondary("Prove");
+                proveBtn.Padding = new Thickness(10, 4);
+                proveBtn.FontSize = 11;
+                proveBtn.IsEnabled = !_model.Busy;
+                proveBtn.Click += async (_, _) => await ProveAsync(repository);
+                row.Children.Add(At(proveBtn, 4));
+            }
+
+            list.Children.Add(row);
         }
         return Card(list, Surface, Line, new Thickness(20));
     }
@@ -858,13 +906,25 @@ public sealed class MainWindow : Window
         var themeSelector = new ComboBox
         {
             ItemsSource = new[] { "System Default", "Light Slate", "Dark Slate" },
-            SelectedIndex = DesignTokens.IsDark ? 2 : 1,
+            SelectedIndex = _preferences.Current.Theme switch
+            {
+                AppThemePreference.Dark => 2,
+                AppThemePreference.Light => 1,
+                _ => 0
+            },
             MinWidth = 200,
             HorizontalAlignment = HorizontalAlignment.Left
         };
         themeSelector.SelectionChanged += (_, _) =>
         {
-            if (themeSelector.SelectedIndex == 2)
+            var selectedTheme = themeSelector.SelectedIndex switch
+            {
+                2 => AppThemePreference.Dark,
+                1 => AppThemePreference.Light,
+                _ => AppThemePreference.System
+            };
+            _preferences.UpdateTheme(selectedTheme);
+            if (selectedTheme == AppThemePreference.Dark)
             {
                 DesignTokens.SetTheme(true);
                 if (Avalonia.Application.Current != null)
@@ -872,12 +932,21 @@ public sealed class MainWindow : Window
                     Avalonia.Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
                 }
             }
-            else
+            else if (selectedTheme == AppThemePreference.Light)
             {
                 DesignTokens.SetTheme(false);
                 if (Avalonia.Application.Current != null)
                 {
                     Avalonia.Application.Current.RequestedThemeVariant = ThemeVariant.Light;
+                }
+            }
+            else
+            {
+                if (Avalonia.Application.Current != null)
+                {
+                    Avalonia.Application.Current.RequestedThemeVariant = ThemeVariant.Default;
+                    var isSysDark = Avalonia.Application.Current.ActualThemeVariant == ThemeVariant.Dark;
+                    DesignTokens.SetTheme(isSysDark);
                 }
             }
         };
@@ -946,7 +1015,9 @@ public sealed class MainWindow : Window
         };
         autostartCheck.IsCheckedChanged += (_, _) =>
         {
-            _settings.StartWithWindows = autostartCheck.IsChecked ?? false;
+            var isChecked = autostartCheck.IsChecked ?? false;
+            _settings.StartWithWindows = isChecked;
+            _preferences.UpdateStartWithWindows(isChecked);
         };
         trayGroup.Children.Add(autostartCheck);
         trayGroup.Children.Add(Text("When running, Fortiq stays in the notification tray so recovery health is continuously verified. Closing the window hides it to the tray.", 11, FontWeight.Normal, Muted, true));
@@ -957,12 +1028,42 @@ public sealed class MainWindow : Window
 
         body.Children.Add(Card(trayGroup, Surface, Line, new Thickness(20)));
 
-        // 5. About Fortiq
-        var aboutGroup = new StackPanel { Spacing = 8 };
-        aboutGroup.Children.Add(Text("About Fortiq", 16, FontWeight.SemiBold, Ink));
-        aboutGroup.Children.Add(DetailRow("Version", _settings.AppVersion));
+        // 5. About Fortiq Community Edition
+        var aboutGroup = new StackPanel { Spacing = 10 };
+        aboutGroup.Children.Add(Text("About Fortiq Community Edition", 16, FontWeight.SemiBold, Ink));
+        aboutGroup.Children.Add(Text("Open-source personal and enterprise data recovery assurance platform.", 12, FontWeight.Normal, Muted, true));
+        aboutGroup.Children.Add(DetailRow("Edition", "Community Edition"));
+        aboutGroup.Children.Add(DetailRow("Version", $"v{_settings.AppVersion}"));
         aboutGroup.Children.Add(DetailRow(".NET Runtime", _settings.RuntimeVersion));
-        aboutGroup.Children.Add(DetailRow("Silicon Security", "Device unlock availability is checked during repository setup"));
+        aboutGroup.Children.Add(DetailRow("License", "Open Source (Apache-2.0 / MIT)"));
+        aboutGroup.Children.Add(DetailRow("Zero-Secret Architecture", "Keys & passphrases never touch disk unencrypted or leak in arguments"));
+
+        var linksRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(0, 8, 0, 0) };
+        var openGuideBtn = Secondary("Disaster Recovery Guide");
+        openGuideBtn.Click += (_, _) =>
+        {
+            var devGuide = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "docs", "desktop-recovery-guide.md"));
+            var prodGuide = Path.Combine(AppContext.BaseDirectory, "docs", "desktop-recovery-guide.md");
+            var guide = File.Exists(prodGuide) ? prodGuide : File.Exists(devGuide) ? devGuide : null;
+            if (guide is not null)
+            {
+                try { Process.Start(new ProcessStartInfo { FileName = guide, UseShellExecute = true }); } catch { }
+            }
+            else
+            {
+                try { Process.Start(new ProcessStartInfo { FileName = "https://github.com/cybou-fr/Fortiq#readme", UseShellExecute = true }); } catch { }
+            }
+        };
+        linksRow.Children.Add(openGuideBtn);
+
+        var openRepoBtn = Secondary("GitHub Repository");
+        openRepoBtn.Click += (_, _) =>
+        {
+            try { Process.Start(new ProcessStartInfo { FileName = "https://github.com/cybou-fr/Fortiq", UseShellExecute = true }); } catch { }
+        };
+        linksRow.Children.Add(openRepoBtn);
+        aboutGroup.Children.Add(linksRow);
+
         body.Children.Add(Card(aboutGroup, Surface, Line, new Thickness(20)));
 
         _page.Child = new ScrollViewer { Content = body };
@@ -1210,6 +1311,15 @@ public sealed class MainWindow : Window
         Show();
         WindowState = WindowState.Normal;
         Activate();
+    }
+
+    public void OpenRecoveryFromTray()
+    {
+        ShowFromTray();
+        if (_fileRecovery is not null)
+        {
+            _ = new FileRecoveryWindow(_fileRecovery()).ShowDialog(this);
+        }
     }
 
     public void ExplicitExit()

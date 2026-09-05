@@ -13,7 +13,7 @@ public sealed class FortiqTrayIcon : IDisposable
     private readonly Action _onExit;
     private bool _disposed;
 
-    public FortiqTrayIcon(Action onOpen, Action onExit)
+    public FortiqTrayIcon(Action onOpen, Action onExit, Action? onOpenRecovery = null, Action? onVerifyNow = null)
     {
         _onOpen = onOpen ?? throw new ArgumentNullException(nameof(onOpen));
         _onExit = onExit ?? throw new ArgumentNullException(nameof(onExit));
@@ -30,6 +30,20 @@ public sealed class FortiqTrayIcon : IDisposable
         var openItem = new NativeMenuItem("Open Fortiq");
         openItem.Click += (_, _) => _onOpen();
         menu.Add(openItem);
+
+        if (onOpenRecovery is not null)
+        {
+            var recoveryItem = new NativeMenuItem("Emergency File Recovery…");
+            recoveryItem.Click += (_, _) => onOpenRecovery();
+            menu.Add(recoveryItem);
+        }
+
+        if (onVerifyNow is not null)
+        {
+            var verifyItem = new NativeMenuItem("Verify Backups Now");
+            verifyItem.Click += (_, _) => onVerifyNow();
+            menu.Add(verifyItem);
+        }
 
         menu.Add(new NativeMenuItemSeparator());
 

@@ -21,7 +21,23 @@ public sealed class FortiqApplication : Avalonia.Application
     public override void Initialize()
     {
         Styles.Add(new FluentTheme());
-        RequestedThemeVariant = ThemeVariant.Light;
+
+        var isPortable = Environment.GetCommandLineArgs().Contains("--portable", StringComparer.OrdinalIgnoreCase);
+        var preferences = DesktopPreferencesStore.Resolve(!isPortable).Current;
+        if (preferences.Theme == AppThemePreference.Dark)
+        {
+            DesignTokens.SetTheme(true);
+            RequestedThemeVariant = ThemeVariant.Dark;
+        }
+        else if (preferences.Theme == AppThemePreference.Light)
+        {
+            DesignTokens.SetTheme(false);
+            RequestedThemeVariant = ThemeVariant.Light;
+        }
+        else
+        {
+            RequestedThemeVariant = ThemeVariant.Default;
+        }
 
         // Fluent paints checkboxes, radio buttons and focus rings with the accent colour Windows
         // personalisation happens to be set to. On this machine that is magenta, so the setup screen
@@ -350,13 +366,64 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception ex)
+            {
+                LogCrash(ex);
+            }
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            LogCrash(e.Exception);
+            e.SetObserved();
+        };
+
         if (InstallationCli.IsCliInvocation(args))
         {
             return InstallationCli.RunAsync(args).GetAwaiter().GetResult();
         }
 
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
-        return 0;
+        try
+        {
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            LogCrash(ex);
+            throw;
+        }
+    }
+
+    private static void LogCrash(Exception ex)
+    {
+        try
+        {
+            var logsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Fortiq", "logs");
+            if (!Directory.Exists(logsDir))
+            {
+                Directory.CreateDirectory(logsDir);
+            }
+
+            var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
+            var logPath = Path.Combine(logsDir, $"crash-{timestamp}.log");
+            var content = $"""
+                Fortiq Community Edition — Crash Report
+                Timestamp: {DateTimeOffset.UtcNow:O}
+                OS: {Environment.OSVersion}
+                Runtime: {Environment.Version}
+                Exception: {ex.GetType().FullName}: {ex.Message}
+                StackTrace:
+                {ex.StackTrace}
+                """;
+            File.WriteAllText(logPath, content);
+        }
+        catch
+        {
+            // Do not fail in crash logger
+        }
     }
 
     public static AppBuilder BuildAvaloniaApp() =>

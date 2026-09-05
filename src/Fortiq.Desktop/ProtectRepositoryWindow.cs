@@ -86,6 +86,13 @@ public sealed class ProtectRepositoryWindow : Window
             _failure.IsVisible = true;
         };
         Closed += (_, _) => _model.ClearStorageCredentials();
+        KeyDown += (_, e) =>
+        {
+            if (e.Key == Avalonia.Input.Key.Escape && _model.CanClose)
+            {
+                Close();
+            }
+        };
         Render();
     }
 
