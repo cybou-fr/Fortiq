@@ -21,6 +21,16 @@ public sealed class MainWindow : Window
     private readonly Border _page = new();
     private readonly Dictionary<string, Button> _navigation = new(StringComparer.Ordinal);
     private string _activeSection = "Home";
+
+    private readonly Border _statusDot = new()
+    {
+        Width = 8,
+        Height = 8,
+        CornerRadius = new CornerRadius(4),
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
+    private readonly TextBlock _statusLabel = Text(string.Empty, 11, FontWeight.Normal, Muted);
     private bool _historySelected;
     private RepositoryRowViewModel? _recoverySource;
     private RepositoryRowViewModel? _kitSource;
@@ -112,8 +122,13 @@ public sealed class MainWindow : Window
         rail.Children.Add(brandHeader);
 
         var menu = new StackPanel { Spacing = 4 };
+        // "Protect" is not here any more. It was the only navigation entry that opened a dialog
+        // instead of showing a page - so the sidebar meant "go here" four times and "do this" once,
+        // and the one exception was the item people clicked first. Protecting a folder is an action,
+        // and it is offered as a button on the screens where it makes sense: the welcome card, the
+        // dashboard header, and "+ Add source" on Backups, which is also the page that lists what is
+        // already protected.
         menu.Children.Add(Nav("Home", RenderHome));
-        menu.Children.Add(Nav("Protect", async () => await ProtectAsync()));
         menu.Children.Add(Nav("Backups", RenderBackups));
         menu.Children.Add(Nav("Recovery", RenderRecovery));
         menu.Children.Add(Nav("Recovery Kit", RenderRecoveryKit));
@@ -123,14 +138,11 @@ public sealed class MainWindow : Window
         var bottomStack = new StackPanel { Spacing = 6 };
         bottomStack.Children.Add(Nav("Settings", RenderSettings));
 
-        var serviceDot = new Border
-        {
-            Width = 8,
-            Height = 8,
-            CornerRadius = new CornerRadius(4),
-            Background = Recoverable,
-            VerticalAlignment = VerticalAlignment.Center
-        };
+        // Was a green dot and the words "Local protection active", both hard-coded. It said that on a
+        // machine protecting nothing, and it would have said it while every repository was at risk.
+        // In a product whose entire claim is that it does not tell you your data is safe when it
+        // cannot show that it is, a permanently green light in the corner is the worst thing on the
+        // screen.
         var serviceBadge = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -138,11 +150,12 @@ public sealed class MainWindow : Window
             Margin = new Thickness(12, 10, 0, 0),
             Children =
             {
-                serviceDot,
-                Text("Local protection active", 11, FontWeight.Normal, Muted)
+                _statusDot,
+                _statusLabel
             }
         };
         bottomStack.Children.Add(serviceBadge);
+        UpdateSidebarStatus();
 
         var versionTag = Text($"v{_settings.AppVersion}", 10, FontWeight.Normal, TextMuted);
         versionTag.Margin = new Thickness(12, 2, 0, 0);
@@ -194,8 +207,28 @@ public sealed class MainWindow : Window
         button.FontWeight = selected ? FontWeight.SemiBold : FontWeight.Normal;
     }
 
+    /// <summary>Puts the machine's actual protection state in the corner of every screen.</summary>
+    private void UpdateSidebarStatus()
+    {
+        var (brush, label) = _model.State switch
+        {
+            HealthStoreState.NotInitialized or HealthStoreState.Empty => (Muted, "Nothing protected yet"),
+            HealthStoreState.Corrupt => (AtRisk, "Protection status unreadable"),
+            HealthStoreState.Stale => (Unproven, "Status out of date"),
+            _ when _model.Repositories.Count == 0 => (Muted, "Nothing protected yet"),
+            _ when _model.Repositories.Any(r => r.Health.Verdict == HealthVerdict.AtRisk) => (AtRisk, "Needs attention"),
+            _ when _model.Repositories.Any(r => r.Health.Verdict == HealthVerdict.Unproven) => (Unproven, "Backed up, not proven"),
+            _ => (Recoverable, "Recovery proven")
+        };
+
+        _statusDot.Background = brush;
+        _statusLabel.Text = label;
+    }
+
     private void RenderActive()
     {
+        UpdateSidebarStatus();
+
         if (_activeSection == "Backups") RenderBackups();
         else if (_activeSection == "Recovery") RenderRecovery();
         else if (_activeSection == "Recovery Kit") RenderRecoveryKit();
@@ -209,31 +242,40 @@ public sealed class MainWindow : Window
         Select("Home");
         var body = new StackPanel { Spacing = 20, Margin = new Thickness(32, 26) };
 
-        body.Children.Add(Header("Dashboard", "Continuous cryptographic backup & recovery assurance.", "Protect a folder", ProtectAsync));
+        var nothingProtectedYet =
+            _model.State is HealthStoreState.NotInitialized or HealthStoreState.Empty
+            || _model.Repositories.Count == 0;
 
-        // 1. Hero Health Banner
-        var (mode, headline, desc, actionText) = ResolveHeroState();
-        var hero = new HeroHealthBanner(
-            mode,
-            headline,
-            desc,
-            actionText,
-            mode == HeroStatusMode.ZeroState ? ProtectAsync : RefreshAsync);
-        body.Children.Add(hero);
-
-        // 2. 4 KPI Stat Cards
-        body.Children.Add(MetricsGrid());
-
-        // 3. Main Content: Protected Sources & Recent Activity
-        if (_model.State is HealthStoreState.NotInitialized or HealthStoreState.Empty || _model.Repositories.Count == 0)
+        if (nothingProtectedYet)
         {
+            // One screen, one thing to do. This used to show a "Protect a folder" button in the
+            // header, the same button again in a banner, and "Protect your first folder" in the card
+            // below it - three buttons for one action, which reads as three different actions and
+            // makes a person stop to work out which is the real one.
+            //
+            // The four measurement tiles are gone from this state too. Before anything is protected
+            // they all read "Never", which measures nothing and looks like four problems.
+            body.Children.Add(Header(
+                "Welcome to Fortiq",
+                "Nothing is being backed up yet. Start with one folder - you can add more later."));
+
             body.Children.Add(ZeroStateWelcomeCard());
+            _page.Child = new ScrollViewer { Content = body };
+            return;
         }
-        else
-        {
-            body.Children.Add(RepositoriesSummaryCard());
-            body.Children.Add(RecentActivityCard());
-        }
+
+        body.Children.Add(Header(
+            "Dashboard",
+            "Your backups, and whether they have been proven to come back.",
+            "Protect a folder",
+            ProtectAsync));
+
+        var (mode, headline, desc, actionText) = ResolveHeroState();
+        body.Children.Add(new HeroHealthBanner(mode, headline, desc, actionText, RefreshAsync));
+
+        body.Children.Add(MetricsGrid());
+        body.Children.Add(RepositoriesSummaryCard());
+        body.Children.Add(RecentActivityCard());
 
         _page.Child = new ScrollViewer { Content = body };
     }
@@ -332,7 +374,7 @@ public sealed class MainWindow : Window
 
     private Border ZeroStateWelcomeCard()
     {
-        var protectBtn = Primary("Protect your first folder");
+        var protectBtn = Primary("Choose a folder");
         protectBtn.Click += async (_, _) => await ProtectAsync();
 
         return Card(new StackPanel
@@ -340,11 +382,11 @@ public sealed class MainWindow : Window
             Spacing = 16,
             Children =
             {
-                Text("Get started with verifiable data protection", 18, FontWeight.SemiBold, Ink),
-                Text("Fortiq protects against ransomware, corruption, and silent hardware loss by proving recovery continuously.", 13, FontWeight.Normal, Muted, true),
-                Check("1. Choose the critical folders and projects that matter"),
-                Check("2. Store encrypted snapshots locally or in immutable object storage"),
-                Check("3. Verify your offline 24-word disaster recovery kit"),
+                Text("Protect your first folder", 18, FontWeight.SemiBold, Ink),
+                Text("Most backup tools tell you a backup ran. Fortiq restores one on a schedule and checks what came back, so you find out your data is recoverable before the day you need it.", 13, FontWeight.Normal, Muted, true),
+                Check("1. Pick a folder - documents, photos, a project"),
+                Check("2. Fortiq encrypts it and copies it somewhere safe"),
+                Check("3. You write down 24 recovery words and keep them off this PC"),
                 protectBtn
             }
         }, Surface, Line, new Thickness(24));
@@ -423,7 +465,7 @@ public sealed class MainWindow : Window
     {
         Select("Backups");
         var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
-        body.Children.Add(Header("Backups & Activity", "Manage protected sources and inspect audit trail.", "+ Add source", ProtectAsync));
+        body.Children.Add(Header("Backups", "The folders Fortiq is protecting, and what it has done with them.", "Protect a folder", ProtectAsync));
 
         body.Children.Add(AuditLedgerCard());
 

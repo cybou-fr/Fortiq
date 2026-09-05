@@ -160,11 +160,20 @@ provisioning, hash-chained receipts, the restore drill, autonomous `Fortiq.Recov
 detection. It installs with no service and no ACLs and uses a user-scoped key, so it is evidence about
 the workflow and not about the deployment.
 
-The installed-Windows lane does not exist yet. It is the one that crosses the boundaries a pilot
-machine actually has — elevated installation under UAC with restrictive ACLs, a service running as
-LocalSystem, a machine-scoped TPM key, IPC authorization refusing a real unelevated caller, and
-survival across a reboot into scheduled unattended execution. Until it is written, no green run
-anywhere in this repository is evidence that those hold.
+`InstalledWindowsPilotTests` is the second lane, and covers what needs an elevated session: an
+installation that deploys the bundle it verified, state-directory ACLs that close `schedules`,
+`credentials`, `audit` and `receipts` to ordinary users, and service registration through the SCM with
+a computable service SID. It is run by `scripts/Test-InstalledPilot.ps1`, which **fails when the lane
+skips**. That matters more than it sounds: these tests skip without elevation, a skipped test exits
+zero, and a lane that quietly does nothing reports the same green as one that passed.
+
+Three things remain unverified by any lane, and belong on the pilot's own acceptance checklist:
+
+1. **A reboot**, and the service returning by itself afterwards.
+2. **IPC refused across a pipe to a genuinely unelevated caller.** The runner is elevated, so the
+   refusal is covered against the policy (`ServiceIpcAuthorizationTests`) rather than through a pipe.
+3. **A machine that has never held Fortiq state.** A fresh runner is close, but the lanes run beside
+   everything else on it.
 
 `scripts/Test-PilotWorkflow.ps1` prints both lists rather than a single verdict, and fails when the
 pilot test skipped rather than reporting a pass having run nothing.

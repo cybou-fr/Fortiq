@@ -76,6 +76,15 @@ jobs:
           }
           if ($failed) { throw "One or more test assemblies failed." }
 
+      - name: Installed-Windows pilot lane
+        shell: pwsh
+        # The boundaries a pilot machine actually has: an elevated install with real ACLs, and
+        # service registration through the SCM. It is a separate step, not part of the loop above,
+        # because it is the only one that must fail when its tests skip - a lane that quietly does
+        # nothing reports the same green as one that passed, and these are the boundaries where that
+        # matters most. The runner is elevated, so the lane runs.
+        run: ./scripts/Test-InstalledPilot.ps1 -ResultsDirectory artifacts/test-results
+
       - name: Report failed tests as annotations
         if: always()
         shell: pwsh

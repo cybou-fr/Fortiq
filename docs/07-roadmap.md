@@ -54,7 +54,7 @@ The Fortiq roadmap is organized around risk reduction and verification milestone
 - [x] **Automated Scheduled Restore Drills**: opt-in `drillRecurrence` per schedule, restoring the newest snapshot into a disposable directory and recording the proof as a receipt (`ScheduledDrillRunner`, `UnattendedRestoreDrill`);
 - [x] **Backup Anomaly Observation**: deduplication collapse and added-data/changed-file spikes measured against each repository's own median (`BackupAnomalyDetector`), surfaced as findings that never alter the recoverability verdict;
 - [ ] **Audit Receipts & History Inspector**: a desktop view over the receipt chain that `AuditLedgerVerifier` already validates, so the ledger's integrity can be shown to somebody rather than only computed (Spec 17 section 7);
-- [ ] **Pristine-machine recovery drill in CI**: DR-001 executed on a fresh `windows-latest` runner against published release artifacts, closing the acceptance gate in [Spec 10](10-disaster-recovery-sequence.md);
+- [ ] **Pristine-machine recovery drill in CI**: DR-001 executed on a fresh `windows-latest` runner against published release artifacts, closing the acceptance gate in [Spec 10](10-disaster-recovery-sequence.md). *Partly done: `InstalledWindowsPilotTests` covers elevated installation, state-directory ACLs and SCM service registration, and `scripts/Test-InstalledPilot.ps1` fails when that lane skips. A reboot, an unelevated IPC caller and a machine that has never held Fortiq state remain outside any lane.*
 - [ ] Multi-repository fleet health aggregator for local workgroups and small networks.
 
 ---

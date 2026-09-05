@@ -140,25 +140,38 @@ public sealed class InstallViewModel : INotifyPropertyChanged
 
     public bool TpmAvailable => _status?.Platform.TpmAvailable ?? false;
 
+    /// <remarks>
+    /// Plain sentence first, detail after. The reader of this screen is deciding whether to install a
+    /// backup tool, not auditing a key hierarchy - "TPM 2.0 silicon provider available
+    /// (non-exportable device key protection)" told them nothing they could act on, and told the one
+    /// reader who knew what it meant something they could have assumed.
+    /// </remarks>
     public string TpmDetail => TpmAvailable
-        ? "TPM 2.0 silicon provider available (non-exportable device key protection)."
-        : "TPM 2.0 silicon not detected (software envelopes and recovery mnemonic will be used).";
+        ? "This PC has a security chip, so Fortiq can unlock your backups here without a password. Your written recovery words still work anywhere."
+        : "No security chip found. Fortiq will use your written recovery words instead - keep them somewhere safe, because they are the only way back in.";
 
     public bool RuntimeValid => _status?.Platform.DotNetRuntimeValid ?? true;
 
-    public string RuntimeDetail => $".NET 10 LTS Desktop Runtime ({_status?.Platform.DotNetVersion ?? Environment.Version.ToString()}).";
+    public string RuntimeDetail => RuntimeValid
+        ? $"Everything Fortiq needs to run is present (.NET {_status?.Platform.DotNetVersion ?? Environment.Version.ToString()})."
+        : $"A required Windows component is missing or too old (.NET {_status?.Platform.DotNetVersion ?? Environment.Version.ToString()}). Install the .NET 10 Desktop Runtime, then reopen Fortiq.";
 
     public bool EngineVerified => _status?.Engine.HashVerified ?? false;
 
     public string EngineDetail => EngineVerified
-        ? $"Storage engine 'restic' v{_status?.Engine.RequiredVersion} SHA-256 verified."
-        : $"Engine not verified ({_status?.Engine.RequiredVersion ?? "missing"}).";
+        ? $"The program that writes your backups is present and unmodified (restic {_status?.Engine.RequiredVersion}, checked byte for byte)."
+        : $"The program that writes your backups is missing or does not match what Fortiq expects (restic {_status?.Engine.RequiredVersion ?? "not found"}). Fortiq will not run an unverified copy.";
 
     public bool VssAvailable => _status?.Platform.HasBackupPrivileges ?? false;
 
+    /// <remarks>
+    /// This row worried people for no reason. Its old text - "Interactive token does not hold
+    /// SeBackupPrivilege" - reads like a fault, and is not one: the background service holds that
+    /// privilege and does the work. Nothing is wrong, so the sentence says nothing is wrong.
+    /// </remarks>
     public string VssDetail => VssAvailable
-        ? "VSS snapshot backup privileges (SeBackupPrivilege) held."
-        : "Interactive token does not hold SeBackupPrivilege (background service handles live snapshots).";
+        ? "Files that are open and in use can be backed up safely."
+        : "Files that are open and in use will still be backed up safely - the Fortiq background service handles those. Nothing to do here.";
 
     public async Task RefreshInspectionAsync(CancellationToken cancellationToken = default)
     {

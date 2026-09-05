@@ -69,6 +69,13 @@ public sealed class InstallationInspector : IInstallationInspector
 {
     private const string TpmProviderName = "Microsoft Platform Crypto Provider";
 
+    /// <remarks>
+    /// Every await here is <c>ConfigureAwait(false)</c>. This is library code and has no business
+    /// resuming on a caller's thread - and when the caller is a UI thread that is blocking on the
+    /// result, resuming there is a deadlock: the continuation waits for a thread that is waiting for
+    /// the continuation. That is exactly what happened, and the symptom was a Fortiq process running
+    /// with no window at all.
+    /// </remarks>
     public async Task<SystemInstallationStatus> InspectAsync(CancellationToken cancellationToken = default)
     {
         var findings = new List<InstallationFinding>();
@@ -125,7 +132,7 @@ public sealed class InstallationInspector : IInstallationInspector
         }
 
         // 2. Engine inspection
-        var engineStatus = await InspectEngineAsync(findings, cancellationToken);
+        var engineStatus = await InspectEngineAsync(findings, cancellationToken).ConfigureAwait(false);
 
         // 3. Password Helper inspection
         var helperStatus = InspectPasswordHelper(findings);
@@ -171,7 +178,7 @@ public sealed class InstallationInspector : IInstallationInspector
         {
             try
             {
-                var content = await File.ReadAllTextAsync(manifestPath, cancellationToken);
+                var content = await File.ReadAllTextAsync(manifestPath, cancellationToken).ConfigureAwait(false);
                 using var doc = JsonDocument.Parse(content);
                 var root = doc.RootElement;
                 if (root.TryGetProperty("engines", out var engines) && engines.ValueKind == JsonValueKind.Array)
@@ -208,7 +215,7 @@ public sealed class InstallationInspector : IInstallationInspector
                 var fi = new FileInfo(binaryPath);
                 if (expectedLength == 0 || fi.Length == expectedLength)
                 {
-                    var fileBytes = await File.ReadAllBytesAsync(binaryPath, cancellationToken);
+                    var fileBytes = await File.ReadAllBytesAsync(binaryPath, cancellationToken).ConfigureAwait(false);
                     var hashBytes = SHA256.HashData(fileBytes);
                     var computedHash = Convert.ToHexStringLower(hashBytes);
 

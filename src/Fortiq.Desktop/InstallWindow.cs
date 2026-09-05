@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -31,12 +32,12 @@ public sealed class InstallWindow : Window
     {
         _model = model ?? throw new ArgumentNullException(nameof(model));
 
-        Title = "Fortiq Setup & Installation";
+        Title = "Fortiq Setup";
         Icon = FortiqBrand.WindowIcon();
         Width = 780;
-        Height = 680;
+        Height = 800;
         MinWidth = 700;
-        MinHeight = 600;
+        MinHeight = 560;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = CanvasBackground;
 
@@ -44,11 +45,15 @@ public sealed class InstallWindow : Window
         _pathTextBox.VerticalContentAlignment = VerticalAlignment.Center;
         _pathTextBox.TextChanged += (_, _) => _model.InstallDirectory = _pathTextBox.Text ?? string.Empty;
 
-        _serviceCheckBox.Content = "Install Windows background service (NT SERVICE\\Fortiq) for scheduled protection";
+        // Says what it does for the person, with the mechanism left out of the label. The old text -
+        // "Install Windows background service (NT SERVICE\Fortiq) for scheduled protection" - named a
+        // Windows account and left the reader to work out that unticking it means backups stop
+        // happening on their own, which is the only thing the choice actually decides.
+        _serviceCheckBox.Content = "Back up automatically, even when Fortiq is closed";
         _serviceCheckBox.IsChecked = _model.InstallService;
         _serviceCheckBox.IsCheckedChanged += (_, _) => _model.InstallService = _serviceCheckBox.IsChecked ?? true;
 
-        _pathCheckBox.Content = "Add Fortiq command-line tools to system PATH";
+        _pathCheckBox.Content = "Let me run Fortiq commands from a terminal";
         _pathCheckBox.IsChecked = _model.AddToPath;
         _pathCheckBox.IsCheckedChanged += (_, _) => _model.AddToPath = _pathCheckBox.IsChecked ?? true;
 
@@ -88,11 +93,16 @@ public sealed class InstallWindow : Window
         };
         _installButton.Click += async (_, _) => await _model.InstallAsync();
 
-        Content = new ScrollViewer
+        // The action bar is docked, not scrolled. It used to sit at the bottom of the same
+        // ScrollViewer as everything else, so on a smaller window - or a higher DPI, which is the
+        // common case - "Install Fortiq" was below the fold and half cut off. A primary action a
+        // person has to go looking for is one they cannot be sure they have found.
+        var body = new ScrollViewer
         {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Content = new StackPanel
             {
-                Margin = new Thickness(34, 28),
+                Margin = new Thickness(34, 28, 34, 20),
                 Spacing = 20,
                 Children =
                 {
@@ -101,11 +111,26 @@ public sealed class InstallWindow : Window
                     OptionsCard(),
                     _progressBar,
                     _statusText,
-                    _errorBanner,
-                    Footer()
+                    _errorBanner
                 }
             }
         };
+
+        var actionBar = new Border
+        {
+            Background = Surface,
+            BorderBrush = Line,
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            Padding = new Thickness(34, 18),
+            Child = Footer()
+        };
+
+        var layout = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(actionBar, Dock.Bottom);
+        layout.Children.Add(actionBar);
+        layout.Children.Add(body);
+
+        Content = layout;
 
         _model.PropertyChanged += (_, e) =>
         {
@@ -123,6 +148,35 @@ public sealed class InstallWindow : Window
         UpdateView();
     }
 
+    /// <summary>
+    /// Shrinks the window to fit the display it opened on, if it does not already.
+    /// </summary>
+    /// <remarks>
+    /// The default height is chosen so the whole wizard is visible without scrolling on an ordinary
+    /// screen. On a smaller one - a 1366x768 laptop, or a scaled display where 800 logical pixels is
+    /// most of the height - that same number puts the action bar under the taskbar, and the person
+    /// cannot reach the button at all. Asking the screen is the difference between a window that fits
+    /// everywhere and one that fits where it was designed.
+    /// </remarks>
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+
+        var screen = Screens.ScreenFromWindow(this);
+        if (screen is null)
+        {
+            return;
+        }
+
+        var available = screen.WorkingArea.Height / screen.Scaling;
+        var fits = Math.Max(MinHeight, available - 60);
+
+        if (Height > fits)
+        {
+            Height = fits;
+        }
+    }
+
     private static StackPanel Header() => new()
     {
         Spacing = 6,
@@ -136,10 +190,10 @@ public sealed class InstallWindow : Window
                 Children =
                 {
                     new Image { Source = FortiqBrand.Logo(), Width = 32, Height = 32 },
-                    Text("Fortiq Setup & Discovery", 24, FontWeight.SemiBold, Ink)
+                    Text("Set up Fortiq", 24, FontWeight.SemiBold, Ink)
                 }
             },
-            Text("Configure background protection service, storage engines, and security prerequisites.", 13, FontWeight.Normal, Muted)
+            Text("A few checks, then choose where to put it. This takes about a minute.", 13, FontWeight.Normal, Muted)
         }
     };
 
@@ -153,8 +207,8 @@ public sealed class InstallWindow : Window
                 Spacing = 2,
                 Children =
                 {
-                    Text("Step 1: System Readiness Check", 15, FontWeight.SemiBold, Ink),
-                    Text("Evaluates host hardware security, engine binaries, and snapshot prerequisites.", 12, FontWeight.Normal, Muted)
+                    Text("Step 1 - What this PC can do", 15, FontWeight.SemiBold, Ink),
+                    Text("Checked automatically. Everything below is either ready or explained.", 12, FontWeight.Normal, Muted)
                 }
             },
             new Border { Height = 1, Background = Line },
@@ -212,8 +266,8 @@ public sealed class InstallWindow : Window
                     Spacing = 2,
                     Children =
                     {
-                        Text("Step 2: Destination & Options", 15, FontWeight.SemiBold, Ink),
-                        Text("Designate where Fortiq components and engine binaries are deployed.", 12, FontWeight.Normal, Muted)
+                        Text("Step 2 - Where it goes", 15, FontWeight.SemiBold, Ink),
+                        Text("The defaults are right for most people. Change them only if you have a reason.", 12, FontWeight.Normal, Muted)
                     }
                 },
                 new Border { Height = 1, Background = Line },
@@ -255,25 +309,25 @@ public sealed class InstallWindow : Window
         // 1. Operating System & .NET Runtime
         _readinessContainer.Children.Add(ReadinessRow(
             _model.RuntimeValid ? CheckmarkBadge() : FailureBadge(),
-            ".NET 10 LTS Desktop Runtime",
+            "Windows components",
             _model.RuntimeDetail));
 
         // 2. Hardware TPM 2.0
         _readinessContainer.Children.Add(ReadinessRow(
             _model.TpmAvailable ? CheckmarkBadge() : CautionBadge(),
-            "Hardware TPM 2.0 Security",
+            "Unlocking on this PC",
             _model.TpmDetail));
 
         // 3. Storage Engine
         _readinessContainer.Children.Add(ReadinessRow(
             _model.EngineVerified ? CheckmarkBadge() : FailureBadge(),
-            "Storage Engine (restic)",
+            "Backup program",
             _model.EngineDetail));
 
         // 4. VSS Privileges
         _readinessContainer.Children.Add(ReadinessRow(
             _model.VssAvailable ? CheckmarkBadge() : InfoBadge(),
-            "Volume Shadow Copy Service (VSS)",
+            "Files that are in use",
             _model.VssDetail));
 
         // Progress and Error State

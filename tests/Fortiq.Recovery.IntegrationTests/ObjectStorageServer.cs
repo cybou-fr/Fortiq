@@ -18,22 +18,68 @@ namespace Fortiq.Recovery.IntegrationTests;
 /// </remarks>
 public sealed class ObjectStorageServer : IAsyncDisposable
 {
-    private const string AccessKey = "fortiqtestaccess";
-    private const string SecretKey = "fortiqtestsecret1234";
+    private const string LocalAccessKey = "fortiqtestaccess";
+    private const string LocalSecretKey = "fortiqtestsecret1234";
 
-    private readonly Process _process;
-    private readonly string _root;
+    /// <summary>
+    /// Point the S3 tests at real storage instead of the local server.
+    /// </summary>
+    /// <remarks>
+    /// A local MinIO is a faithful S3 implementation, and that is exactly its limitation: it agrees
+    /// with our assumptions because it shares them. A provider bills differently, signs differently,
+    /// and decides for itself what Object Lock means - and a repository is only immutable if the
+    /// provider says so, not if MinIO did. Set these three and the same tests run against the real
+    /// thing, unchanged.
+    ///
+    /// Never a default. Tests that would silently reach out to somebody's paid storage the moment a
+    /// stray variable is set are tests nobody trusts to run.
+    /// </remarks>
+    public const string EndpointVariable = "FORTIQ_S3_ENDPOINT";
 
-    private ObjectStorageServer(Process process, string root, int port)
+    public const string RegionVariable = "FORTIQ_S3_REGION";
+
+    private readonly Process? _process;
+    private readonly string? _root;
+    private readonly string _accessKey;
+    private readonly string _secretKey;
+    private readonly string _region;
+
+    private ObjectStorageServer(Process? process, string? root, string endpoint, string accessKey, string secretKey, string region)
     {
         _process = process;
         _root = root;
-        Endpoint = $"http://127.0.0.1:{port}";
+        _accessKey = accessKey;
+        _secretKey = secretKey;
+        _region = region;
+        Endpoint = endpoint;
     }
 
     public string Endpoint { get; }
 
-    public ObjectStorageCredentials Credentials { get; } = new(AccessKey, SecretKey, "us-east-1");
+    public ObjectStorageCredentials Credentials => new(_accessKey, _secretKey, _region);
+
+    /// <summary>True when these tests are talking to storage this project does not own.</summary>
+    public bool IsExternal => _process is null;
+
+    private static (string Endpoint, string AccessKey, string SecretKey, string Region)? ExternalTarget()
+    {
+        var endpoint = Environment.GetEnvironmentVariable(EndpointVariable);
+        var accessKey = Environment.GetEnvironmentVariable("AWS_ACCESS_KEY_ID");
+        var secretKey = Environment.GetEnvironmentVariable("AWS_SECRET_ACCESS_KEY");
+
+        if (string.IsNullOrWhiteSpace(endpoint) ||
+            string.IsNullOrWhiteSpace(accessKey) ||
+            string.IsNullOrWhiteSpace(secretKey))
+        {
+            return null;
+        }
+
+        return (
+            endpoint,
+            accessKey,
+            secretKey,
+            Environment.GetEnvironmentVariable(RegionVariable) ?? "us-east-1");
+    }
 
     public static string ServerPath
     {
@@ -48,6 +94,23 @@ public sealed class ObjectStorageServer : IAsyncDisposable
 
     public static async Task<ObjectStorageServer> StartAsync(CancellationToken cancellationToken)
     {
+        if (ExternalTarget() is { } external)
+        {
+            var remote = new ObjectStorageServer(
+                null,
+                null,
+                external.Endpoint,
+                external.AccessKey,
+                external.SecretKey,
+                external.Region);
+
+            // Reached before any test body runs, so a wrong endpoint or a revoked key fails as a
+            // connection problem rather than as whichever assertion happened to come first.
+            using var probe = remote.CreateClient();
+            await probe.ListBucketsAsync(cancellationToken);
+            return remote;
+        }
+
         Skip.IfNot(File.Exists(ServerPath), "The local S3 server is not present; run scripts/Get-TestStorage.ps1.");
 
         var root = Path.Combine(Path.GetTempPath(), "fortiq-s3-" + Guid.NewGuid().ToString("N"));
@@ -74,25 +137,25 @@ public sealed class ObjectStorageServer : IAsyncDisposable
 
         startInfo.ArgumentList.Add("--address");
         startInfo.ArgumentList.Add($"127.0.0.1:{port}");
-        startInfo.Environment["MINIO_ROOT_USER"] = AccessKey;
-        startInfo.Environment["MINIO_ROOT_PASSWORD"] = SecretKey;
+        startInfo.Environment["MINIO_ROOT_USER"] = LocalAccessKey;
+        startInfo.Environment["MINIO_ROOT_PASSWORD"] = LocalSecretKey;
         startInfo.Environment["MINIO_BROWSER"] = "off";
 
         var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start the S3 server.");
-        var server = new ObjectStorageServer(process, root, port);
+        var server = new ObjectStorageServer(process, root, $"http://127.0.0.1:{port}", LocalAccessKey, LocalSecretKey, "us-east-1");
 
         await server.WaitUntilHealthyAsync(cancellationToken);
         return server;
     }
 
     public IAmazonS3 CreateClient() => new AmazonS3Client(
-        AccessKey,
-        SecretKey,
+        _accessKey,
+        _secretKey,
         new AmazonS3Config
         {
             ServiceURL = Endpoint,
             ForcePathStyle = true,
-            AuthenticationRegion = "us-east-1"
+            AuthenticationRegion = _region
         });
 
     /// <summary>Creates a bucket that keeps what is written to it for <paramref name="retention"/>.</summary>
@@ -153,6 +216,14 @@ public sealed class ObjectStorageServer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // Nothing of ours to stop when the storage belongs to somebody else. The buckets these tests
+        // made are left where they are: deleting other people's buckets on the way out is not a
+        // cleanup this code gets to decide on.
+        if (_process is null)
+        {
+            return;
+        }
+
         try
         {
             if (!_process.HasExited)
@@ -188,7 +259,8 @@ public sealed class ObjectStorageServer : IAsyncDisposable
 
         while (DateTime.UtcNow < deadline)
         {
-            if (_process.HasExited)
+            // Only ever called for a server this class started; the external path returns before it.
+            if (_process!.HasExited)
             {
                 throw new InvalidOperationException(
                     $"The S3 server exited during start-up: {await _process.StandardError.ReadToEndAsync(cancellationToken)}");

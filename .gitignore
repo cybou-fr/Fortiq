@@ -45,3 +45,11 @@ Thumbs.db
 
 # Test-only tools acquired by scripts/Get-TestStorage.ps1
 /tools/
+
+# Credentials, belt and braces. Test keys live outside the working tree entirely, which is the
+# actual protection; these rules only catch a file somebody creates here by habit.
+*.secrets.json
+secrets/
+.env
+.env.*
+s3-test.ps1

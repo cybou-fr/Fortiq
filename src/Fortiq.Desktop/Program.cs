@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 using Fortiq.Application;
@@ -21,6 +22,19 @@ public sealed class FortiqApplication : Avalonia.Application
     {
         Styles.Add(new FluentTheme());
         RequestedThemeVariant = ThemeVariant.Light;
+
+        // Fluent paints checkboxes, radio buttons and focus rings with the accent colour Windows
+        // personalisation happens to be set to. On this machine that is magenta, so the setup screen
+        // had magenta checkboxes beside a blue primary button - two accents, neither of them Fortiq's.
+        // Pinning the accent to the brand colour makes one product instead of a theme sampler.
+        var brand = Color.Parse("#2563EB");
+        Resources["SystemAccentColor"] = brand;
+        Resources["SystemAccentColorLight1"] = Color.Parse("#3B82F6");
+        Resources["SystemAccentColorLight2"] = Color.Parse("#60A5FA");
+        Resources["SystemAccentColorLight3"] = Color.Parse("#93C5FD");
+        Resources["SystemAccentColorDark1"] = Color.Parse("#1D4ED8");
+        Resources["SystemAccentColorDark2"] = Color.Parse("#1E40AF");
+        Resources["SystemAccentColorDark3"] = Color.Parse("#1E3A8A");
     }
 
     public override void OnFrameworkInitializationCompleted()
@@ -31,7 +45,15 @@ public sealed class FortiqApplication : Avalonia.Application
             var isPortable = args.Contains("--portable", StringComparer.OrdinalIgnoreCase);
 
             var inspector = new InstallationInspector();
-            var status = inspector.InspectAsync().GetAwaiter().GetResult();
+
+            // Run off the UI thread, and block here rather than on the dispatcher. Calling
+            // GetResult() directly on the UI thread deadlocked: the inspector's continuations were
+            // posted back to the thread that was blocking on them, and the application started with
+            // no window - a process alive, nothing on screen, nothing in the log.
+            //
+            // Blocking at all is still wrong for a slow disk; the inspection hashes a 31 MB engine
+            // binary. That is a separate change: show the window first and fill it in.
+            var status = Task.Run(() => inspector.InspectAsync()).GetAwaiter().GetResult();
 
             if (isPortable || status.IsInstalled)
             {
