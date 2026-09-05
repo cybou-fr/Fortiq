@@ -79,9 +79,12 @@ public static class FortiqButton
 
     private static Style PresenterFill(string pseudoClass, IBrush background, IBrush foreground)
     {
+        // The colon stays. Avalonia's Class() takes a pseudo-class with its ':' prefix; stripping it
+        // asks for a real style class of that name, which nothing has - so the style silently matched
+        // nothing and the hover bug survived a commit claiming to fix it.
         var style = new Style(selector => selector
             .OfType<Button>()
-            .Class(pseudoClass.TrimStart(':'))
+            .Class(pseudoClass)
             .Template()
             .OfType<ContentPresenter>());
 
