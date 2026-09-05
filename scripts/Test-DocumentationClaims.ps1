@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Fails when documentation names a Fortiq type, project or file that does not exist.
+    Fails when documentation and code disagree about which Fortiq components exist.
 
 .DESCRIPTION
     Documentation drifts towards intent. A specification written in the present indicative reads as
@@ -12,6 +12,11 @@
     Fortiq type, or a repository path, with nothing behind it. It cannot catch a claim about
     behaviour - that ProvenRestore hashes files, say - because the name is real and only the
     sentence is wrong. Those stay a matter of review.
+
+    The same drift runs the other way, and did: documentation kept saying "There is no `InstallWindow`"
+    for five commits after the installer shipped. So a denial placed next to a backticked identifier is
+    checked against the code as well, and so is -KnownAbsent itself - an allowlist entry that outlives
+    its subject switches the check off for that name without anyone noticing.
 
     Only backticked identifiers are considered, so prose is never guessed at. An identifier that is
     deliberately aspirational belongs in -KnownAbsent with a reason, which keeps the intent visible
@@ -39,7 +44,6 @@ $root = Split-Path $PSScriptRoot -Parent
 # removing it from the documentation is a decision someone makes rather than something this script
 # forces the day the wording changes.
 $intent = @{
-    'InstallWindow'          = 'Spec 21 / ADR-014: embedded installer, design intent, not implemented.'
     'ComponentHubView'       = 'Spec 17 section 6: component hub, design intent, not implemented.'
     'ReceiptsView'           = 'Spec 17 section 7: receipts inspector, design intent, not implemented.'
     'IPathPickerService'     = 'ADR-015: picker abstraction; the client calls StorageProvider directly.'
@@ -50,7 +54,7 @@ $intent = @{
     # description of the repository; Spec 23 says so under its implementation status.
     'HomeView'                 = 'Spec 23 blueprint: no view classes exist; the client is code-built.'
     'BackupsView'              = 'Spec 23 blueprint: no view classes exist.'
-    'SettingsView'             = 'Spec 23 blueprint: Settings is a placeholder in MainWindow.'
+    'SettingsView'             = 'Spec 23 blueprint: Settings is rendered inline by MainWindow.'
     'ProtectWizardView'        = 'Spec 23 blueprint: the wizard is ProtectRepositoryWindow.'
     'RecoveryProofView'        = 'Spec 23 blueprint: recovery lives in MainWindow.'
     'RecoveryKitView'          = 'Spec 23 blueprint, not implemented.'
@@ -59,8 +63,8 @@ $intent = @{
     'AppNavigationItemViewModel' = 'Spec 23 blueprint: navigation is built inline in MainWindow.'
     'LastProvenRestore'        = 'Spec 23 blueprint property; the fact is RepositoryFacts.LastProvenRestoreAt.'
 
-    # Installer and control plane: whole subsystems specified and not built.
-    'IInstallationInspector'   = 'Spec 21 / ADR-014: installer, design intent, not implemented.'
+    # Control plane and updater: whole subsystems specified and not built. The installer itself is
+    # built - InstallWindow and IInstallationInspector left this list when it shipped.
     'UpdatePolicy'             = 'ADR-010: metadata-only control plane, design intent.'
     'Fortiq.Backup.Desktop'    = 'ADR-015: AppUserModelID for taskbar grouping, design intent, not registered.'
 }
@@ -130,6 +134,46 @@ foreach ($document in $Path) {
     }
 }
 
+# The mirror of the check above, and the one that actually went wrong next. Documentation that says
+# "There is no `InstallWindow`" is a claim too, and nothing contradicted it for five commits after
+# the installer shipped - the identifier check cannot see it, because it only looks for names that
+# are missing. A denial of something that exists understates the product and misleads planning just
+# as badly as a claim of something that does not.
+#
+# Only explicit denials next to a backticked identifier are matched. Prose that merely discusses
+# absence in general terms is left alone, on the same principle as the check above.
+$denials = @(
+    '\bno\s+`([^`\r\n]+)`'
+    '`([^`\r\n]+)`(?:\s+\w+){0,2}\s+(?:does not exist|do not exist|is not implemented|are not implemented|was never written|were never written)'
+)
+
+$contradictions = @()
+foreach ($document in $Path) {
+    $text = Get-Content $document -Raw
+    $relative = ($document -replace [regex]::Escape($root + [IO.Path]::DirectorySeparatorChar), '').Replace('\', '/')
+
+    foreach ($pattern in $denials) {
+        foreach ($match in [regex]::Matches($text, $pattern)) {
+            $token = $match.Groups[1].Value.Trim()
+            if ($token -cnotmatch $looksLikeIdentifier) { continue }
+            if (-not $defined.Contains($token)) { continue }
+
+            $line = ($text.Substring(0, $match.Index) -split "`n").Count
+            $contradictions += [pscustomobject]@{ File = $relative; Line = $line; Token = $token }
+        }
+    }
+}
+
+# The allowlist is a claim of the same kind, held in this script rather than in a document. An entry
+# that survives the day its subject is written turns the check off for that name silently, which is
+# the one failure mode a check like this cannot afford.
+$staleIntent = @()
+foreach ($entry in $intent.GetEnumerator()) {
+    if ($defined.Contains($entry.Key)) {
+        $staleIntent += [pscustomobject]@{ Token = $entry.Key; Reason = $entry.Value }
+    }
+}
+
 # One line per identifier, not per mention: a name used in eight places is one problem.
 $unique = @($problems | Group-Object Token | Sort-Object Name)
 foreach ($group in $unique) {
@@ -145,8 +189,35 @@ foreach ($group in $unique) {
     Write-Host "$($first.File):$($first.Line): $message"
 }
 
-if ($unique.Count -gt 0) {
-    throw "$($unique.Count) documented identifier(s) do not exist in the code."
+$contradictionGroups = @($contradictions | Group-Object Token | Sort-Object Name)
+foreach ($group in $contradictionGroups) {
+    $first = $group.Group[0]
+    $where = if ($group.Count -eq 1) { '' } else { " (and $($group.Count - 1) more)" }
+    $message = "Documentation says ``$($first.Token)`` does not exist, but the code defines it$where. " +
+        'Update the document to describe what is built.'
+
+    if ($env:GITHUB_ACTIONS) {
+        Write-Host "::error file=$($first.File),line=$($first.Line)::$message"
+    }
+
+    Write-Host "$($first.File):$($first.Line): $message"
 }
 
-Write-Host "Checked $($Path.Count) document(s); every named Fortiq identifier exists."
+foreach ($entry in ($staleIntent | Sort-Object Token)) {
+    $message = "-KnownAbsent lists ``$($entry.Token)`` as unbuilt (`"$($entry.Reason)`"), but the code " +
+        'defines it. Remove the entry so the name is checked again.'
+
+    if ($env:GITHUB_ACTIONS) {
+        Write-Host "::error file=scripts/Test-DocumentationClaims.ps1::$message"
+    }
+
+    Write-Host "scripts/Test-DocumentationClaims.ps1: $message"
+}
+
+$failures = $unique.Count + $contradictionGroups.Count + $staleIntent.Count
+if ($failures -gt 0) {
+    throw "$failures documentation claim(s) disagree with the code."
+}
+
+Write-Host ("Checked $($Path.Count) document(s); every named Fortiq identifier exists, " +
+    'no document denies one that does, and the allowlist names nothing that is built.')
