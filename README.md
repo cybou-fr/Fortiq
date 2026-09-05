@@ -85,7 +85,11 @@ To spin up a local 4-node S3 cluster with Object Lock support for integration te
 
 ## Documentation & Architecture Specifications
 
-Architecture specifications and Architecture Decision Records (ADRs) are maintained in the local workspace archive (`docs/`). Only code-level documentation and repository policies are published directly to the public GitHub repository ([README.md](README.md) and [SECURITY.md](SECURITY.md)).
+Architecture specifications and Architecture Decision Records (ADRs) live in [docs/](docs/) and are
+published with the code. Each one opens with an implementation status stating what is built and what is
+still design intent, and CI fails the build when a document names a component nobody wrote — or denies
+one that exists (`scripts/Test-DocumentationClaims.ps1`). A specification kept private drifts from the
+code unopposed; keeping them here means the same check that guards the README guards all of them.
 
 ### Architectural Specifications Overview
 

@@ -1,7 +1,6 @@
 # Fortiq repository ignores
 
 # User-requested exclusions
-docs/
 .idea/
 
 # Engine downloads & binaries

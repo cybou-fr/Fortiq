@@ -23,8 +23,7 @@
     rather than silently tolerated.
 
 .PARAMETER Path
-    Documents to check. Defaults to README.md, SECURITY.md and docs/ when it is present - docs/ is
-    excluded from version control, so CI checks the published files only.
+    Documents to check. Defaults to README.md, SECURITY.md and every Markdown file under docs/.
 
 .PARAMETER KnownAbsent
     Identifiers that documentation may name although no code defines them. Each needs a reason.
