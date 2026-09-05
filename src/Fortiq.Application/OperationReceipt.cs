@@ -18,8 +18,8 @@ public sealed record ReceiptSource(string Kind, string StableId, string? Consist
 
 /// <summary>
 /// The machine-readable record of one engine operation, as defined by
-/// docs/11-executable-prototype.md. It contains no secrets and is never required to restore data:
-/// a repository stays recoverable without any receipt.
+/// docs/11-executable-prototype.md and ADR-007. It contains no secrets and is never required to restore data.
+/// Chained via SHA-256 hash chaining to form an unbroken, tamper-evident audit ledger.
 /// </summary>
 public sealed record OperationReceipt(
     Guid OperationId,
@@ -32,10 +32,78 @@ public sealed record OperationReceipt(
     string? SnapshotId,
     ReceiptSource? Source,
     IReadOnlyDictionary<string, long> Metrics,
-    IReadOnlyList<string> Warnings)
+    IReadOnlyList<string> Warnings,
+    long SequenceNumber = 0,
+    string? PreviousReceiptHash = null,
+    string? ReceiptHash = null)
 {
     public const string Schema = "fortiq.operation-receipt";
     public const int SchemaVersion = 1;
+    public const string GenesisHash = "GENESIS";
+
+    /// <summary>
+    /// Computes deterministic SHA-256 digest over canonical receipt contents, chaining to the previous receipt hash.
+    /// </summary>
+    public static string ComputeCanonicalHash(
+        Guid operationId,
+        OperationKind operation,
+        string repositoryId,
+        EngineIdentity engine,
+        DateTimeOffset startedAt,
+        DateTimeOffset completedAt,
+        EngineResult engineResult,
+        string? snapshotId,
+        ReceiptSource? source,
+        IReadOnlyDictionary<string, long> metrics,
+        IReadOnlyList<string> warnings,
+        long sequenceNumber,
+        string previousReceiptHash)
+    {
+        using var stream = new System.IO.MemoryStream();
+        using var writer = new System.Text.Json.Utf8JsonWriter(stream);
+
+        writer.WriteStartObject();
+        writer.WriteString("schema", Schema);
+        writer.WriteNumber("version", SchemaVersion);
+        writer.WriteString("operationId", operationId);
+        writer.WriteString("operation", operation.ToString());
+        writer.WriteString("repositoryId", repositoryId);
+        writer.WriteString("engineName", engine.Name);
+        writer.WriteString("engineVersion", engine.Version);
+        writer.WriteString("engineSha256", engine.Sha256);
+        writer.WriteString("startedAt", startedAt.ToUniversalTime().ToString("O"));
+        writer.WriteString("completedAt", completedAt.ToUniversalTime().ToString("O"));
+        writer.WriteString("engineResult", engineResult.ToString());
+        if (snapshotId is not null) writer.WriteString("snapshotId", snapshotId);
+        if (source is not null)
+        {
+            writer.WriteString("sourceKind", source.Kind);
+            writer.WriteString("sourceStableId", source.StableId);
+            if (source.Consistency is not null) writer.WriteString("sourceConsistency", source.Consistency);
+        }
+        writer.WriteNumber("sequenceNumber", sequenceNumber);
+        writer.WriteString("previousReceiptHash", previousReceiptHash);
+
+        writer.WriteStartArray("metrics");
+        foreach (var (k, v) in metrics.OrderBy(m => m.Key, StringComparer.Ordinal))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("key", k);
+            writer.WriteNumber("val", v);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+
+        writer.WriteStartArray("warnings");
+        foreach (var w in warnings) writer.WriteStringValue(w);
+        writer.WriteEndArray();
+
+        writer.WriteEndObject();
+        writer.Flush();
+
+        var hashBytes = System.Security.Cryptography.SHA256.HashData(stream.ToArray());
+        return Convert.ToHexStringLower(hashBytes);
+    }
 }
 
 /// <summary>

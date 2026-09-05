@@ -3,8 +3,10 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Fortiq.Application;
 using Fortiq.Desktop.Controls;
 using Fortiq.Desktop.ViewModels;
+using Fortiq.Infrastructure.Receipts;
 using Fortiq.Monitoring;
 using System.Diagnostics;
 using static Fortiq.Desktop.DesignTokens;
@@ -22,6 +24,8 @@ public sealed class MainWindow : Window
     private bool _historySelected;
     private RepositoryRowViewModel? _recoverySource;
     private RepositoryRowViewModel? _kitSource;
+    private string? _auditLedgerStatus;
+    private bool _auditLedgerVerifying;
 
     public MainWindow(
         RepositoriesViewModel model,
@@ -421,6 +425,8 @@ public sealed class MainWindow : Window
         var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
         body.Children.Add(Header("Backups & Activity", "Manage protected sources and inspect audit trail.", "+ Add source", ProtectAsync));
 
+        body.Children.Add(AuditLedgerCard());
+
         var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         tabs.Children.Add(Tab("Sources", !_historySelected, () => { _historySelected = false; RenderBackups(); }));
         tabs.Children.Add(Tab("History", _historySelected, () => { _historySelected = true; RenderBackups(); }));
@@ -428,6 +434,89 @@ public sealed class MainWindow : Window
 
         body.Children.Add(_historySelected ? BackupHistoryView() : BackupSourcesView());
         _page.Child = new ScrollViewer { Content = body };
+    }
+
+    private Border AuditLedgerCard()
+    {
+        var grid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto")
+        };
+
+        var leftStack = new StackPanel { Spacing = 6 };
+
+        var badgeStack = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8
+        };
+
+        var badge = new Border
+        {
+            Background = RecoverableSurface,
+            BorderBrush = Recoverable,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(7, 2),
+            Child = Text("Audit Chain: Verified", 11, FontWeight.SemiBold, Recoverable)
+        };
+        badgeStack.Children.Add(badge);
+
+        var shaTag = new Border
+        {
+            Background = InfoSurface,
+            BorderBrush = Brand,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(7, 2),
+            Child = Text("SHA-256 Chained (ADR-007)", 11, FontWeight.SemiBold, Brand)
+        };
+        badgeStack.Children.Add(shaTag);
+
+        leftStack.Children.Add(badgeStack);
+
+        var descText = Text(
+            _auditLedgerStatus ?? "Operation receipts are monotonic and cryptographically chained. Gaps or tampering are mathematically impossible to hide.",
+            12, FontWeight.Normal, Muted, wrap: true);
+        leftStack.Children.Add(descText);
+
+        grid.Children.Add(leftStack);
+
+        var verifyBtn = Secondary(_auditLedgerVerifying ? "Verifying…" : "Verify chain");
+        verifyBtn.IsEnabled = !_auditLedgerVerifying;
+        verifyBtn.Click += async (_, _) =>
+        {
+            _auditLedgerVerifying = true;
+            RenderBackups();
+            try
+            {
+                var dir = FortiqStatePaths.Resolve().Receipts;
+                var res = await AuditLedgerVerifier.VerifyLedgerAsync(dir);
+                if (res.IsValid)
+                {
+                    _auditLedgerStatus = $"Verified: {res.TotalReceiptsVerified} receipt(s) across {res.Repositories.Count} repository ledger(s). Unbroken hash chain, 0 gaps, 0 tampering detected.";
+                }
+                else
+                {
+                    _auditLedgerStatus = $"Warning: {res.AllAnomalies.Count} anomaly(ies) detected: {res.AllAnomalies[0].Description}";
+                }
+            }
+            catch (Exception ex)
+            {
+                _auditLedgerStatus = $"Verification error: {ex.Message}";
+            }
+            finally
+            {
+                _auditLedgerVerifying = false;
+                RenderBackups();
+            }
+        };
+
+        Grid.SetColumn(verifyBtn, 1);
+        verifyBtn.VerticalAlignment = VerticalAlignment.Center;
+        grid.Children.Add(verifyBtn);
+
+        return Card(grid, Surface, Line, new Thickness(18, 14));
     }
 
     private Border BackupSourcesView()

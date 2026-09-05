@@ -29,6 +29,7 @@
     <ProjectReference Include="..\Fortiq.Operations\Fortiq.Operations.csproj" />
     <ProjectReference Include="..\Fortiq.Scheduling\Fortiq.Scheduling.csproj" />
     <ProjectReference Include="..\Fortiq.Infrastructure.ObjectStorage\Fortiq.Infrastructure.ObjectStorage.csproj" />
+    <ProjectReference Include="..\Fortiq.Infrastructure.Receipts\Fortiq.Infrastructure.Receipts.csproj" />
     <ProjectReference Include="..\Fortiq.Platform.Windows\Fortiq.Platform.Windows.csproj" />
   </ItemGroup>
 

@@ -1,5 +1,7 @@
 using System.Text;
 using System.Text.Json;
+using Fortiq.Application;
+using Fortiq.Infrastructure.Receipts;
 using Fortiq.Platform.Windows;
 
 namespace Fortiq.Desktop;
@@ -24,6 +26,7 @@ public static class InstallationCli
         return first is "--status" or "-status" or "/status"
             or "--install" or "-install" or "/install"
             or "--uninstall" or "-uninstall" or "/uninstall"
+            or "--verify-ledger" or "-verify-ledger" or "/verify-ledger"
             or "--worker-install" or "--worker-uninstall"
             or "--help" or "-h" or "/?" or "-?";
     }
@@ -56,6 +59,7 @@ public static class InstallationCli
                 "status" => await RunStatusAsync(args),
                 "install" => await RunInstallAsync(args),
                 "uninstall" => await RunUninstallAsync(args),
+                "verify-ledger" => await RunVerifyLedgerAsync(args),
                 "worker-install" => await RunWorkerInstallAsync(args),
                 "worker-uninstall" => await RunWorkerUninstallAsync(args),
                 _ => PrintSyntaxError($"Unknown command '{args[0]}'.")
@@ -290,6 +294,90 @@ public static class InstallationCli
         return 0;
     }
 
+    private static async Task<int> RunVerifyLedgerAsync(string[] args)
+    {
+        var jsonOutput = args.Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+        string? targetDir = null;
+        string? repoId = null;
+
+        for (var i = 1; i < args.Length; i++)
+        {
+            if ((args[i].Equals("--dir", StringComparison.OrdinalIgnoreCase) ||
+                 args[i].Equals("--receipts-dir", StringComparison.OrdinalIgnoreCase)) &&
+                i + 1 < args.Length)
+            {
+                targetDir = args[++i];
+            }
+            else if ((args[i].Equals("--repository", StringComparison.OrdinalIgnoreCase) ||
+                      args[i].Equals("-r", StringComparison.OrdinalIgnoreCase)) &&
+                     i + 1 < args.Length)
+            {
+                repoId = args[++i];
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(targetDir))
+        {
+            var defaultPath = FortiqStatePaths.Resolve().Receipts;
+            if (Directory.Exists(defaultPath))
+            {
+                targetDir = defaultPath;
+            }
+            else
+            {
+                var fallbackCommon = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Fortiq", "work", "receipts");
+                var localReceipts = Path.Combine(AppContext.BaseDirectory, "receipts");
+                targetDir = Directory.Exists(fallbackCommon) ? fallbackCommon : (Directory.Exists(localReceipts) ? localReceipts : defaultPath);
+            }
+        }
+
+        var result = await AuditLedgerVerifier.VerifyLedgerAsync(targetDir, repoId);
+
+        if (jsonOutput)
+        {
+            Console.WriteLine(JsonSerializer.Serialize(result, JsonOptions));
+            return result.IsValid ? 0 : 1;
+        }
+
+        Console.WriteLine("==================================================");
+        Console.WriteLine(" Fortiq Cryptographic Audit Ledger Verification");
+        Console.WriteLine("==================================================");
+        Console.WriteLine($"Audit Directory:  {targetDir}");
+        Console.WriteLine($"Filter Repo ID:   {repoId ?? "[All Repositories]"}");
+        Console.WriteLine($"Verdict:          {(result.IsValid ? "VERIFIED (Cryptographic SHA-256 Hash-Chain Intact)" : "TAMPERING / ANOMALIES DETECTED")}");
+        Console.WriteLine($"Total Receipts:   {result.TotalReceiptsVerified}");
+        Console.WriteLine($"Repositories:     {result.Repositories.Count}");
+        Console.WriteLine();
+
+        foreach (var repo in result.Repositories)
+        {
+            Console.WriteLine($"[Repository: {repo.RepositoryId}]");
+            Console.WriteLine($"  Status:         {(repo.IsValid ? "Valid (Intact)" : "INVALID")}");
+            Console.WriteLine($"  Receipts Count: {repo.TotalReceipts}");
+            Console.WriteLine($"  Sequence Range: {repo.FirstSequenceNumber} .. {repo.LastSequenceNumber}");
+            Console.WriteLine($"  Genesis Hash:   {repo.GenesisHash}");
+            Console.WriteLine($"  Head Hash:      {repo.HeadHash}");
+            if (repo.Anomalies.Count > 0)
+            {
+                Console.WriteLine("  Anomalies:");
+                foreach (var anomaly in repo.Anomalies)
+                {
+                    Console.WriteLine($"    - [{anomaly.AnomalyType}] Seq {anomaly.SequenceNumber}: {anomaly.Description}");
+                }
+            }
+            Console.WriteLine();
+        }
+
+        if (result.AllAnomalies.Count > 0)
+        {
+            Console.Error.WriteLine($"FAILED: {result.AllAnomalies.Count} security anomaly(ies) found during audit chain verification.");
+            return 1;
+        }
+
+        Console.WriteLine("SUCCESS: All cryptographic receipts and ledger hash chains verified without gaps or alterations.");
+        return 0;
+    }
+
     private static int PrintSyntaxError(string message)
     {
         Console.Error.WriteLine($"Syntax Error: {message}");
@@ -308,6 +396,9 @@ Commands:
   --install [--dir <path>] [--silent]      Install Fortiq, register Windows service, set ACLs.
   --uninstall [--purge-data] [--silent]    Remove Fortiq service and binaries. Preserves state
                                            unless --purge-data is specified.
+  --verify-ledger [--dir <path>] [--repository <id>] [--json]
+                                           Cryptographically verify the SHA-256 hash-chained audit
+                                           ledger for tampering, deletion, or sequence gaps.
 
 Options:
   --dir <path>     Custom destination folder (default: %ProgramFiles%\Fortiq).
