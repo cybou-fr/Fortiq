@@ -113,13 +113,27 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public Func<Task<bool>>? StopServiceAction { get; set; }
     public Func<Task<string>>? RefreshServiceStatusAction { get; set; }
 
-    public SettingsViewModel(string dataDirectory, string? logsDirectory = null)
+    /// <param name="startWithWindows">
+    /// The initial autostart state. Left null, it is read from the machine.
+    /// </param>
+    /// <remarks>
+    /// The parameter exists because reading the machine unconditionally made this view model's tests
+    /// depend on the developer's registry: installing Fortiq with autostart enabled turned a passing
+    /// test red without a line of it changing. A test that reads the machine it runs on is not
+    /// testing the code.
+    /// </remarks>
+    public SettingsViewModel(string dataDirectory, string? logsDirectory = null, bool? startWithWindows = null)
     {
         DataDirectory = dataDirectory ?? string.Empty;
         LogsDirectory = logsDirectory ?? (string.IsNullOrEmpty(dataDirectory) ? string.Empty : Path.Combine(dataDirectory, "logs"));
         AppVersion = typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
         RuntimeVersion = Environment.Version.ToString(3);
-        if (OperatingSystem.IsWindows())
+
+        if (startWithWindows is { } given)
+        {
+            _startWithWindows = given;
+        }
+        else if (OperatingSystem.IsWindows())
         {
             _startWithWindows = Fortiq.Platform.Windows.WindowsAutostartController.IsAutostartEnabled();
         }

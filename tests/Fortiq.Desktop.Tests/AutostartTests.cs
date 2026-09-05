@@ -8,7 +8,11 @@ public sealed class AutostartTests
     [Fact]
     public void SettingsViewModelNotifiesOnStartWithWindowsChanged()
     {
-        var vm = new SettingsViewModel(Path.Combine(Path.GetTempPath(), "fortiq-test-" + Guid.NewGuid().ToString("N")));
+        // Stated rather than read from this machine, so the result does not depend on whether the
+        // developer happens to have Fortiq set to start with Windows.
+        var vm = new SettingsViewModel(
+            Path.Combine(Path.GetTempPath(), "fortiq-test-" + Guid.NewGuid().ToString("N")),
+            startWithWindows: false);
         var propertyChanged = false;
         vm.PropertyChanged += (_, e) =>
         {

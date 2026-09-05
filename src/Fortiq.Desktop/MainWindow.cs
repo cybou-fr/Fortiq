@@ -8,6 +8,7 @@ using Fortiq.Desktop.Controls;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Infrastructure.Receipts;
 using Fortiq.Monitoring;
+using Fortiq.Platform.Windows;
 using System.Diagnostics;
 using static Fortiq.Desktop.DesignTokens;
 
@@ -1216,10 +1217,91 @@ public sealed class MainWindow : Window
             return;
         }
 
-        if (_wizard is null || !await EnsurePrivilegesAsync()) return;
+        if (_wizard is null) return;
+
+        // Installed mode hands provisioning to the service, and the service refuses a caller who does
+        // not hold its privileges. Rather than tell the person to reopen the whole application as an
+        // administrator and start again - which leaves a backup client running with full rights for
+        // as long as it stays open - Fortiq elevates this one operation: Windows prompts, a second
+        // instance shows only the wizard, and it exits when the wizard is done.
+        if (_installed && OperatingSystem.IsWindows() && !WindowsPrivilegeChecker.IsElevated())
+        {
+            await ProtectElevatedAsync();
+            return;
+        }
+
         await new ProtectRepositoryWindow(_wizard()).ShowDialog(this);
         await RefreshAsync();
     }
+
+    /// <summary>Runs the protection wizard in an elevated instance and waits for it to finish.</summary>
+    private async Task ProtectElevatedAsync()
+    {
+        var executable = Path.Combine(AppContext.BaseDirectory, "Fortiq.Desktop.exe");
+        if (!File.Exists(executable))
+        {
+            await ShowNoticeAsync(
+                "Fortiq could not be started",
+                $"'{executable}' is missing, so the protection wizard cannot be opened with the " +
+                "permissions it needs. Reinstall Fortiq.");
+            return;
+        }
+
+        try
+        {
+            using var elevated = Process.Start(new ProcessStartInfo(executable)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                ArgumentList = { "--protect" }
+            });
+
+            if (elevated is null)
+            {
+                return;
+            }
+
+            await elevated.WaitForExitAsync();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // The person declined the prompt, which is an answer and not a fault. Saying so is
+            // better than a silent no-op that looks like a broken button.
+            await ShowNoticeAsync(
+                "Permission not granted",
+                "Protecting a folder needs administrator approval, because the background service " +
+                "reads the folder and creates a key bound to this machine. Nothing was changed.");
+            return;
+        }
+
+        // Whatever the elevated pass did, this window's picture of the machine is now out of date.
+        await RefreshAsync();
+    }
+
+    private async Task ShowNoticeAsync(string title, string message)
+    {
+        var ok = Primary("OK");
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 480,
+            Height = 240,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = CanvasBackground,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(24),
+                Spacing = 16,
+                Children = { Text(message, 14, FontWeight.Normal, Ink, true), ok }
+            }
+        };
+
+        ok.Click += (_, _) => dialog.Close();
+        await dialog.ShowDialog(this);
+    }
+
+    /// <summary>The wizard this window would open, for the elevated pass to show on its own.</summary>
+    internal ProtectRepositoryViewModel? CreateWizard() => _wizard?.Invoke();
 
     private async Task RefreshAsync() => await _model.RefreshAsync(CancellationToken.None);
 

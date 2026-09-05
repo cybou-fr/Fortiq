@@ -98,7 +98,9 @@ public sealed class SettingsViewModelTests
     [Fact]
     public void StartWithWindowsRollsBackWhenActionReturnsFalse()
     {
-        var vm = new SettingsViewModel(@"C:\ProgramData\Fortiq")
+        // The starting state is stated, not read from this machine. Without it the test passed only
+        // where Fortiq's autostart happened to be off, and installing Fortiq turned it red.
+        var vm = new SettingsViewModel(@"C:\ProgramData\Fortiq", startWithWindows: false)
         {
             SetAutostartAction = _ => false
         };

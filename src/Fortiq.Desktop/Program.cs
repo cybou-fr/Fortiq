@@ -100,6 +100,21 @@ public sealed class FortiqApplication : Avalonia.Application
                     var inspector = new InstallationInspector();
                     var status = await Task.Run(() => inspector.InspectAsync());
                     if (closed) return;
+                    var isProtectOnly = Environment.GetCommandLineArgs()
+                        .Contains("--protect", StringComparer.OrdinalIgnoreCase);
+
+                    if (isProtectOnly)
+                    {
+                        // Started by an unelevated Fortiq that needs one privileged operation. Only
+                        // the wizard is shown; closing it ends this process and the unelevated window
+                        // the person was already looking at refreshes.
+                        var only = CreateProtectWindow();
+                        desktop.MainWindow = only;
+                        only.Show();
+                        only.Closed += (_, _) => desktop.Shutdown();
+                        return;
+                    }
+
                     if (isPortable || status.IsInstalled)
                     {
                         var mainWindow = CreateMainWindow(installed: status.IsInstalled && !isPortable);
@@ -286,6 +301,26 @@ public sealed class FortiqApplication : Avalonia.Application
             () => new ProtectRepositoryViewModel(protect, automaticBackupsAvailable: automaticAvailable, automaticBackupsUnavailableReason: unavailableReason),
             settings, installed: installed,
             fileRecovery: () => new FileRecoveryViewModel(new FileRecoveryAdapter(engineRoot, paths.Runs)));
+    }
+
+    /// <summary>
+    /// The wizard on its own, for the elevated pass that protecting a folder needs.
+    /// </summary>
+    /// <remarks>
+    /// Provisioning asks the service to act with its own privileges, so the service refuses a caller
+    /// who does not hold them - which left an ordinary user in installed mode unable to protect
+    /// anything at all. The answer is to elevate the operation, not the application: Windows raises
+    /// its prompt, this window opens, and the recovery phrase it shows never leaves the process that
+    /// generated it. Running the whole desktop as administrator instead would leave a backup client
+    /// with full rights on the machine for as long as it stays open, to spare one prompt.
+    /// </remarks>
+    private static ProtectRepositoryWindow CreateProtectWindow()
+    {
+        var host = CreateMainWindow(installed: true);
+        var wizard = host.CreateWizard()
+            ?? throw new InvalidOperationException("The protection wizard is not available in this mode.");
+
+        return new ProtectRepositoryWindow(wizard);
     }
 
     private static string ResolveEngineRoot()

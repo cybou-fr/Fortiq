@@ -77,6 +77,13 @@ public sealed class InstallationManager : IInstallationOperations
         progress?.Report(new("Preparing installation directories...", 10));
         Directory.CreateDirectory(targetDir);
 
+        // Before a single file is copied. The service holds its own executable open while it runs, so
+        // installing over an existing installation failed on the copy - the first install worked
+        // because nothing was there, and every upgrade after it did not. Stopping first is also the
+        // only way the replacement is atomic from the service's point of view: it never sees half of
+        // one version and half of another.
+        var serviceWasRunning = StopServiceForReplacement(progress);
+
         var (bundleRoot, manifest) = DiscoverManifest(sourceDir);
         if (manifest is not null && bundleRoot is not null)
         {
@@ -165,8 +172,50 @@ public sealed class InstallationManager : IInstallationOperations
             }
         }
 
+        // Put back what was stopped. When InstallService was asked for, the block above has already
+        // registered and started it; this covers the upgrade that keeps the existing registration.
+        if (serviceWasRunning && OperatingSystem.IsWindows() && !options.InstallService)
+        {
+            progress?.Report(new("Starting the Fortiq service...", 95));
+            WindowsServiceController.StartService(WindowsServiceController.DefaultServiceName, TimeSpan.FromSeconds(30));
+        }
+
         progress?.Report(new("Installation completed successfully.", 100));
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Stops the Fortiq service if it is running, so its files can be replaced. Returns whether it
+    /// was running, which is what decides if it should be started again afterwards.
+    /// </summary>
+    private static bool StopServiceForReplacement(IProgress<InstallProgressReport>? progress)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        try
+        {
+            var status = WindowsServiceController.QueryStatus(WindowsServiceController.DefaultServiceName);
+            if (!status.Exists || !status.Running)
+            {
+                return false;
+            }
+
+            progress?.Report(new("Stopping the Fortiq service so its files can be replaced...", 15));
+            WindowsServiceController.StopService(WindowsServiceController.DefaultServiceName, TimeSpan.FromSeconds(30));
+            return true;
+        }
+        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Reported rather than swallowed: if the service could not be stopped the copy below will
+            // fail, and the operator needs the first reason rather than the second.
+            throw new InvalidOperationException(
+                "The Fortiq service is running and could not be stopped, so its files cannot be replaced. " +
+                $"Stop the 'Fortiq' service and run the installer again. ({error.Message})",
+                error);
+        }
     }
 
     public static async Task UninstallAsync(
