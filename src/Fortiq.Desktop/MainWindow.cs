@@ -131,6 +131,36 @@ public sealed class MainWindow : Window
         RenderActive();
     }
 
+    /// <summary>Shrinks the window to fit the display it opened on, if it does not already.</summary>
+    /// <remarks>
+    /// The default size suits an ordinary screen. On a 1366x768 laptop, or a scaled display where the
+    /// same number is most of the height, it puts the bottom of the window under the taskbar and the
+    /// controls there out of reach. Asking the screen is the difference between a window that fits
+    /// everywhere and one that fits where it was designed.
+    /// </remarks>
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+
+        var screen = Screens.ScreenFromWindow(this);
+        if (screen is null)
+        {
+            return;
+        }
+
+        var fitsHigh = Math.Max(MinHeight, screen.WorkingArea.Height / screen.Scaling - 60);
+        if (Height > fitsHigh)
+        {
+            Height = fitsHigh;
+        }
+
+        var fitsWide = Math.Max(MinWidth, screen.WorkingArea.Width / screen.Scaling - 60);
+        if (Width > fitsWide)
+        {
+            Width = fitsWide;
+        }
+    }
+
     private Border NavigationRail()
     {
         var rail = new Grid

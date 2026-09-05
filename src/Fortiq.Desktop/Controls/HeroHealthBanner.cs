@@ -100,17 +100,11 @@ public sealed class HeroHealthBanner : Border
 
         if (!string.IsNullOrEmpty(actionLabel) && onAction != null)
         {
-            var button = new Button
-            {
-                Content = actionLabel,
-                Background = Brand,
-                Foreground = Brushes.White,
-                FontWeight = FontWeight.SemiBold,
-                Padding = new Thickness(18, 10),
-                CornerRadius = new CornerRadius(6),
-                BorderThickness = new Thickness(0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
+            // Through FortiqButton, like every other action in the product. Painted locally it would
+            // vanish under the pointer: the Fluent theme repaints the presenter on hover and a local
+            // background does not survive that.
+            var button = FortiqButton.Primary(actionLabel);
+            button.VerticalAlignment = VerticalAlignment.Center;
             button.Click += async (_, _) => await onAction();
 
             Grid.SetColumn(button, 1);

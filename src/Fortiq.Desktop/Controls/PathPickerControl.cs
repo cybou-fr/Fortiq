@@ -65,18 +65,11 @@ public sealed class PathPickerControl : StackPanel
         _textBox.VerticalContentAlignment = VerticalAlignment.Center;
         _textBox.TextChanged += (_, _) => PathChanged?.Invoke(_textBox.Text ?? string.Empty);
 
-        _browseButton = new Button
-        {
-            Content = "Browse…",
-            Padding = new Thickness(14, 8),
-            CornerRadius = new CornerRadius(6),
-            BorderBrush = Line,
-            BorderThickness = new Thickness(1),
-            Background = Surface,
-            Foreground = Ink,
-            FontWeight = FontWeight.SemiBold,
-            VerticalAlignment = VerticalAlignment.Stretch
-        };
+        // Same treatment as every other button, so it stays visible while it is being pointed at -
+        // which for a Browse button is the whole of its life.
+        _browseButton = FortiqButton.Secondary("Browse…");
+        _browseButton.VerticalAlignment = VerticalAlignment.Stretch;
+
         _browseButton.Click += async (_, _) => await BrowseAsync();
 
         var inputRow = new Grid
