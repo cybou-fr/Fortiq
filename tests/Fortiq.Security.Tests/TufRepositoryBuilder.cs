@@ -99,19 +99,24 @@ internal static class TufRepositoryBuilder
         long version,
         string targetPath,
         ReadOnlySpan<byte> content,
+        string? expires = null) =>
+        TargetsFor(version, [(targetPath, content.ToArray())], expires);
+
+    public static string TargetsFor(
+        long version,
+        IReadOnlyList<(string Target, byte[] Content)> targets,
         string? expires = null)
     {
-        var digest = Convert.ToHexStringLower(SHA256.HashData(content));
+        var entries = string.Join(",", targets.Select(target =>
+            Quote(target.Target) + ":{" +
+                Quote("hashes") + ":{" + Field("sha256", Convert.ToHexStringLower(SHA256.HashData(target.Content))) + "}," +
+                Number("length", target.Content.Length) +
+            "}"));
 
         return "{" +
             Field("_type", "targets") + "," +
             Field("expires", expires ?? Expiry(TimeSpan.FromDays(30))) + "," +
-            Quote("targets") + ":{" +
-                Quote(targetPath) + ":{" +
-                    Quote("hashes") + ":{" + Field("sha256", digest) + "}," +
-                    Number("length", content.Length) +
-                "}" +
-            "}," +
+            Quote("targets") + ":{" + entries + "}," +
             Number("version", version) +
             "}";
     }
