@@ -51,6 +51,11 @@ foreach ($component in @(@{Folder='desktop'; Project='Fortiq.Desktop'}, @{Folder
     if ((Get-FileHash -LiteralPath $binaryOutput -Algorithm SHA256).Hash -ine $entry.binarySha256) {
         throw 'The copied engine failed verification; this bundle is incomplete.'
     }
+}
+
+# Once, into the bundle root - not once per component. The brace above was lost, which put every line
+# from here to the end of the file inside the component loop and left the script unparseable, so no
+# bundle could be built at all.
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'SECURITY.md') -Destination $destination
 if (Test-Path (Join-Path $repositoryRoot 'README-FIRST.txt')) {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot 'README-FIRST.txt') -Destination $destination
