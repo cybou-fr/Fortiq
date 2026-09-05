@@ -67,7 +67,34 @@ public sealed class FileRecoveryWindow : Window
         };
         _repository.TextChanged += (_, _) => Refresh();
         _phrase.TextChanged += (_, _) => Refresh();
-        _kit.PathChanged += _ => Refresh();
+        _kit.PathChanged += path =>
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                var kitFile = Path.Combine(path, "kit.json");
+                if (File.Exists(kitFile))
+                {
+                    try
+                    {
+                        var json = File.ReadAllText(kitFile);
+                        using var doc = System.Text.Json.JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("repositoryLocator", out var locProp))
+                        {
+                            var loc = locProp.GetString();
+                            if (!string.IsNullOrWhiteSpace(loc))
+                            {
+                                _repository.Text = loc;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Best effort detection
+                    }
+                }
+            }
+            Refresh();
+        };
         _accessFields.Children.Add(Field("Backup repository", _repository));
         _accessFields.Children.Add(_kit);
         _accessFields.Children.Add(Field("Recovery phrase (held only for this session)", _phrase));
@@ -234,13 +261,13 @@ public sealed class FileRecoveryWindow : Window
         {
             _fileListStatus.Text = "No files found in this backup.";
         }
-        else if (string.IsNullOrWhiteSpace(_model.SearchQuery))
+        else if (!string.IsNullOrWhiteSpace(_model.SearchFilterSummary))
         {
-            _fileListStatus.Text = $"{_model.Files.Count:N0} files in backup. Select one to restore.";
+            _fileListStatus.Text = _model.SearchFilterSummary;
         }
         else
         {
-            _fileListStatus.Text = $"Showing {_model.FilteredFiles.Count:N0} of {_model.Files.Count:N0} files matching \"{_model.SearchQuery}\".";
+            _fileListStatus.Text = $"{_model.Files.Count:N0} files in backup. Select one to restore.";
         }
     }
 

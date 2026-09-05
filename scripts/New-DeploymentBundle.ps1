@@ -51,8 +51,10 @@ foreach ($component in @(@{Folder='desktop'; Project='Fortiq.Desktop'}, @{Folder
     if ((Get-FileHash -LiteralPath $binaryOutput -Algorithm SHA256).Hash -ine $entry.binarySha256) {
         throw 'The copied engine failed verification; this bundle is incomplete.'
     }
-}
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'SECURITY.md') -Destination $destination
+if (Test-Path (Join-Path $repositoryRoot 'README-FIRST.txt')) {
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'README-FIRST.txt') -Destination $destination
+}
 
 $desktopExe = Join-Path $destination 'desktop/Fortiq.Desktop.exe'
 $serviceExe = Join-Path $destination 'service/Fortiq.Service.exe'
@@ -107,7 +109,7 @@ $payload = Get-ChildItem -LiteralPath $destination -Recurse -File |
     Where-Object { $_.Name -ne 'bundle-manifest.json' -and $_.Name -ne 'SHA256SUMS' } |
     Sort-Object FullName |
     ForEach-Object {
-        $relative = $_.FullName.Substring($destination.Length).TrimStart('', '/') -replace '\', '/'
+        $relative = $_.FullName.Substring($destination.Length).TrimStart('\', '/') -replace '\\', '/'
         [ordered]@{
             path = $relative
             length = $_.Length

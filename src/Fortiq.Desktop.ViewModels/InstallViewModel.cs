@@ -155,7 +155,7 @@ public sealed class InstallViewModel : INotifyPropertyChanged
     /// </remarks>
     public string TpmDetail => TpmAvailable
         ? "This PC has a security chip, so Fortiq can unlock your backups here without a password. Your written recovery words still work anywhere."
-        : "No security chip found. Fortiq will use your written recovery words instead - keep them somewhere safe, because they are the only way back in.";
+        : "No security chip found. Automatic backups aren't available on this PC. You can still use Fortiq for manual recovery.";
 
     public bool RuntimeValid => _status?.Platform.DotNetRuntimeValid ?? true;
 

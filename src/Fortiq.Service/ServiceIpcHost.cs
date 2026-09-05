@@ -1,4 +1,4 @@
-﻿using System.IO.Pipes;
+using System.IO.Pipes;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -201,24 +201,33 @@ public sealed class ServiceIpcHost : BackgroundService
             deviceKeyScope: DeviceKeyScope.Machine);
 
         var repositoryId = provisioned.Repository.Id.ToString();
-        bool backupScheduled = true;
+        bool backupScheduled = false;
         string? schedulingFailure = null;
 
-        try
-        {
-            await FileSystemScheduleStore.WriteDefaultScheduleAsync(
-                Path.Combine(_paths.Schedules, "schedules"),
-                repositoryId,
-                payload.RepositoryLocation,
-                payload.KitDirectory,
-                payload.SourcePath,
-                new TimeOnly(2, 30),
-                cancellationToken);
-        }
-        catch (Exception ex)
+        if (!provisioned.DeviceUnlockAvailable)
         {
             backupScheduled = false;
-            schedulingFailure = $"Repository created with machine key, but scheduling failed: {ex.Message}";
+            schedulingFailure = "Automatic scheduled backups require a TPM 2.0 security chip on this machine. Schedule was not created.";
+        }
+        else
+        {
+            try
+            {
+                await FileSystemScheduleStore.WriteDefaultScheduleAsync(
+                    Path.Combine(_paths.Schedules, "schedules"),
+                    repositoryId,
+                    payload.RepositoryLocation,
+                    payload.KitDirectory,
+                    payload.SourcePath,
+                    new TimeOnly(2, 30),
+                    cancellationToken);
+                backupScheduled = true;
+            }
+            catch (Exception ex)
+            {
+                backupScheduled = false;
+                schedulingFailure = $"Repository created with machine key, but scheduling failed: {ex.Message}";
+            }
         }
 
         var provisionResp = new ServiceIpcProtocol.ProvisionResponse(

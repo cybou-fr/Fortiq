@@ -94,4 +94,18 @@ public sealed class SettingsViewModelTests
         Assert.Equal("Stopped", vm.ServiceStatus);
         Assert.False(vm.IsServiceRunning);
     }
+
+    [Fact]
+    public void StartWithWindowsRollsBackWhenActionReturnsFalse()
+    {
+        var vm = new SettingsViewModel(@"C:\ProgramData\Fortiq")
+        {
+            SetAutostartAction = _ => false
+        };
+
+        vm.StartWithWindows = true;
+
+        Assert.False(vm.StartWithWindows);
+        Assert.Contains("Could not update Windows startup registration", vm.StatusMessage);
+    }
 }

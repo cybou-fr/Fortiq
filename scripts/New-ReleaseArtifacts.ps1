@@ -57,6 +57,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Installing the SBOM tool failed.' }
 & (Join-Path $tools 'dotnet-CycloneDX.exe') $solution --out $sbomDirectory --json --filename 'sbom.json'
 if ($LASTEXITCODE -ne 0) { throw 'Generating the bill of materials failed.' }
 
+Write-Host 'Building the Community Deployment Bundle'
+$bundleDirectory = Join-Path $OutputDirectory 'bundle'
+& (Join-Path $PSScriptRoot 'New-DeploymentBundle.ps1') -OutputDirectory $bundleDirectory -Configuration $Configuration
+if ($LASTEXITCODE -ne 0) { throw 'Building deployment bundle failed.' }
+
+Write-Host 'Packaging Fortiq-Community-0.1.0-win-x64.zip'
+$communityZip = Join-Path $OutputDirectory 'Fortiq-Community-0.1.0-win-x64.zip'
+Compress-Archive -Path "$bundleDirectory\*" -DestinationPath $communityZip -Force
+
 Move-Item (Join-Path $sbomDirectory 'sbom.json') (Join-Path $OutputDirectory 'sbom.json')
 Remove-Item -Recurse -Force $sbomDirectory, $tools
 

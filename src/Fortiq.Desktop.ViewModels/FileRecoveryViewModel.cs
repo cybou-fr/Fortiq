@@ -122,6 +122,9 @@ public sealed class FileRecoveryViewModel(IFileRecovery recovery) : INotifyPrope
         }
     }
 
+    public const int MaxDisplayResults = 500;
+    public string SearchFilterSummary { get; private set; } = string.Empty;
+
     public void SetSearchQuery(string query)
     {
         SearchQuery = query ?? string.Empty;
@@ -132,16 +135,34 @@ public sealed class FileRecoveryViewModel(IFileRecovery recovery) : INotifyPrope
     {
         if (string.IsNullOrWhiteSpace(SearchQuery))
         {
-            FilteredFiles = Files;
+            FilteredFiles = Files.Count <= MaxDisplayResults
+                ? Files
+                : Files.Take(MaxDisplayResults).ToArray();
+
+            SearchFilterSummary = Files.Count > MaxDisplayResults
+                ? $"Showing first {MaxDisplayResults:N0} of {Files.Count:N0} files. Use search to filter."
+                : $"{Files.Count:N0} files in backup. Select one to restore.";
         }
         else
         {
-            FilteredFiles = Files
-                .Where(f => f.Name.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase) ||
-                            f.Path.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
+            var query = SearchQuery;
+            var matches = Files
+                .Where(f => f.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                            f.Path.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            FilteredFiles = matches.Count <= MaxDisplayResults
+                ? matches
+                : matches.Take(MaxDisplayResults).ToArray();
+
+            SearchFilterSummary = matches.Count > MaxDisplayResults
+                ? $"Showing top {MaxDisplayResults:N0} of {matches.Count:N0} files matching \"{query}\". Refine query for more specific results."
+                : matches.Count == 0
+                    ? $"No files match \"{query}\"."
+                    : $"Showing {matches.Count:N0} files matching \"{query}\".";
         }
         Changed(nameof(FilteredFiles));
+        Changed(nameof(SearchFilterSummary));
     }
 
     public async Task RestoreAsync(RecoverySnapshot snapshot, string target, string? specificPath = null)

@@ -273,9 +273,17 @@ public sealed class FortiqApplication : Avalonia.Application
             };
         }
 
+        var tpmAvailable = OperatingSystem.IsWindows() && Fortiq.Infrastructure.Keys.WindowsTpmEnvelope.IsAvailable;
+        var automaticAvailable = installed && tpmAvailable;
+        var unavailableReason = !installed
+            ? "Portable mode: background scheduled backups require an installed service."
+            : !tpmAvailable
+                ? "No security chip found. Automatic backups aren't available on this PC. You can still use Fortiq for manual recovery."
+                : null;
+
         return new MainWindow(
             new RepositoriesViewModel(new HealthFileSource(paths.HealthReport), prove),
-            () => new ProtectRepositoryViewModel(protect, automaticBackupsAvailable: installed),
+            () => new ProtectRepositoryViewModel(protect, automaticBackupsAvailable: automaticAvailable, automaticBackupsUnavailableReason: unavailableReason),
             settings, installed: installed,
             fileRecovery: () => new FileRecoveryViewModel(new FileRecoveryAdapter(engineRoot, paths.Runs)));
     }

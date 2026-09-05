@@ -89,9 +89,14 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
     private bool _busy;
     private ProtectStep _step = ProtectStep.Describe;
 
-    public ProtectRepositoryViewModel(IProtectRepository protect, Func<int, int, int>? pickWord = null, bool automaticBackupsAvailable = true)
+    public ProtectRepositoryViewModel(
+        IProtectRepository protect,
+        Func<int, int, int>? pickWord = null,
+        bool automaticBackupsAvailable = true,
+        string? automaticBackupsUnavailableReason = null)
     {
         AutomaticBackupsAvailable = automaticBackupsAvailable;
+        AutomaticBackupsUnavailableReason = automaticBackupsUnavailableReason;
         _protect = protect ?? throw new ArgumentNullException(nameof(protect));
         _pickWord = pickWord ?? ((count, _) => Random.Shared.Next(count));
     }
@@ -154,6 +159,7 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
     public string? SchedulingFailure { get; private set; }
 
     public bool AutomaticBackupsAvailable { get; }
+    public string? AutomaticBackupsUnavailableReason { get; }
 
     public bool CanClose => !Busy && Step is ProtectStep.Describe or ProtectStep.Done;
 

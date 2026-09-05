@@ -110,6 +110,12 @@ public sealed class MainWindow : Window
         {
             if (!_isExplicitExit)
             {
+                if (!_installed || !_preferences.Current.MinimizeToTrayOnClose)
+                {
+                    _isExplicitExit = true;
+                    return;
+                }
+
                 e.Cancel = true;
                 Hide();
             }
@@ -365,10 +371,11 @@ public sealed class MainWindow : Window
 
     private Grid MetricsGrid()
     {
-        var backup = Latest(x => x.LastBackupAt);
-        var check = Latest(x => x.LastHealthyCheckAt);
-        var restore = Latest(x => x.LastProvenRestoreAt);
-        var immutable = _model.Repositories.Count > 0 && _model.Repositories.All(x => x.Health.Facts.StorageImmutable);
+        var total = _model.Repositories.Count;
+        var backedUpRecently = _model.Repositories.Count(r =>
+            r.Health.Facts.LastBackupAt is { } dt && (DateTimeOffset.UtcNow - dt) <= TimeSpan.FromDays(2));
+        var recoveryProven = _model.Repositories.Count(r => r.Health.Verdict == HealthVerdict.Recoverable);
+        var needsAttention = _model.Repositories.Count(r => r.Health.Verdict != HealthVerdict.Recoverable);
 
         var grid = new Grid
         {
@@ -377,32 +384,35 @@ public sealed class MainWindow : Window
         };
 
         Add(grid, new KpiStatCard(
-            "Last backup",
-            Relative(backup),
-            backup is null ? "None" : "Completed",
-            backup is null ? Muted : Recoverable,
-            backup is null ? InfoSurface : RecoverableSurface), 0);
+            "Protected sources",
+            total.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            total == 0 ? "None configured" : "Configured",
+            total == 0 ? Muted : Ink,
+            total == 0 ? InfoSurface : Surface), 0);
 
+        var backupAllGood = total > 0 && backedUpRecently == total;
         Add(grid, new KpiStatCard(
-            "Integrity check",
-            Relative(check),
-            check is null ? "Not checked" : "Healthy",
-            check is null ? Unproven : Recoverable,
-            check is null ? UnprovenSurface : RecoverableSurface), 1);
+            "Backed up recently",
+            total == 0 ? "0" : $"{backedUpRecently} of {total}",
+            total == 0 ? "No sources" : backupAllGood ? "All up to date" : $"{total - backedUpRecently} pending",
+            total == 0 ? Muted : backupAllGood ? Recoverable : Unproven,
+            total == 0 ? InfoSurface : backupAllGood ? RecoverableSurface : UnprovenSurface), 1);
 
+        var provenAllGood = total > 0 && recoveryProven == total;
         Add(grid, new KpiStatCard(
-            "Proven restore",
-            Relative(restore),
-            restore is null ? "Not proven" : "Verified",
-            restore is null ? Unproven : Recoverable,
-            restore is null ? UnprovenSurface : RecoverableSurface), 2);
+            "Recovery proven",
+            total == 0 ? "0" : $"{recoveryProven} of {total}",
+            total == 0 ? "No sources" : provenAllGood ? "All verified" : $"{total - recoveryProven} unproven",
+            total == 0 ? Muted : provenAllGood ? Recoverable : Unproven,
+            total == 0 ? InfoSurface : provenAllGood ? RecoverableSurface : UnprovenSurface), 2);
 
+        var hasAttention = needsAttention > 0;
         Add(grid, new KpiStatCard(
-            "Storage protection",
-            immutable ? "Immutable" : "Standard",
-            immutable ? "Protected" : "Review",
-            immutable ? Recoverable : Unproven,
-            immutable ? RecoverableSurface : UnprovenSurface), 3);
+            "Needs attention",
+            total == 0 ? "0" : needsAttention.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            total == 0 ? "None" : hasAttention ? $"{needsAttention} source(s) at risk" : "All healthy",
+            hasAttention ? Failure : Recoverable,
+            hasAttention ? AtRiskSurface : RecoverableSurface), 3);
 
         return grid;
     }
@@ -529,14 +539,15 @@ public sealed class MainWindow : Window
             Spacing = 8
         };
 
+        var colors = AuditBadgeColors();
         var badge = new Border
         {
-            Background = RecoverableSurface,
-            BorderBrush = Recoverable,
+            Background = colors.Background,
+            BorderBrush = colors.Foreground,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(7, 2),
-            Child = Text(AuditBadgeText(), 11, FontWeight.SemiBold, Recoverable)
+            Child = Text(AuditBadgeText(), 11, FontWeight.SemiBold, colors.Foreground)
         };
         badgeStack.Children.Add(badge);
 
@@ -554,7 +565,7 @@ public sealed class MainWindow : Window
         leftStack.Children.Add(badgeStack);
 
         var descText = Text(
-            _auditLedgerStatus ?? "Operation receipts are monotonic and cryptographically chained. Gaps or tampering are mathematically impossible to hide.",
+            _auditLedgerStatus ?? "Operation receipts are monotonic and cryptographically chained. Verification validates each receipt hash and sequence continuity on disk.",
             12, FontWeight.Normal, Muted, wrap: true);
         leftStack.Children.Add(descText);
 
@@ -724,8 +735,7 @@ public sealed class MainWindow : Window
             var restoreFiles = Primary("Restore files from a recovery kit");
             restoreFiles.Click += async (_, _) =>
             {
-                if (await EnsurePrivilegesAsync())
-                    await new FileRecoveryWindow(_fileRecovery()).ShowDialog(this);
+                await new FileRecoveryWindow(_fileRecovery()).ShowDialog(this);
             };
             body.Children.Add(restoreFiles);
         }
@@ -812,18 +822,7 @@ public sealed class MainWindow : Window
         details.Children.Add(DetailRow("Last Backup", Absolute(facts.LastBackupAt)));
         details.Children.Add(DetailRow("Integrity Check", Absolute(facts.LastHealthyCheckAt)));
         details.Children.Add(DetailRow("Proven Restore", Absolute(facts.LastProvenRestoreAt)));
-        details.Children.Add(DetailRow("Evidence Match", facts.LastProvenRestoreAt is null ? "Pending drill" : "Exact byte match against restic tree manifest"));
-
-        var openFolderBtn = Secondary("Open Proof Location in Explorer");
-        openFolderBtn.Click += (_, _) =>
-        {
-            var runsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Fortiq", "runs");
-            if (Directory.Exists(runsDir))
-            {
-                Process.Start(new ProcessStartInfo { FileName = runsDir, UseShellExecute = true });
-            }
-        };
-        details.Children.Add(new StackPanel { Margin = new Thickness(0, 8, 0, 0), Children = { openFolderBtn } });
+        details.Children.Add(DetailRow("Evidence Match", facts.LastProvenRestoreAt is null ? "Pending drill" : "Restore completed and restored bytes were reconciled on disk."));
 
         return Card(details, Surface, Line, new Thickness(20));
     }
@@ -953,34 +952,41 @@ public sealed class MainWindow : Window
         themeGroup.Children.Add(themeSelector);
         body.Children.Add(Card(themeGroup, Surface, Line, new Thickness(20)));
 
-        // 2. Windows Service Management
+        // 2. Windows Background Protection
         var serviceGroup = new StackPanel { Spacing = 12 };
-        serviceGroup.Children.Add(Text("Windows Background Service", 16, FontWeight.SemiBold, Ink));
-        serviceGroup.Children.Add(Text("Runs scheduled automated backups and periodic integrity verifications.", 12, FontWeight.Normal, Muted));
+        serviceGroup.Children.Add(Text("Background Protection", 16, FontWeight.SemiBold, Ink));
+        serviceGroup.Children.Add(Text("The Windows background service executes scheduled backups and periodic integrity verifications.", 12, FontWeight.Normal, Muted));
 
         var serviceRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), VerticalAlignment = VerticalAlignment.Center };
+        var isRunning = _settings.IsServiceRunning;
+        var statusHeadline = isRunning
+            ? "● Running — Backups continue even when Fortiq is closed."
+            : "○ Stopped — Scheduled backups are paused until the service is running.";
+
         serviceRow.Children.Add(new StackPanel
         {
             Spacing = 4,
             Children =
             {
-                // The status is a word now, not a record dump, and this says what the word means for
-                // the person's backups rather than restating it.
-                Text(ServiceStatusHeadline(), 14, FontWeight.SemiBold, Ink),
-                Text(_installed ? "Managed by the installed Fortiq service" : "Portable mode: no background scheduler", 12, FontWeight.Normal, Muted)
+                Text(statusHeadline, 14, FontWeight.SemiBold, isRunning ? Recoverable : Failure),
+                Text(_installed ? "Managed by the Windows background service (NT SERVICE\\Fortiq)" : "Portable mode: no background scheduler", 12, FontWeight.Normal, Muted)
             }
         });
 
-        var toggleServiceBtn = Secondary(_settings.IsServiceRunning ? "Stop Service" : "Start Service");
-        toggleServiceBtn.IsEnabled = _installed && !_settings.IsBusy;
-        toggleServiceBtn.Click += async (_, _) =>
+        if (!_settings.IsServiceRunning && _installed)
         {
-            if (!await EnsurePrivilegesAsync()) return;
-            await _settings.ToggleServiceAsync();
-            RenderSettings();
-        };
-        Grid.SetColumn(toggleServiceBtn, 1);
-        serviceRow.Children.Add(toggleServiceBtn);
+            var repairServiceBtn = Primary("Repair Service");
+            repairServiceBtn.IsEnabled = !_settings.IsBusy;
+            repairServiceBtn.Click += async (_, _) =>
+            {
+                if (!await EnsurePrivilegesAsync()) return;
+                await _settings.ToggleServiceAsync();
+                RenderSettings();
+            };
+            Grid.SetColumn(repairServiceBtn, 1);
+            serviceRow.Children.Add(repairServiceBtn);
+        }
+
         serviceGroup.Children.Add(serviceRow);
         if (_settings.StatusMessage is { } statusMessage)
             serviceGroup.Children.Add(Text(statusMessage, 12, FontWeight.Normal, Failure, true));
@@ -1020,7 +1026,11 @@ public sealed class MainWindow : Window
             _preferences.UpdateStartWithWindows(isChecked);
         };
         trayGroup.Children.Add(autostartCheck);
-        trayGroup.Children.Add(Text("When running, Fortiq stays in the notification tray so recovery health is continuously verified. Closing the window hides it to the tray.", 11, FontWeight.Normal, Muted, true));
+        trayGroup.Children.Add(Text(
+            _installed
+                ? "Closing this window hides the Fortiq status app. The Windows background service continues backups independently."
+                : "In portable mode, closing this window exits Fortiq. Scheduled background backups require an installed service.",
+            11, FontWeight.Normal, Muted, true));
 
         var exitAppBtn = Secondary("Exit Fortiq");
         exitAppBtn.Click += (_, _) => ExplicitExit();
@@ -1087,17 +1097,33 @@ public sealed class MainWindow : Window
         _ => string.Empty
     };
 
-    /// <summary>
-    /// What the audit chain badge may honestly claim.
-    /// </summary>
-    /// <remarks>
-    /// It read "Audit Chain: Verified" always, including on a machine with no repositories and so no
-    /// receipts at all. An empty chain is not a verified one, and a green badge that says it is
-    /// teaches people the badge means nothing - which is expensive for the one badge in this product
-    /// that has to mean something.
-    /// </remarks>
-    private string AuditBadgeText() =>
-        _model.Repositories.Count == 0 ? "Audit chain: nothing recorded yet" : "Audit chain: verified";
+    private string AuditBadgeText()
+    {
+        if (_model.Repositories.Count == 0) return "Audit chain: nothing recorded yet";
+        if (_auditLedgerStatus is not null)
+        {
+            return _auditLedgerStatus.Contains("anomaly", StringComparison.OrdinalIgnoreCase) ||
+                   _auditLedgerStatus.Contains("tampering", StringComparison.OrdinalIgnoreCase) ||
+                   _auditLedgerStatus.Contains("failed", StringComparison.OrdinalIgnoreCase)
+                ? "Audit chain: anomaly detected"
+                : "Audit chain: verified";
+        }
+        return "Audit chain: not checked yet";
+    }
+
+    private (IBrush Background, IBrush Foreground) AuditBadgeColors()
+    {
+        if (_model.Repositories.Count == 0) return (InfoSurface, Muted);
+        if (_auditLedgerStatus is not null)
+        {
+            return _auditLedgerStatus.Contains("anomaly", StringComparison.OrdinalIgnoreCase) ||
+                   _auditLedgerStatus.Contains("tampering", StringComparison.OrdinalIgnoreCase) ||
+                    _auditLedgerStatus.Contains("failed", StringComparison.OrdinalIgnoreCase)
+                ? (AtRiskSurface, Failure)
+                : (RecoverableSurface, Recoverable);
+        }
+        return (UnprovenSurface, Unproven);
+    }
 
     private static Grid Header(string title, string subtitle, string? action = null, Func<Task>? handler = null)
     {
@@ -1161,12 +1187,35 @@ public sealed class MainWindow : Window
             }
         };
         await dialog.ShowDialog(this);
-        if (launched) Close();
+        if (launched) ExplicitExit();
         return false;
     }
 
     private async Task ProtectAsync()
     {
+        if (_installed && OperatingSystem.IsWindows() && !Fortiq.Infrastructure.Keys.WindowsTpmEnvelope.IsAvailable)
+        {
+            var explanation = Text(
+                "Automatic backups aren't available on this PC.\n\n" +
+                "Automatic Community Protection requires Windows with a TPM 2.0 security chip for device-bound unlock. " +
+                "You can still use Fortiq for manual file recovery from existing recovery kits.",
+                14, FontWeight.Normal, Ink, true);
+            var okBtn = Primary("OK");
+            var dlg = new Window
+            {
+                Title = "Automatic protection unavailable", Width = 480, Height = 240,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Content = new StackPanel
+                {
+                    Margin = new Thickness(24), Spacing = 16,
+                    Children = { explanation, okBtn }
+                }
+            };
+            okBtn.Click += (_, _) => dlg.Close();
+            await dlg.ShowDialog(this);
+            return;
+        }
+
         if (_wizard is null || !await EnsurePrivilegesAsync()) return;
         await new ProtectRepositoryWindow(_wizard()).ShowDialog(this);
         await RefreshAsync();

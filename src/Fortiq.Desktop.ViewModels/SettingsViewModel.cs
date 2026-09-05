@@ -27,6 +27,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action<AppThemePreference>? ThemeChanged;
 
+    public Func<bool, bool>? SetAutostartAction { get; set; }
+
     public bool StartWithWindows
     {
         get => _startWithWindows;
@@ -34,9 +36,33 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         {
             if (Set(ref _startWithWindows, value))
             {
-                if (OperatingSystem.IsWindows())
+                if (SetAutostartAction != null)
                 {
-                    Fortiq.Platform.Windows.WindowsAutostartController.SetAutostartEnabled(value);
+                    var success = SetAutostartAction(value);
+                    if (!success)
+                    {
+                        _startWithWindows = !value;
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StartWithWindows)));
+                        StatusMessage = "Could not update Windows startup registration in the registry.";
+                    }
+                    else
+                    {
+                        StatusMessage = null;
+                    }
+                }
+                else if (OperatingSystem.IsWindows())
+                {
+                    var success = Fortiq.Platform.Windows.WindowsAutostartController.SetAutostartEnabled(value);
+                    if (!success)
+                    {
+                        _startWithWindows = !value;
+                        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StartWithWindows)));
+                        StatusMessage = "Could not update Windows startup registration in the registry.";
+                    }
+                    else
+                    {
+                        StatusMessage = null;
+                    }
                 }
             }
         }

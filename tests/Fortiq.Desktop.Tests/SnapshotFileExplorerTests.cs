@@ -77,6 +77,33 @@ public sealed class SnapshotFileExplorerTests
 
         model.SetSearchQuery(string.Empty);
         Assert.Equal(3, model.FilteredFiles.Count);
+        Assert.Equal("3 files in backup. Select one to restore.", model.SearchFilterSummary);
+    }
+
+    [Fact]
+    public async Task SearchCapsAtMaxDisplayResultsAndSetsWarningSummary()
+    {
+        var manyFiles = Enumerable.Range(1, 600)
+            .Select(i => new SnapshotFileItem($"file_{i:D4}.txt", $"/C/folder/file_{i:D4}.txt", "file", 100, null))
+            .ToList();
+
+        var stub = new StubFileRecovery { Files = manyFiles };
+        var model = new FileRecoveryViewModel(stub);
+        await model.LoadAsync(Access);
+        await model.LoadFilesAsync(Snapshot);
+
+        Assert.Equal(600, model.Files.Count);
+        Assert.Equal(FileRecoveryViewModel.MaxDisplayResults, model.FilteredFiles.Count);
+        Assert.Equal("Showing first 500 of 600 files. Use search to filter.", model.SearchFilterSummary);
+
+        model.SetSearchQuery("file_005");
+        // file_0050 to file_0059 and file_005 -> total 11
+        Assert.True(model.FilteredFiles.Count < FileRecoveryViewModel.MaxDisplayResults);
+        Assert.Equal($"Showing {model.FilteredFiles.Count} files matching \"file_005\".", model.SearchFilterSummary);
+
+        model.SetSearchQuery("nonexistent_item");
+        Assert.Empty(model.FilteredFiles);
+        Assert.Equal("No files match \"nonexistent_item\".", model.SearchFilterSummary);
     }
 
     [Fact]

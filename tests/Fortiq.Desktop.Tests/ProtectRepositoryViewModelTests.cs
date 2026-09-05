@@ -163,6 +163,18 @@ public sealed class ProtectRepositoryViewModelTests
         Assert.Contains("[redacted]", result.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AutomaticBackupsUnavailableReasonIsPreserved()
+    {
+        var model = new ProtectRepositoryViewModel(
+            new FakeCreator(),
+            automaticBackupsAvailable: false,
+            automaticBackupsUnavailableReason: "No security chip found. Automatic backups aren't available on this PC.");
+
+        Assert.False(model.AutomaticBackupsAvailable);
+        Assert.Equal("No security chip found. Automatic backups aren't available on this PC.", model.AutomaticBackupsUnavailableReason);
+    }
+
     private static string[] Words() => Mnemonic.Split(' ');
 
     private static ProtectRepositoryViewModel Wizard() =>

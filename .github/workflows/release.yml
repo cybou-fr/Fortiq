@@ -89,6 +89,7 @@ jobs:
           subject-path: |
             artifacts/release/recover/Fortiq.Recover.exe
             artifacts/release/recover/Fortiq.PasswordHelper.exe
+            artifacts/release/Fortiq-Community-*.zip
             artifacts/release/sbom.json
             artifacts/release/SHA256SUMS
 

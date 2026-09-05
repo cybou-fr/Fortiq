@@ -343,8 +343,11 @@ public sealed class ProtectRepositoryWindow : Window
     {
         if (!_model.AutomaticBackupsAvailable)
         {
-            _content.Children.Add(SectionTitle("Portable mode", "Automatic backups are unavailable in this mode."));
-            _content.Children.Add(Warning("This creates a repository and recovery kit only. Your files will not be backed up automatically. Install Fortiq and configure protection there to enable scheduled backups."));
+            var title = "Automatic backups unavailable";
+            var message = _model.AutomaticBackupsUnavailableReason
+                ?? "Automatic backups are unavailable in this mode. You can still use Fortiq for manual recovery.";
+            _content.Children.Add(SectionTitle(title, "Automatic background backups cannot run on this configuration."));
+            _content.Children.Add(Warning(message));
             SetActions(Footer("Back", "Next", () => { _setupStep = 3; Render(); }));
             return;
         }
@@ -378,7 +381,7 @@ public sealed class ProtectRepositoryWindow : Window
         summary.Children.Add(Summary("Storage Destination", _model.RepositoryLocation));
         summary.Children.Add(Summary("Protected Source", _model.SourcePath));
         summary.Children.Add(Summary("Recovery Kit Location", _model.KitDirectory));
-        summary.Children.Add(Summary("Backup Recurrence", _model.AutomaticBackupsAvailable ? "Nightly at 02:30 (Automatic)" : "Unavailable in portable mode"));
+        summary.Children.Add(Summary("Backup Recurrence", _model.AutomaticBackupsAvailable ? "Nightly at 02:30 (Automatic)" : "Manual / Recovery kit only"));
 
         _content.Children.Add(Card(summary));
         _content.Children.Add(Warning("Next, Fortiq will display your 24-word disaster recovery phrase. You must write it down and keep it offline."));

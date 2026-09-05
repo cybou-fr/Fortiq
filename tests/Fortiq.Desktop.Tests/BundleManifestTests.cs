@@ -79,6 +79,40 @@ public sealed class BundleManifestTests : IDisposable
     }
 
     [Fact]
+    public void ValidateBundleSucceedsWithReadmeFirstInPayload()
+    {
+        var dummyBytes = "Fortiq Service Binary Content"u8.ToArray();
+        var dummyHash = Convert.ToHexStringLower(SHA256.HashData(dummyBytes));
+        var readmeBytes = "Welcome to Fortiq Community Edition"u8.ToArray();
+        var readmeHash = Convert.ToHexStringLower(SHA256.HashData(readmeBytes));
+
+        var svcRelative = "service\\Fortiq.Service.exe";
+        var svcFull = Path.Combine(_tempDir, svcRelative);
+        Directory.CreateDirectory(Path.GetDirectoryName(svcFull)!);
+        File.WriteAllBytes(svcFull, dummyBytes);
+
+        var readmeFull = Path.Combine(_tempDir, "README-FIRST.txt");
+        File.WriteAllBytes(readmeFull, readmeBytes);
+
+        var manifest = new InstallationManager.BundleManifest(
+            "fortiq.bundle-manifest",
+            "1.0.0",
+            "win-x64",
+            DateTimeOffset.UtcNow.ToString("O"),
+            new[]
+            {
+                new InstallationManager.BundleComponentManifest("Fortiq Service", "service", svcRelative, true, dummyHash)
+            },
+            new[]
+            {
+                new InstallationManager.BundleFileManifest("service/Fortiq.Service.exe", dummyBytes.Length, dummyHash),
+                new InstallationManager.BundleFileManifest("README-FIRST.txt", readmeBytes.Length, readmeHash)
+            });
+
+        InstallationManager.ValidateBundle(_tempDir, manifest);
+    }
+
+    [Fact]
     public void ValidateBundleThrowsWhenRequiredComponentIsMissing()
     {
         var manifest = new InstallationManager.BundleManifest(
