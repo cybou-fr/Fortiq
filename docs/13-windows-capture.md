@@ -1,6 +1,6 @@
 # Windows Capture: VSS & USN Change Journal
 
-> **Implementation status: Partially implemented.** VSS via `--use-fs-snapshot` is implemented. **USN Change Journal inspection is not** — nothing in `src/` reads the journal.
+> **Implementation status: Implemented.** VSS via `--use-fs-snapshot` is implemented. NTFS USN Change Journal inspection, checkpoint continuity verification, ransomware anomaly heuristics, and stratified sampling are implemented in `Fortiq.Platform.Windows` and `Fortiq.Domain`.
 
 
 ## Objective
