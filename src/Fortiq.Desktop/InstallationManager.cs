@@ -14,7 +14,8 @@ public sealed record InstallOptions(
     bool InstallService = true,
     bool AddToPath = true,
     string? SourceDirectory = null,
-    bool ProvisionAcls = true);
+    bool ProvisionAcls = true,
+    bool AutoStartOnLogon = true);
 
 public sealed record UninstallOptions(
     bool PurgeData = false,
@@ -41,10 +42,11 @@ public sealed class InstallationManager : IInstallationOperations
         string targetDir,
         bool installService,
         bool addToPath,
+        bool autoStartOnLogon,
         IProgress<(string Message, double Percent)> progress,
         CancellationToken cancellationToken)
     {
-        var options = new InstallOptions(targetDir, installService, addToPath);
+        var options = new InstallOptions(targetDir, installService, addToPath, AutoStartOnLogon: autoStartOnLogon);
 
         // If running as Administrator, execute installation directly in-process
         if (!OperatingSystem.IsWindows() || WindowsPrivilegeChecker.IsElevated())
@@ -154,6 +156,13 @@ public sealed class InstallationManager : IInstallationOperations
                 progress?.Report(new("Configuring system PATH...", 95));
                 TryAddDirectoryToPath(targetDir);
             }
+
+            if (options.AutoStartOnLogon)
+            {
+                progress?.Report(new("Configuring Windows autostart on logon...", 98));
+                var installedDesktopExe = Path.Combine(targetDir, "Fortiq.Desktop.exe");
+                WindowsAutostartController.SetAutostartEnabled(true, installedDesktopExe);
+            }
         }
 
         progress?.Report(new("Installation completed successfully.", 100));
@@ -167,6 +176,11 @@ public sealed class InstallationManager : IInstallationOperations
     {
         ArgumentNullException.ThrowIfNull(options);
         var targetDir = Path.GetFullPath(options.TargetDirectory ?? DefaultInstallPath);
+
+        if (OperatingSystem.IsWindows())
+        {
+            WindowsAutostartController.SetAutostartEnabled(false);
+        }
 
         progress?.Report(new("Stopping and removing Windows Service...", 20));
         if (OperatingSystem.IsWindows())

@@ -41,8 +41,12 @@ public sealed class FortiqApplication : Avalonia.Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            desktop.ShutdownMode = Avalonia.Controls.ShutdownMode.OnExplicitShutdown;
+
             var args = desktop.Args ?? Array.Empty<string>();
             var isPortable = args.Contains("--portable", StringComparer.OrdinalIgnoreCase);
+            var isTrayLaunch = args.Contains("--tray", StringComparer.OrdinalIgnoreCase)
+                || args.Contains("--minimized", StringComparer.OrdinalIgnoreCase);
 
             var message = new Avalonia.Controls.TextBlock
             {
@@ -58,6 +62,16 @@ public sealed class FortiqApplication : Avalonia.Application
                     Margin = new Thickness(24), Spacing = 16, Children = { message, retry }
                 }
             };
+            if (isTrayLaunch)
+            {
+                loading.Opacity = 0;
+                loading.ShowInTaskbar = false;
+                loading.Width = 0;
+                loading.Height = 0;
+                loading.WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.Manual;
+                loading.Position = new PixelPoint(-20000, -20000);
+            }
+
             desktop.MainWindow = loading;
             var closed = false;
             loading.Closed += (_, _) => closed = true;
@@ -72,7 +86,12 @@ public sealed class FortiqApplication : Avalonia.Application
                     if (closed) return;
                     if (isPortable || status.IsInstalled)
                     {
-                        desktop.MainWindow = CreateMainWindow(installed: status.IsInstalled && !isPortable);
+                        var mainWindow = CreateMainWindow(installed: status.IsInstalled && !isPortable);
+                        desktop.MainWindow = mainWindow;
+                        if (!isTrayLaunch)
+                        {
+                            mainWindow.Show();
+                        }
                     }
                     else
                     {
@@ -97,13 +116,21 @@ public sealed class FortiqApplication : Avalonia.Application
                         };
 
                         desktop.MainWindow = installWindow;
+                        installWindow.Show();
                     }
-                    desktop.MainWindow.Show();
                     loading.Close();
                 }
                 catch (Exception error)
                 {
                     if (closed) return;
+                    if (isTrayLaunch)
+                    {
+                        loading.Opacity = 1;
+                        loading.ShowInTaskbar = true;
+                        loading.Width = 460;
+                        loading.Height = 200;
+                        loading.WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterScreen;
+                    }
                     message.Text = "Fortiq could not start. " + error.Message;
                     retry.IsVisible = true;
                 }

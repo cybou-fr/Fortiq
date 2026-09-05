@@ -6,7 +6,7 @@ namespace Fortiq.Desktop.ViewModels;
 
 public interface IInstallationOperations
 {
-    Task<int> ExecuteInstallAsync(string targetDir, bool installService, bool addToPath, IProgress<(string Message, double Percent)> progress, CancellationToken cancellationToken);
+    Task<int> ExecuteInstallAsync(string targetDir, bool installService, bool addToPath, bool autoStartOnLogon, IProgress<(string Message, double Percent)> progress, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -23,6 +23,7 @@ public sealed class InstallViewModel : INotifyPropertyChanged
     private string _installDirectory;
     private bool _installService = true;
     private bool _addToPath = true;
+    private bool _autoStartOnLogon = true;
     private string _progressMessage = "Ready to install.";
     private double _progressPercent;
     private string? _errorMessage;
@@ -114,6 +115,12 @@ public sealed class InstallViewModel : INotifyPropertyChanged
         set => SetField(ref _addToPath, value);
     }
 
+    public bool AutoStartOnLogon
+    {
+        get => _autoStartOnLogon;
+        set => SetField(ref _autoStartOnLogon, value);
+    }
+
     public string ProgressMessage
     {
         get => _progressMessage;
@@ -132,7 +139,7 @@ public sealed class InstallViewModel : INotifyPropertyChanged
         set => SetField(ref _errorMessage, value);
     }
 
-    public bool PrerequisitesMet => _status is null || _status.Platform.DotNetRuntimeValid;
+    public bool PrerequisitesMet => _status is null || (_status.Platform.DotNetRuntimeValid && _status.Engine.HashVerified);
 
     public bool CanInstall => !IsInstalling && !string.IsNullOrWhiteSpace(InstallDirectory) && PrerequisitesMet;
 
@@ -210,7 +217,7 @@ public sealed class InstallViewModel : INotifyPropertyChanged
                     ProgressPercent = p.Percent;
                 });
 
-                var exitCode = await _operations.ExecuteInstallAsync(InstallDirectory, InstallService, AddToPath, progress, cancellationToken);
+                var exitCode = await _operations.ExecuteInstallAsync(InstallDirectory, InstallService, AddToPath, AutoStartOnLogon, progress, cancellationToken);
                 if (exitCode == 66)
                 {
                     ErrorMessage = "Administrative elevation (UAC) was declined. Installation was cancelled.";

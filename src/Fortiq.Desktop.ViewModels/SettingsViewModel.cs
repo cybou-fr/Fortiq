@@ -22,9 +22,25 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private bool _isServiceRunning;
     private bool _isBusy;
     private string? _statusMessage;
+    private bool _startWithWindows;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action<AppThemePreference>? ThemeChanged;
+
+    public bool StartWithWindows
+    {
+        get => _startWithWindows;
+        set
+        {
+            if (Set(ref _startWithWindows, value))
+            {
+                if (OperatingSystem.IsWindows())
+                {
+                    Fortiq.Platform.Windows.WindowsAutostartController.SetAutostartEnabled(value);
+                }
+            }
+        }
+    }
 
     public AppThemePreference ThemePreference
     {
@@ -77,6 +93,10 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         LogsDirectory = logsDirectory ?? (string.IsNullOrEmpty(dataDirectory) ? string.Empty : Path.Combine(dataDirectory, "logs"));
         AppVersion = typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
         RuntimeVersion = Environment.Version.ToString(3);
+        if (OperatingSystem.IsWindows())
+        {
+            _startWithWindows = Fortiq.Platform.Windows.WindowsAutostartController.IsAutostartEnabled();
+        }
     }
 
     public async Task RefreshServiceStatusAsync()

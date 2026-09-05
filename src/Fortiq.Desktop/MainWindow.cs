@@ -38,6 +38,9 @@ public sealed class MainWindow : Window
     private RepositoryRowViewModel? _kitSource;
     private string? _auditLedgerStatus;
     private bool _auditLedgerVerifying;
+    private readonly Action<string>? _updateTrayStatus;
+    private readonly Action? _disposeTray;
+    private bool _isExplicitExit;
 
     public MainWindow(
         RepositoriesViewModel model,
@@ -90,7 +93,31 @@ public sealed class MainWindow : Window
             if (!_model.Busy) await RefreshAsync();
         };
         Opened += (_, _) => refreshTimer.Start();
-        Closed += (_, _) => refreshTimer.Stop();
+
+        var trayIcon = new FortiqTrayIcon(ShowFromTray, ExplicitExit);
+        _updateTrayStatus = trayIcon.UpdateStatus;
+        _disposeTray = trayIcon.Dispose;
+
+        Closed += (_, _) =>
+        {
+            refreshTimer.Stop();
+            _disposeTray();
+        };
+
+        Closing += (sender, e) =>
+        {
+            if (!_isExplicitExit)
+            {
+                e.Cancel = true;
+                Hide();
+            }
+        };
+
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            _isExplicitExit = true;
+            _disposeTray();
+        };
 
         RenderActive();
     }
@@ -227,6 +254,7 @@ public sealed class MainWindow : Window
 
         _statusDot.Background = brush;
         _statusLabel.Text = label;
+        _updateTrayStatus?.Invoke(label);
     }
 
     private void RenderActive()
@@ -905,7 +933,31 @@ public sealed class MainWindow : Window
         storageGroup.Children.Add(folderButtons);
         body.Children.Add(Card(storageGroup, Surface, Line, new Thickness(20)));
 
-        // 4. About Fortiq
+        // 4. Startup & System Tray
+        var trayGroup = new StackPanel { Spacing = 12 };
+        trayGroup.Children.Add(Text("Startup & System Tray", 16, FontWeight.SemiBold, Ink));
+        trayGroup.Children.Add(Text("Control background monitoring and automatic launch behavior.", 12, FontWeight.Normal, Muted));
+
+        var autostartCheck = new CheckBox
+        {
+            Content = "Start Fortiq automatically when signing in to Windows (starts in tray)",
+            IsChecked = _settings.StartWithWindows,
+            IsEnabled = OperatingSystem.IsWindows()
+        };
+        autostartCheck.IsCheckedChanged += (_, _) =>
+        {
+            _settings.StartWithWindows = autostartCheck.IsChecked ?? false;
+        };
+        trayGroup.Children.Add(autostartCheck);
+        trayGroup.Children.Add(Text("When running, Fortiq stays in the notification tray so recovery health is continuously verified. Closing the window hides it to the tray.", 11, FontWeight.Normal, Muted, true));
+
+        var exitAppBtn = Secondary("Exit Fortiq");
+        exitAppBtn.Click += (_, _) => ExplicitExit();
+        trayGroup.Children.Add(new StackPanel { Margin = new Thickness(0, 4, 0, 0), Children = { exitAppBtn } });
+
+        body.Children.Add(Card(trayGroup, Surface, Line, new Thickness(20)));
+
+        // 5. About Fortiq
         var aboutGroup = new StackPanel { Spacing = 8 };
         aboutGroup.Children.Add(Text("About Fortiq", 16, FontWeight.SemiBold, Ink));
         aboutGroup.Children.Add(DetailRow("Version", _settings.AppVersion));
@@ -1152,4 +1204,22 @@ public sealed class MainWindow : Window
 
     private static string Absolute(DateTimeOffset? value) =>
         value is null ? "Not available" : value.Value.LocalDateTime.ToString("g", System.Globalization.CultureInfo.CurrentCulture);
+
+    public void ShowFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    public void ExplicitExit()
+    {
+        _isExplicitExit = true;
+        _disposeTray?.Invoke();
+        Close();
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.Shutdown();
+        }
+    }
 }

@@ -20,6 +20,7 @@ public sealed class InstallWindow : Window
     private readonly StackPanel _readinessContainer = new() { Spacing = 10 };
     private readonly TextBox _pathTextBox = new();
     private readonly CheckBox _serviceCheckBox = new();
+    private readonly CheckBox _autostartCheckBox = new();
     private readonly CheckBox _pathCheckBox = new();
     private readonly ProgressBar _progressBar = new() { Height = 4, Minimum = 0, Maximum = 100, IsVisible = false };
     private readonly TextBlock _statusText = Text(string.Empty, 12, FontWeight.Normal, Brand);
@@ -52,6 +53,10 @@ public sealed class InstallWindow : Window
         _serviceCheckBox.Content = "Back up automatically, even when Fortiq is closed";
         _serviceCheckBox.IsChecked = _model.InstallService;
         _serviceCheckBox.IsCheckedChanged += (_, _) => _model.InstallService = _serviceCheckBox.IsChecked ?? true;
+
+        _autostartCheckBox.Content = "Start Fortiq automatically when I log on to Windows (in tray)";
+        _autostartCheckBox.IsChecked = _model.AutoStartOnLogon;
+        _autostartCheckBox.IsCheckedChanged += (_, _) => _model.AutoStartOnLogon = _autostartCheckBox.IsChecked ?? true;
 
         _pathCheckBox.Content = "Let me run Fortiq commands from a terminal";
         _pathCheckBox.IsChecked = _model.AddToPath;
@@ -281,6 +286,7 @@ public sealed class InstallWindow : Window
                     }
                 },
                 _serviceCheckBox,
+                _autostartCheckBox,
                 _pathCheckBox
             }
         });
@@ -350,6 +356,7 @@ public sealed class InstallWindow : Window
         _portableButton.IsEnabled = _model.CanRunPortable;
         _pathTextBox.IsEnabled = !_model.IsInstalling;
         _serviceCheckBox.IsEnabled = !_model.IsInstalling;
+        _autostartCheckBox.IsEnabled = !_model.IsInstalling;
         _pathCheckBox.IsEnabled = !_model.IsInstalling;
     }
 

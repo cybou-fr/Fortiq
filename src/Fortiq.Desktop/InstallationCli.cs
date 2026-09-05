@@ -150,6 +150,7 @@ public static class InstallationCli
         var installService = true;
         var addToPath = true;
         var provisionAcls = true;
+        var autoStart = true;
         var silent = false;
         string? sourceDir = null;
 
@@ -176,13 +177,17 @@ public static class InstallationCli
             {
                 provisionAcls = false;
             }
+            else if (arg.Equals("--no-autostart", StringComparison.OrdinalIgnoreCase))
+            {
+                autoStart = false;
+            }
             else if (arg.Equals("--silent", StringComparison.OrdinalIgnoreCase) || arg.Equals("-s", StringComparison.OrdinalIgnoreCase))
             {
                 silent = true;
             }
         }
 
-        var options = new InstallOptions(targetDir, installService, addToPath, sourceDir, provisionAcls);
+        var options = new InstallOptions(targetDir, installService, addToPath, sourceDir, provisionAcls, autoStart);
 
         // Check if already elevated or unprivileged install requested
         var requiresElevation = OperatingSystem.IsWindows() && (installService || provisionAcls || addToPath);
@@ -416,6 +421,7 @@ Options:
   --source, --bundle <dir> Source directory or deployment bundle containing binaries.
   --no-service             Do not install or start the background Windows Service.
   --no-path                Do not modify the system PATH environment variable.
+  --no-autostart           Do not configure Fortiq to start automatically on logon.
   --no-acls                Skip ACL provisioning (for unprivileged/test environments).
   --purge-data             Destructive: remove %ProgramData%\Fortiq state and receipts audit trail.
   --silent, -s             Suppress informational console output.
