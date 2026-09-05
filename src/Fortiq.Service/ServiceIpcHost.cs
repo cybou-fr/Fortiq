@@ -190,12 +190,19 @@ public sealed class ServiceIpcHost : BackgroundService
             storage: _storage,
             protection: new S3StorageProtectionInspector(_storage));
 
-        Directory.CreateDirectory(_paths.Working);
+        // A directory of its own for this attempt. The provisioning intent that guards a half-finished
+        // run lives in the working directory, and every provision used to share one - so a single
+        // interrupted attempt left an intent that refused every later attempt, for any repository,
+        // permanently. The person seeing that refusal cannot clear it either: the directory is closed
+        // to them by design. Per-run directories keep the guard doing its job - recognising one
+        // unfinished repository - without it becoming a lock on the whole feature.
+        var working = Path.Combine(_paths.Working, "provision", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(working);
 
         var provisioned = await provisioner.CreateAsync(
             payload.RepositoryLocation,
             payload.KitDirectory,
-            _paths.Working,
+            working,
             cancellationToken,
             addDeviceUnlock: true,
             deviceKeyScope: DeviceKeyScope.Machine);

@@ -88,7 +88,10 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
         // Portable mode only. No service is running for this installation, the state directory is the
         // one carried beside the executable, and the key is scoped to the user - which is what
         // portable means and why it is a separate mode rather than a degraded one.
-        var working = _paths.Working;
+        // Its own directory per attempt, for the same reason as the service path: the provisioning
+        // intent guards one unfinished repository, and sharing one directory turned it into a lock
+        // that no later attempt could get past.
+        var working = Path.Combine(_paths.Working, "provision", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(working);
 
         var provisioned = await _provisioner.CreateAsync(

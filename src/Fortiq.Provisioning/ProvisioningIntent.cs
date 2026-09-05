@@ -39,7 +39,10 @@ internal sealed class ProvisioningIntent
         if (File.Exists(path))
         {
             throw new InvalidOperationException(
-                "This working directory holds an unfinished provisioning run; clean it up before starting another.");
+                $"'{path}' records a provisioning run that did not finish. It is left in place " +
+                "deliberately, so a repository that was never completed is not mistaken for a working " +
+                "one. Remove that file to start again - it needs an administrator, because the " +
+                "directory is closed to ordinary accounts.");
         }
 
         var document = new IntentDocument(
