@@ -1,90 +1,171 @@
+using Avalonia;
 using Avalonia.Media;
+using Avalonia.Styling;
 
 namespace Fortiq.Desktop;
 
 /// <summary>
 /// Every colour the desktop paints, in one place.
+/// Adheres to the Fluent v2 Slate design system specified in Spec 22, Spec 23, and ADR-015.
+/// Supports both Light Slate and Dark Slate themes dynamically.
 /// </summary>
-/// <remarks>
-/// This exists because of a specific failure. The palette was changed from a dark scheme to this
-/// light one across the whole client while the ADR, the UI specification and the README went on
-/// describing the old one, and nothing caught it for several commits. The colours were hex literals
-/// duplicated across two files of layout code, where a palette decision is indistinguishable from a
-/// layout tweak, so there was no diff a reviewer could look at and call a palette change.
-/// <para>
-/// Changing a colour is now one edit in one file. That is the whole point; it is not an abstraction
-/// for its own sake. See DEC-024 and ADR-015 Revision 1.
-/// </para>
-/// <para>
-/// Names describe the role, not the colour. A token called <see cref="Unproven"/> can be argued with
-/// on the merits; one called "Amber" can only be argued with on taste, and the argument that matters
-/// here is about what Fortiq is willing to claim.
-/// </para>
-/// </remarks>
 public static class DesignTokens
 {
-    /// <summary>Window background. Named in full because <c>Canvas</c> is an Avalonia control.</summary>
-    public static readonly IBrush CanvasBackground = Of("#F6F8FB");
+    private static bool _isDark;
 
-    /// <summary>Cards, panels and the navigation rail.</summary>
-    public static readonly IBrush Surface = Of("#FFFFFF");
+    public static event Action? ThemeChanged;
 
-    /// <summary>Card outlines and dividers.</summary>
-    public static readonly IBrush Line = Of("#E3E8EF");
+    public static bool IsDark => _isDark;
 
-    /// <summary>Headings and primary text.</summary>
-    public static readonly IBrush Ink = Of("#172033");
+    public static void SetTheme(ThemeVariant variant)
+    {
+        SetTheme(variant == ThemeVariant.Dark);
+    }
 
-    /// <summary>Helper text, timestamps, secondary labels.</summary>
-    public static readonly IBrush Muted = Of("#667085");
+    public static void SetTheme(bool dark)
+    {
+        if (_isDark == dark) return;
+        _isDark = dark;
+        ThemeChanged?.Invoke();
+    }
 
-    /// <summary>Primary actions, active navigation, informational text.</summary>
-    public static readonly IBrush Brand = Of("#0866D9");
+    // --- Dynamic Themed Brushes ---
 
-    /// <summary>Surface behind guidance callouts, with <see cref="InfoLine"/> as its border.</summary>
-    public static readonly IBrush InfoSurface = Of("#EAF3FF");
+    /// <summary>Window background canvas.</summary>
+    public static IBrush CanvasBackground => _isDark ? DarkCanvasBackground : LightCanvasBackground;
 
-    /// <inheritdoc cref="InfoSurface"/>
-    public static readonly IBrush InfoLine = Of("#B9D7FF");
+    /// <summary>Sidebar navigation background.</summary>
+    public static IBrush SidebarBackground => _isDark ? DarkSidebarBackground : LightSidebarBackground;
+
+    /// <summary>Cards and primary content surfaces (Surface alias).</summary>
+    public static IBrush Surface => _isDark ? DarkCardBackground : LightCardBackground;
+
+    /// <summary>Elevated surface (modals, dropdowns, hovered items).</summary>
+    public static IBrush CardElevatedBackground => _isDark ? DarkCardElevatedBackground : LightCardElevatedBackground;
+
+    /// <summary>Card hover background.</summary>
+    public static IBrush CardHoverBackground => _isDark ? DarkCardHoverBackground : LightCardHoverBackground;
+
+    /// <summary>Card outlines, dividers and subtle lines.</summary>
+    public static IBrush Line => _isDark ? DarkBorderSubtle : LightBorderSubtle;
+
+    /// <summary>Medium borders for form controls.</summary>
+    public static IBrush BorderMedium => _isDark ? DarkBorderMedium : LightBorderMedium;
+
+    /// <summary>Focus border for interactive inputs.</summary>
+    public static IBrush BorderFocus => _isDark ? DarkBorderFocus : LightBorderFocus;
+
+    /// <summary>Headings and primary text (Ink alias).</summary>
+    public static IBrush Ink => _isDark ? DarkTextPrimary : LightTextPrimary;
+
+    /// <summary>Helper text, timestamps, secondary labels (Muted alias).</summary>
+    public static IBrush Muted => _isDark ? DarkTextSecondary : LightTextSecondary;
+
+    /// <summary>Dimmed or tertiary text.</summary>
+    public static IBrush TextMuted => _isDark ? DarkTextMuted : LightTextMuted;
+
+    /// <summary>Primary actions, active navigation, brand accent.</summary>
+    public static IBrush Brand => _isDark ? DarkBrandPrimary : LightBrandPrimary;
+
+    /// <summary>Brand hover state.</summary>
+    public static IBrush BrandHover => _isDark ? DarkBrandHover : LightBrandHover;
+
+    /// <summary>Informational callout surface.</summary>
+    public static IBrush InfoSurface => _isDark ? DarkInfoSurface : LightInfoSurface;
+
+    /// <summary>Informational callout border.</summary>
+    public static IBrush InfoLine => _isDark ? DarkInfoLine : LightInfoLine;
 
     /// <summary>A step of the wizard that has not been reached yet.</summary>
-    public static readonly IBrush StepInactive = Of("#D5DBE5");
+    public static IBrush StepInactive => _isDark ? DarkStepInactive : LightStepInactive;
 
-    /// <summary>
-    /// Proven recoverable: backed up, checked, and restored from within the thresholds.
-    /// </summary>
-    public static readonly IBrush Recoverable = Of("#159455");
+    /// <summary>Proven recoverable: backed up, checked, and restored from within thresholds.</summary>
+    public static IBrush Recoverable => _isDark ? DarkStatusSuccess : LightStatusSuccess;
 
-    /// <inheritdoc cref="Recoverable"/>
-    public static readonly IBrush RecoverableSurface = Of("#EAF8F0");
+    /// <summary>Surface tint for proven recoverable status.</summary>
+    public static IBrush RecoverableSurface => _isDark ? DarkStatusSuccessBg : LightStatusSuccessBg;
 
-    /// <summary>
-    /// Backed up, but nobody has restored from it. Deliberately not green: a repository nobody has
-    /// restored from looks finished to a person, and removing that impression is why the verdict
-    /// exists at all.
-    /// </summary>
-    public static readonly IBrush Unproven = Of("#B7791F");
+    /// <summary>Unproven verdict: backed up, but not yet restored/proven.</summary>
+    public static IBrush Unproven => _isDark ? DarkStatusWarning : LightStatusWarning;
 
-    /// <inheritdoc cref="Unproven"/>
-    public static readonly IBrush UnprovenSurface = Of("#FFF8E7");
+    /// <summary>Surface tint for unproven status.</summary>
+    public static IBrush UnprovenSurface => _isDark ? DarkStatusWarningBg : LightStatusWarningBg;
 
-    /// <inheritdoc cref="Unproven"/>
-    public static readonly IBrush UnprovenLine = Of("#F4CC73");
+    /// <summary>Border for unproven cards.</summary>
+    public static IBrush UnprovenLine => _isDark ? DarkUnprovenLine : LightUnprovenLine;
 
-    /// <summary>A recovery that would fail today.</summary>
-    public static readonly IBrush AtRisk = Of("#D92D20");
+    /// <summary>At-risk verdict: backup missing, failure or critical warning.</summary>
+    public static IBrush AtRisk => _isDark ? DarkStatusDanger : LightStatusDanger;
 
-    /// <inheritdoc cref="AtRisk"/>
-    public static readonly IBrush AtRiskSurface = Of("#FFF4F2");
+    /// <summary>Surface tint for at-risk status.</summary>
+    public static IBrush AtRiskSurface => _isDark ? DarkStatusDangerBg : LightStatusDangerBg;
 
-    /// <inheritdoc cref="AtRisk"/>
-    public static readonly IBrush AtRiskLine = Of("#FDA29B");
+    /// <summary>Border for at-risk cards.</summary>
+    public static IBrush AtRiskLine => _isDark ? DarkAtRiskLine : LightAtRiskLine;
 
-    /// <summary>Text of a failure the person needs to read, rather than a verdict badge.</summary>
-    public static readonly IBrush Failure = Of("#B42318");
+    /// <summary>Text of a failure that the operator needs to read.</summary>
+    public static IBrush Failure => _isDark ? DarkFailure : LightFailure;
 
-    /// <summary>Text of a caution that is not a failure, such as the recovery-phrase warning.</summary>
-    public static readonly IBrush Caution = Of("#8A5A00");
+    /// <summary>Text of a caution that is not a failure.</summary>
+    public static IBrush Caution => _isDark ? DarkCaution : LightCaution;
+
+    // --- Static Palette Definitions ---
+
+    // Light Slate Palette
+    private static readonly IBrush LightCanvasBackground = Of("#F8FAFC");
+    private static readonly IBrush LightSidebarBackground = Of("#F1F5F9");
+    private static readonly IBrush LightCardBackground = Of("#FFFFFF");
+    private static readonly IBrush LightCardElevatedBackground = Of("#F8FAFC");
+    private static readonly IBrush LightCardHoverBackground = Of("#F1F5F9");
+    private static readonly IBrush LightBorderSubtle = Of("#E2E8F0");
+    private static readonly IBrush LightBorderMedium = Of("#CBD5E1");
+    private static readonly IBrush LightBorderFocus = Of("#2563EB");
+    private static readonly IBrush LightTextPrimary = Of("#0F172A");
+    private static readonly IBrush LightTextSecondary = Of("#475569");
+    private static readonly IBrush LightTextMuted = Of("#94A3B8");
+    private static readonly IBrush LightBrandPrimary = Of("#2563EB");
+    private static readonly IBrush LightBrandHover = Of("#1D4ED8");
+    private static readonly IBrush LightInfoSurface = Of("#EFF6FF");
+    private static readonly IBrush LightInfoLine = Of("#BFDBFE");
+    private static readonly IBrush LightStepInactive = Of("#CBD5E1");
+    private static readonly IBrush LightStatusSuccess = Of("#059669");
+    private static readonly IBrush LightStatusSuccessBg = Of("#ECFDF5");
+    private static readonly IBrush LightStatusWarning = Of("#D97706");
+    private static readonly IBrush LightStatusWarningBg = Of("#FFFBEB");
+    private static readonly IBrush LightUnprovenLine = Of("#FDE68A");
+    private static readonly IBrush LightStatusDanger = Of("#DC2626");
+    private static readonly IBrush LightStatusDangerBg = Of("#FEF2F2");
+    private static readonly IBrush LightAtRiskLine = Of("#FECACA");
+    private static readonly IBrush LightFailure = Of("#B91C1C");
+    private static readonly IBrush LightCaution = Of("#B45309");
+
+    // Dark Slate Palette
+    private static readonly IBrush DarkCanvasBackground = Of("#0F1117");
+    private static readonly IBrush DarkSidebarBackground = Of("#141720");
+    private static readonly IBrush DarkCardBackground = Of("#1A1D26");
+    private static readonly IBrush DarkCardElevatedBackground = Of("#222634");
+    private static readonly IBrush DarkCardHoverBackground = Of("#282D3D");
+    private static readonly IBrush DarkBorderSubtle = Of("#2A3042");
+    private static readonly IBrush DarkBorderMedium = Of("#374151");
+    private static readonly IBrush DarkBorderFocus = Of("#3B82F6");
+    private static readonly IBrush DarkTextPrimary = Of("#F8FAFC");
+    private static readonly IBrush DarkTextSecondary = Of("#94A3B8");
+    private static readonly IBrush DarkTextMuted = Of("#64748B");
+    private static readonly IBrush DarkBrandPrimary = Of("#3B82F6");
+    private static readonly IBrush DarkBrandHover = Of("#60A5FA");
+    private static readonly IBrush DarkInfoSurface = Of("#1E293B");
+    private static readonly IBrush DarkInfoLine = Of("#334155");
+    private static readonly IBrush DarkStepInactive = Of("#334155");
+    private static readonly IBrush DarkStatusSuccess = Of("#10B981");
+    private static readonly IBrush DarkStatusSuccessBg = Of("#163326");
+    private static readonly IBrush DarkStatusWarning = Of("#F59E0B");
+    private static readonly IBrush DarkStatusWarningBg = Of("#332712");
+    private static readonly IBrush DarkUnprovenLine = Of("#78350F");
+    private static readonly IBrush DarkStatusDanger = Of("#EF4444");
+    private static readonly IBrush DarkStatusDangerBg = Of("#331518");
+    private static readonly IBrush DarkAtRiskLine = Of("#7F1D1D");
+    private static readonly IBrush DarkFailure = Of("#F87171");
+    private static readonly IBrush DarkCaution = Of("#FBBF24");
 
     private static SolidColorBrush Of(string value) => new(Color.Parse(value));
 }

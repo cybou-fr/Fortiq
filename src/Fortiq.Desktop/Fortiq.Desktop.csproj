@@ -12,8 +12,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="..\..\assets\icon.ico" Link="Assets\icon.ico" />
-    <AvaloniaResource Include="..\..\assets\icon.png" Link="Assets\icon.png" />
+    <AvaloniaResource Include="..\..\assets\icon.ico" Link="Assets/icon.ico" />
+    <AvaloniaResource Include="..\..\assets\icon.png" Link="Assets/icon.png" />
   </ItemGroup>
 
   <ItemGroup>

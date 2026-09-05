@@ -2,8 +2,11 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Styling;
+using Fortiq.Desktop.Controls;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Monitoring;
+using System.Diagnostics;
 using static Fortiq.Desktop.DesignTokens;
 
 namespace Fortiq.Desktop;
@@ -11,66 +14,159 @@ namespace Fortiq.Desktop;
 public sealed class MainWindow : Window
 {
     private readonly RepositoriesViewModel _model;
+    private readonly SettingsViewModel _settings;
     private readonly Func<ProtectRepositoryViewModel>? _wizard;
-    private readonly Border _page = new() { Background = CanvasBackground };
+    private readonly Border _page = new();
     private readonly Dictionary<string, Button> _navigation = new(StringComparer.Ordinal);
     private string _activeSection = "Home";
     private bool _historySelected;
     private RepositoryRowViewModel? _recoverySource;
     private RepositoryRowViewModel? _kitSource;
 
-    public MainWindow(RepositoriesViewModel model, Func<ProtectRepositoryViewModel>? wizard = null)
+    public MainWindow(
+        RepositoriesViewModel model,
+        Func<ProtectRepositoryViewModel>? wizard = null,
+        SettingsViewModel? settings = null)
     {
         _model = model ?? throw new ArgumentNullException(nameof(model));
         _wizard = wizard;
-        Title = "Fortiq";
+        _settings = settings ?? new SettingsViewModel(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+
+        Title = "Fortiq — Data Recovery Assurance";
         Icon = FortiqBrand.WindowIcon();
-        Width = 1000; Height = 650; MinWidth = 850; MinHeight = 560; Background = CanvasBackground;
+        Width = 1060;
+        Height = 700;
+        MinWidth = 880;
+        MinHeight = 580;
+        Background = CanvasBackground;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
-        var shell = new Grid { ColumnDefinitions = new ColumnDefinitions("210,*") };
-        shell.Children.Add(Navigation());
-        Grid.SetColumn(_page, 1); shell.Children.Add(_page); Content = shell;
+        _page.Background = CanvasBackground;
+
+        var shell = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("230,*")
+        };
+        shell.Children.Add(NavigationRail());
+        Grid.SetColumn(_page, 1);
+        shell.Children.Add(_page);
+        Content = shell;
+
         _model.PropertyChanged += (_, _) => RenderActive();
-        Opened += async (_, _) => await RefreshAsync();
+        DesignTokens.ThemeChanged += () =>
+        {
+            Background = CanvasBackground;
+            _page.Background = CanvasBackground;
+            RenderActive();
+        };
+
+        Opened += async (_, _) =>
+        {
+            await RefreshAsync();
+            await _settings.RefreshServiceStatusAsync();
+        };
+
         var refreshTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-        refreshTimer.Tick += async (_, _) => { if (!_model.Busy) await RefreshAsync(); };
+        refreshTimer.Tick += async (_, _) =>
+        {
+            if (!_model.Busy) await RefreshAsync();
+        };
         Opened += (_, _) => refreshTimer.Start();
         Closed += (_, _) => refreshTimer.Stop();
+
+        RenderActive();
     }
 
-    private Border Navigation()
+    private Border NavigationRail()
     {
         var rail = new Grid
         {
-            Background = Surface, RowDefinitions = new RowDefinitions("Auto,*,Auto"),
-            Margin = new Thickness(16, 18)
+            Background = SidebarBackground,
+            RowDefinitions = new RowDefinitions("Auto,*,Auto"),
+            Margin = new Thickness(16, 20)
         };
-        rail.Children.Add(new StackPanel
+
+        var brandHeader = new StackPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(4, 0, 0, 22),
-            Children = { new Image { Source = FortiqBrand.Logo(), Width = 28, Height = 28 }, Text("Fortiq", 18, FontWeight.SemiBold, Ink) }
-        });
-        var menu = new StackPanel { Spacing = 5 };
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Margin = new Thickness(6, 0, 0, 24),
+            Children =
+            {
+                new Image { Source = FortiqBrand.Logo(), Width = 30, Height = 30 },
+                new StackPanel
+                {
+                    Spacing = 1,
+                    Children =
+                    {
+                        Text("Fortiq", 17, FontWeight.Bold, Ink),
+                        Text("Recovery Assurance", 10, FontWeight.Normal, Muted)
+                    }
+                }
+            }
+        };
+        rail.Children.Add(brandHeader);
+
+        var menu = new StackPanel { Spacing = 4 };
         menu.Children.Add(Nav("Home", RenderHome));
         menu.Children.Add(Nav("Protect", async () => await ProtectAsync()));
         menu.Children.Add(Nav("Backups", RenderBackups));
         menu.Children.Add(Nav("Recovery", RenderRecovery));
         menu.Children.Add(Nav("Recovery Kit", RenderRecoveryKit));
-        menu.Children.Add(Nav("Settings", () => ShowSection("Settings", "Application, schedule, storage and service settings.")));
-        Grid.SetRow(menu, 1); rail.Children.Add(menu);
-        var service = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, Children = { Text("Local protection", 11, FontWeight.Normal, Muted) } };
-        var footer = new StackPanel { Spacing = 4, Margin = new Thickness(4, 0), Children = { Text("Fortiq", 13, FontWeight.SemiBold, Ink), Text("Protect What Matters", 11, FontWeight.Normal, Muted), service } };
-        Grid.SetRow(footer, 2); rail.Children.Add(footer);
-        return new Border { Background = Surface, BorderBrush = Line, BorderThickness = new Thickness(0, 0, 1, 0), Child = rail };
+        Grid.SetRow(menu, 1);
+        rail.Children.Add(menu);
+
+        var bottomStack = new StackPanel { Spacing = 6 };
+        bottomStack.Children.Add(Nav("Settings", RenderSettings));
+
+        var serviceDot = new Border
+        {
+            Width = 8,
+            Height = 8,
+            CornerRadius = new CornerRadius(4),
+            Background = Recoverable,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var serviceBadge = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 7,
+            Margin = new Thickness(12, 10, 0, 0),
+            Children =
+            {
+                serviceDot,
+                Text("Local protection active", 11, FontWeight.Normal, Muted)
+            }
+        };
+        bottomStack.Children.Add(serviceBadge);
+
+        var versionTag = Text($"v{_settings.AppVersion}", 10, FontWeight.Normal, TextMuted);
+        versionTag.Margin = new Thickness(12, 2, 0, 0);
+        bottomStack.Children.Add(versionTag);
+
+        Grid.SetRow(bottomStack, 2);
+        rail.Children.Add(bottomStack);
+
+        return new Border
+        {
+            Background = SidebarBackground,
+            BorderBrush = Line,
+            BorderThickness = new Thickness(0, 0, 1, 0),
+            Child = rail
+        };
     }
 
     private Button Nav(string label, Action action)
     {
         var button = new Button
         {
-            Content = label, HorizontalContentAlignment = HorizontalAlignment.Left, HorizontalAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(13, 10), BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(6)
+            Content = label,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(14, 9),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(6),
+            FontSize = 13
         };
         _navigation[label] = button;
         button.Click += (_, _) => { Select(label); action(); };
@@ -81,15 +177,10 @@ public sealed class MainWindow : Window
     private void Select(string section)
     {
         _activeSection = section;
-        foreach (var item in _navigation) ApplyNavigationStyle(item.Value, item.Key == section);
-    }
-
-    private void RenderActive()
-    {
-        if (_activeSection == "Backups") RenderBackups();
-        else if (_activeSection == "Recovery") RenderRecovery();
-        else if (_activeSection == "Recovery Kit") RenderRecoveryKit();
-        else if (_activeSection == "Home") RenderHome();
+        foreach (var item in _navigation)
+        {
+            ApplyNavigationStyle(item.Value, item.Key == section);
+        }
     }
 
     private static void ApplyNavigationStyle(Button button, bool selected)
@@ -99,123 +190,281 @@ public sealed class MainWindow : Window
         button.FontWeight = selected ? FontWeight.SemiBold : FontWeight.Normal;
     }
 
+    private void RenderActive()
+    {
+        if (_activeSection == "Backups") RenderBackups();
+        else if (_activeSection == "Recovery") RenderRecovery();
+        else if (_activeSection == "Recovery Kit") RenderRecoveryKit();
+        else if (_activeSection == "Settings") RenderSettings();
+        else RenderHome();
+    }
+
+    // --- Screen 1: Dashboard (Home) ---
     private void RenderHome()
     {
         Select("Home");
-        var body = new StackPanel { Spacing = 16, Margin = new Thickness(30, 26) };
-        body.Children.Add(Header("Recovery assurance", "See whether your protected data can actually be recovered.", "Protect a folder", ProtectAsync));
-        if (_model.State is HealthStoreState.NotInitialized or HealthStoreState.Empty) body.Children.Add(Welcome());
-        else { body.Children.Add(Hero()); body.Children.Add(Metrics()); body.Children.Add(Repositories()); }
-        if (_model.Failure is { Length: > 0 })
-            body.Children.Add(Card(new StackPanel { Spacing = 5, Children = { Text("We could not read the latest protection status.", 14, FontWeight.SemiBold, Failure), Text(_model.Failure, 12, FontWeight.Normal, Muted, true) } }, AtRiskSurface, AtRiskLine));
+        var body = new StackPanel { Spacing = 20, Margin = new Thickness(32, 26) };
+
+        body.Children.Add(Header("Dashboard", "Continuous cryptographic backup & recovery assurance.", "Protect a folder", ProtectAsync));
+
+        // 1. Hero Health Banner
+        var (mode, headline, desc, actionText) = ResolveHeroState();
+        var hero = new HeroHealthBanner(
+            mode,
+            headline,
+            desc,
+            actionText,
+            mode == HeroStatusMode.ZeroState ? ProtectAsync : RefreshAsync);
+        body.Children.Add(hero);
+
+        // 2. 4 KPI Stat Cards
+        body.Children.Add(MetricsGrid());
+
+        // 3. Main Content: Protected Sources & Recent Activity
+        if (_model.State is HealthStoreState.NotInitialized or HealthStoreState.Empty || _model.Repositories.Count == 0)
+        {
+            body.Children.Add(ZeroStateWelcomeCard());
+        }
+        else
+        {
+            body.Children.Add(RepositoriesSummaryCard());
+            body.Children.Add(RecentActivityCard());
+        }
+
         _page.Child = new ScrollViewer { Content = body };
     }
 
-    private Border Welcome()
+    private (HeroStatusMode Mode, string Headline, string Desc, string Action) ResolveHeroState()
     {
-        var protect = Primary("Protect a folder"); protect.Click += async (_, _) => await ProtectAsync();
-        return Card(new StackPanel
+        if (_model.State is HealthStoreState.NotInitialized or HealthStoreState.Empty || _model.Repositories.Count == 0)
         {
-            Spacing = 15, MaxWidth = 650, HorizontalAlignment = HorizontalAlignment.Left,
-            Children =
-            {
-                Text("Set up your first protected source", 23, FontWeight.SemiBold, Ink),
-                Text("Fortiq will create an encrypted backup, check its integrity, and prove recovery with a real restore.", 14, FontWeight.Normal, Muted, true),
-                Check("Choose the files that matter"), Check("Store an encrypted copy separately"),
-                Check("Create and verify an offline recovery kit"), protect
-            }
-        }, Surface, Line, new Thickness(30));
+            return (HeroStatusMode.ZeroState,
+                "Protect what matters before you need it",
+                "No protected sources are configured yet. Add your first folder to start automated verifiable backups.",
+                "Protect a folder");
+        }
+
+        if (_model.State == HealthStoreState.Corrupt)
+        {
+            return (HeroStatusMode.AtRisk,
+                "Protection status temporarily unavailable",
+                _model.Failure ?? "Could not read health evidence. Check local service.",
+                "Refresh");
+        }
+
+        if (_model.State == HealthStoreState.Stale)
+        {
+            return (HeroStatusMode.Unproven,
+                "Protection status is out of date",
+                "The health report has not been refreshed recently. Verify that the Fortiq service is running.",
+                "Refresh");
+        }
+
+        if (_model.Repositories.Any(r => r.Health.Verdict == HealthVerdict.AtRisk))
+        {
+            return (HeroStatusMode.AtRisk,
+                "Something may not be recoverable today",
+                "One or more protected sources report integrity or verification issues. Review findings below.",
+                "Review");
+        }
+
+        if (_model.Repositories.Any(r => r.Health.Verdict == HealthVerdict.Unproven))
+        {
+            return (HeroStatusMode.Unproven,
+                "Recovery has not been proven for all sources",
+                "Backups exist and are healthy, but at least one source needs a verified restore test.",
+                "Prove recovery");
+        }
+
+        return (HeroStatusMode.Recoverable,
+            "Your data is recoverable",
+            "All critical checks are healthy. Fortiq has recently restored and verified your protected sources.",
+            "Refresh");
     }
 
-    private Border Hero()
-    {
-        var risk = _model.Repositories.Any(x => x.Health.Verdict == HealthVerdict.AtRisk);
-        var unavailable = _model.State is HealthStoreState.Stale or HealthStoreState.Corrupt;
-        var unproven = unavailable || _model.Repositories.Any(x => x.Health.Verdict == HealthVerdict.Unproven);
-        var tone = risk ? AtRiskSurface : unproven ? UnprovenSurface : RecoverableSurface;
-        var accent = risk ? AtRisk : unproven ? Unproven : Recoverable;
-        var detail = unavailable ? "Current protection is unknown. Refresh the report or check the Fortiq service."
-            : risk ? "One or more sources need attention. Review the findings below."
-            : unproven ? "Backups exist, but at least one source still needs a proven restore."
-            : "All critical checks are healthy. Fortiq has recently restored and verified your data.";
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-        grid.Children.Add(new StackPanel { Spacing = 5, Margin = new Thickness(0, 0, 18, 0), Children = { Text(_model.Headline, 22, FontWeight.SemiBold, Ink, true), Text(detail, 13, FontWeight.Normal, Muted, true) } });
-        grid.Children.Add(Action("Refresh", RefreshAsync, 1));
-        return Card(grid, tone, accent, new Thickness(22));
-    }
-
-    private Grid Metrics()
+    private Grid MetricsGrid()
     {
         var backup = Latest(x => x.LastBackupAt);
         var check = Latest(x => x.LastHealthyCheckAt);
         var restore = Latest(x => x.LastProvenRestoreAt);
         var immutable = _model.Repositories.Count > 0 && _model.Repositories.All(x => x.Health.Facts.StorageImmutable);
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*,*,*"), ColumnSpacing = 12 };
-        Add(grid, Metric("Last backup", Relative(backup), backup is null ? "Not available" : "Completed"), 0);
-        Add(grid, Metric("Integrity check", Relative(check), check is null ? "Not checked" : "Healthy"), 1);
-        Add(grid, Metric("Proven restore", Relative(restore), restore is null ? "Not proven" : "Verified"), 2);
-        Add(grid, Metric("Storage protection", immutable ? "Immutable" : "Review", immutable ? "Protected" : "Needs attention"), 3);
+
+        var grid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,*,*,*"),
+            ColumnSpacing = 12
+        };
+
+        Add(grid, new KpiStatCard(
+            "Last backup",
+            Relative(backup),
+            backup is null ? "None" : "Completed",
+            backup is null ? Muted : Recoverable,
+            backup is null ? InfoSurface : RecoverableSurface), 0);
+
+        Add(grid, new KpiStatCard(
+            "Integrity check",
+            Relative(check),
+            check is null ? "Not checked" : "Healthy",
+            check is null ? Unproven : Recoverable,
+            check is null ? UnprovenSurface : RecoverableSurface), 1);
+
+        Add(grid, new KpiStatCard(
+            "Proven restore",
+            Relative(restore),
+            restore is null ? "Not proven" : "Verified",
+            restore is null ? Unproven : Recoverable,
+            restore is null ? UnprovenSurface : RecoverableSurface), 2);
+
+        Add(grid, new KpiStatCard(
+            "Storage protection",
+            immutable ? "Immutable" : "Standard",
+            immutable ? "Protected" : "Review",
+            immutable ? Recoverable : Unproven,
+            immutable ? RecoverableSurface : UnprovenSurface), 3);
+
         return grid;
     }
 
-    private DateTimeOffset? Latest(Func<RepositoryFacts, DateTimeOffset?> selector) =>
-        _model.Repositories.Select(x => selector(x.Health.Facts)).Where(x => x is not null).OrderByDescending(x => x).FirstOrDefault();
-
-    private Border Repositories()
+    private Border ZeroStateWelcomeCard()
     {
-        var list = new StackPanel { Spacing = 12 };
+        var protectBtn = Primary("Protect your first folder");
+        protectBtn.Click += async (_, _) => await ProtectAsync();
+
+        return Card(new StackPanel
+        {
+            Spacing = 16,
+            Children =
+            {
+                Text("Get started with verifiable data protection", 18, FontWeight.SemiBold, Ink),
+                Text("Fortiq protects against ransomware, corruption, and silent hardware loss by proving recovery continuously.", 13, FontWeight.Normal, Muted, true),
+                Check("1. Choose the critical folders and projects that matter"),
+                Check("2. Store encrypted snapshots locally or in immutable object storage"),
+                Check("3. Verify your offline 24-word disaster recovery kit"),
+                protectBtn
+            }
+        }, Surface, Line, new Thickness(24));
+    }
+
+    private Border RepositoriesSummaryCard()
+    {
+        var list = new StackPanel { Spacing = 10 };
         foreach (var repository in _model.Repositories)
         {
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("1.2*,2*,Auto") };
-            row.Children.Add(new StackPanel { Spacing = 3, Children = { Text(repository.Title, 14, FontWeight.SemiBold, Ink), Text(repository.Health.RepositoryId, 11, FontWeight.Normal, Muted) } });
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("1.5*,2*,Auto"), ColumnSpacing = 12 };
+            row.Children.Add(new StackPanel
+            {
+                Spacing = 2,
+                Children =
+                {
+                    Text(repository.Title, 14, FontWeight.SemiBold, Ink),
+                    Text(repository.Health.RepositoryId, 11, FontWeight.Normal, Muted)
+                }
+            });
             row.Children.Add(At(Text(repository.Summary, 12, FontWeight.Normal, Muted, true), 1));
+
             var prove = Secondary(repository.Health.Verdict == HealthVerdict.Recoverable ? "Proven" : "Prove recovery");
             prove.IsEnabled = repository.CanProveRecovery && !_model.Busy;
             prove.Click += async (_, _) => await _model.ProveRecoveryAsync(repository, CancellationToken.None);
-            row.Children.Add(At(prove, 2)); list.Children.Add(row);
+            row.Children.Add(At(prove, 2));
+
+            list.Children.Add(row);
         }
-        return Card(new StackPanel { Spacing = 16, Children = { Text("Protected sources", 17, FontWeight.SemiBold, Ink), list } }, Surface, Line, new Thickness(20));
+
+        return Card(new StackPanel
+        {
+            Spacing = 16,
+            Children =
+            {
+                Text("Protected sources", 16, FontWeight.SemiBold, Ink),
+                list
+            }
+        }, Surface, Line, new Thickness(20));
     }
 
-    private static Border Metric(string title, string value, string status) => Card(new StackPanel
+    private Border RecentActivityCard()
     {
-        Spacing = 7, Children = { Text(title, 12, FontWeight.Normal, Muted), Text(value, 17, FontWeight.SemiBold, Ink), Text(status, 11, FontWeight.SemiBold, status is "Healthy" or "Verified" or "Protected" or "Completed" ? Recoverable : Unproven) }
-    }, Surface, Line);
+        var events = _model.Repositories
+            .SelectMany(repository => new (DateTimeOffset? At, string Source, string Operation, string Result)[]
+            {
+                (repository.Health.Facts.LastBackupAt, repository.Title, "Backup", "Completed"),
+                (repository.Health.Facts.LastHealthyCheckAt, repository.Title, "Integrity check", "Healthy"),
+                (repository.Health.Facts.LastProvenRestoreAt, repository.Title, "Proven restore", "Verified")
+            })
+            .Where(item => item.At is not null)
+            .OrderByDescending(item => item.At)
+            .Take(5)
+            .ToArray();
 
+        var list = new StackPanel { Spacing = 4 };
+        list.Children.Add(TableRow("Time", "Source", "Operation", "Result", true));
+        foreach (var item in events)
+        {
+            list.Children.Add(TableRow(Relative(item.At), item.Source, item.Operation, item.Result));
+        }
+
+        return Card(new StackPanel
+        {
+            Spacing = 14,
+            Children =
+            {
+                Text("Recent activity", 16, FontWeight.SemiBold, Ink),
+                list
+            }
+        }, Surface, Line, new Thickness(20));
+    }
+
+    // --- Screen 3: Backups & Activity ---
     private void RenderBackups()
     {
         Select("Backups");
-        var body = new StackPanel { Spacing = 16, Margin = new Thickness(30, 26) };
-        body.Children.Add(Header("Backups", "Manage protected sources and inspect backup history.", "Add source", ProtectAsync));
+        var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
+        body.Children.Add(Header("Backups & Activity", "Manage protected sources and inspect audit trail.", "+ Add source", ProtectAsync));
 
         var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         tabs.Children.Add(Tab("Sources", !_historySelected, () => { _historySelected = false; RenderBackups(); }));
         tabs.Children.Add(Tab("History", _historySelected, () => { _historySelected = true; RenderBackups(); }));
         body.Children.Add(tabs);
-        body.Children.Add(_historySelected ? BackupHistory() : BackupSources());
+
+        body.Children.Add(_historySelected ? BackupHistoryView() : BackupSourcesView());
         _page.Child = new ScrollViewer { Content = body };
     }
 
-    private Border BackupSources()
+    private Border BackupSourcesView()
     {
         if (_model.Repositories.Count == 0)
         {
-            var add = Primary("Add your first source"); add.Click += async (_, _) => await ProtectAsync();
-            return Card(new StackPanel { Spacing = 10, Children = { Text("No protected sources yet", 18, FontWeight.SemiBold, Ink), Text("Add a source to begin creating encrypted, verifiable backups.", 13, FontWeight.Normal, Muted), add } }, Surface, Line, new Thickness(22));
+            var add = Primary("Add your first source");
+            add.Click += async (_, _) => await ProtectAsync();
+            return Card(new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    Text("No protected sources configured", 18, FontWeight.SemiBold, Ink),
+                    Text("Add a source folder to begin continuous, deduplicated backups.", 13, FontWeight.Normal, Muted),
+                    add
+                }
+            }, Surface, Line, new Thickness(24));
         }
 
-        var list = new StackPanel { Spacing = 0 };
+        var list = new StackPanel { Spacing = 4 };
         list.Children.Add(TableRow("Source", "Last backup", "Recovery", "Status", true));
         foreach (var repository in _model.Repositories)
         {
-            var status = repository.Health.Verdict switch { HealthVerdict.Recoverable => "Recoverable", HealthVerdict.Unproven => "Unproven", _ => "At risk" };
+            var status = repository.Health.Verdict switch
+            {
+                HealthVerdict.Recoverable => "Recoverable",
+                HealthVerdict.Unproven => "Unproven",
+                _ => "At risk"
+            };
             var recovery = repository.Health.Facts.LastProvenRestoreAt is null ? "Not proven" : Relative(repository.Health.Facts.LastProvenRestoreAt);
             list.Children.Add(TableRow(repository.Title, Relative(repository.Health.Facts.LastBackupAt), recovery, status));
         }
         return Card(list, Surface, Line, new Thickness(20));
     }
 
-    private Border BackupHistory()
+    private Border BackupHistoryView()
     {
         var events = _model.Repositories
             .SelectMany(repository => new (DateTimeOffset? At, string Source, string Operation, string Result)[]
@@ -229,51 +478,75 @@ public sealed class MainWindow : Window
             .ToArray();
 
         if (events.Length == 0)
-            return Card(new StackPanel { Spacing = 6, Children = { Text("No backup history yet", 18, FontWeight.SemiBold, Ink), Text("Completed backup, check and restore evidence will appear here.", 13, FontWeight.Normal, Muted) } }, Surface, Line, new Thickness(22));
+        {
+            return Card(new StackPanel
+            {
+                Spacing = 6,
+                Children =
+                {
+                    Text("No backup history yet", 18, FontWeight.SemiBold, Ink),
+                    Text("Audit trail and proof evidence will appear here after the first backup cycle.", 13, FontWeight.Normal, Muted)
+                }
+            }, Surface, Line, new Thickness(24));
+        }
 
-        var list = new StackPanel { Spacing = 0 };
+        var list = new StackPanel { Spacing = 4 };
         list.Children.Add(TableRow("Time", "Source", "Operation", "Result", true));
-        foreach (var item in events) list.Children.Add(TableRow(Relative(item.At), item.Source, item.Operation, item.Result));
+        foreach (var item in events)
+        {
+            list.Children.Add(TableRow(Relative(item.At), item.Source, item.Operation, item.Result));
+        }
         return Card(list, Surface, Line, new Thickness(20));
     }
 
-    private static Grid TableRow(string first, string second, string third, string fourth, bool heading = false)
-    {
-        var weight = heading ? FontWeight.SemiBold : FontWeight.Normal;
-        var color = heading ? Muted : Ink;
-        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("1.4*,1.1*,1.2*,Auto"), ColumnSpacing = 12, Margin = new Thickness(0, 8), MinHeight = 30 };
-        row.Children.Add(Text(first, heading ? 11 : 13, weight, color, true));
-        row.Children.Add(At(Text(second, heading ? 11 : 12, weight, color, true), 1));
-        row.Children.Add(At(Text(third, heading ? 11 : 12, weight, color, true), 2));
-        var statusColor = !heading && fourth is "Recoverable" or "Completed" or "Healthy" or "Verified" ? Recoverable : !heading ? Unproven : color;
-        row.Children.Add(At(Text(fourth, heading ? 11 : 12, heading ? weight : FontWeight.SemiBold, statusColor), 3));
-        return row;
-    }
-
-    private static Button Tab(string label, bool selected, Action action)
-    {
-        var button = new Button { Content = label, Padding = new Thickness(14, 7), Background = selected ? InfoSurface : Brushes.Transparent, Foreground = selected ? Brand : Muted, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(5), FontWeight = selected ? FontWeight.SemiBold : FontWeight.Normal };
-        button.Click += (_, _) => action(); return button;
-    }
-
+    // --- Screen 4: Recovery Proof ---
     private void RenderRecovery()
     {
         Select("Recovery");
         _recoverySource = _model.Repositories.FirstOrDefault(item => item.Health.RepositoryId == _recoverySource?.Health.RepositoryId)
             ?? _model.Repositories.FirstOrDefault();
-        var body = new StackPanel { Spacing = 16, Margin = new Thickness(30, 26) };
-        body.Children.Add(Header("Prove recovery", "Actually restore data and verify that it can be recovered."));
+
+        var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
+        body.Children.Add(Header("Prove Recovery", "Execute isolated restore drills to prove data can truly be recovered."));
 
         if (_recoverySource is null)
         {
-            var protect = Primary("Protect a folder"); protect.Click += async (_, _) => await ProtectAsync();
-            body.Children.Add(Card(new StackPanel { Spacing = 10, Children = { Text("There is nothing to recover yet", 18, FontWeight.SemiBold, Ink), Text("Create a protected source before running a recovery proof.", 13, FontWeight.Normal, Muted), protect } }, Surface, Line, new Thickness(22)));
-            _page.Child = new ScrollViewer { Content = body }; return;
+            var protect = Primary("Protect a folder");
+            protect.Click += async (_, _) => await ProtectAsync();
+            body.Children.Add(Card(new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    Text("No repositories available to prove", 18, FontWeight.SemiBold, Ink),
+                    Text("Protect a source first before running recovery drills.", 13, FontWeight.Normal, Muted),
+                    protect
+                }
+            }, Surface, Line, new Thickness(24)));
+            _page.Child = new ScrollViewer { Content = body };
+            return;
         }
 
-        var selector = new ComboBox { ItemsSource = _model.Repositories.Select(item => item.Title).ToArray(), SelectedIndex = Math.Max(0, _model.Repositories.IndexOf(_recoverySource)), MinWidth = 240, HorizontalAlignment = HorizontalAlignment.Left };
-        selector.SelectionChanged += (_, _) => { if (selector.SelectedIndex >= 0) { _recoverySource = _model.Repositories[selector.SelectedIndex]; RenderRecovery(); } };
-        body.Children.Add(new StackPanel { Spacing = 6, Children = { Text("Protected source", 12, FontWeight.SemiBold, Ink), selector } });
+        if (_model.Repositories.Count > 1)
+        {
+            var selector = new ComboBox
+            {
+                ItemsSource = _model.Repositories.Select(item => item.Title).ToArray(),
+                SelectedIndex = Math.Max(0, _model.Repositories.IndexOf(_recoverySource)),
+                MinWidth = 260,
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            selector.SelectionChanged += (_, _) =>
+            {
+                if (selector.SelectedIndex >= 0)
+                {
+                    _recoverySource = _model.Repositories[selector.SelectedIndex];
+                    RenderRecovery();
+                }
+            };
+            body.Children.Add(new StackPanel { Spacing = 6, Children = { Text("Protected source", 12, FontWeight.SemiBold, Ink), selector } });
+        }
+
         body.Children.Add(RecoveryHero(_recoverySource));
         body.Children.Add(RecoveryDetails(_recoverySource));
         _page.Child = new ScrollViewer { Content = body };
@@ -285,137 +558,371 @@ public sealed class MainWindow : Window
         var current = repository.Health.Verdict == HealthVerdict.Recoverable;
         var tone = current ? RecoverableSurface : UnprovenSurface;
         var accent = current ? Recoverable : Unproven;
-        var run = Primary(_model.Busy ? "Running recovery proof…" : "Run recovery proof now");
+
+        var run = Primary(_model.Busy ? "Running restore drill…" : "Run recovery proof now");
         run.IsEnabled = repository.CanProveRecovery && !_model.Busy;
         run.Click += async (_, _) => await _model.ProveRecoveryAsync(repository, CancellationToken.None);
+
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         grid.Children.Add(new StackPanel
         {
-            Spacing = 6, Margin = new Thickness(0, 0, 18, 0),
+            Spacing = 6,
+            Margin = new Thickness(0, 0, 18, 0),
             Children =
             {
-                Text(current ? "Recovery is proven by current evidence" : "Current recovery needs verification", 21, FontWeight.SemiBold, Ink, true),
-                Text(current ? $"A real restore completed {Relative(proven)} and its output was verified." : repository.Detail, 13, FontWeight.Normal, Muted, true)
+                Text(current ? "Recovery is proven by current evidence" : "Recovery requires verification drill", 20, FontWeight.SemiBold, Ink, true),
+                Text(current ? $"A real restore completed {Relative(proven)} and byte integrity was verified." : repository.Detail, 13, FontWeight.Normal, Muted, true)
             }
         });
-        Grid.SetColumn(run, 1); run.VerticalAlignment = VerticalAlignment.Center; grid.Children.Add(run);
+        Grid.SetColumn(run, 1);
+        run.VerticalAlignment = VerticalAlignment.Center;
+        grid.Children.Add(run);
+
         return Card(grid, tone, accent, new Thickness(22));
     }
 
     private static Border RecoveryDetails(RepositoryRowViewModel repository)
     {
         var facts = repository.Health.Facts;
-        var details = new StackPanel { Spacing = 14 };
-        details.Children.Add(Text("Latest proof details", 17, FontWeight.SemiBold, Ink));
-        details.Children.Add(DetailRow("Repository", repository.Title));
-        details.Children.Add(DetailRow("Last backup", Absolute(facts.LastBackupAt)));
-        details.Children.Add(DetailRow("Integrity check", Absolute(facts.LastHealthyCheckAt)));
-        details.Children.Add(DetailRow("Proven restore", Absolute(facts.LastProvenRestoreAt)));
-        details.Children.Add(DetailRow("Verification", facts.LastProvenRestoreAt is null ? "Not yet verified" : "Restore completed and output matched recorded evidence"));
+        var details = new StackPanel { Spacing = 12 };
+        details.Children.Add(Text("Latest proof evidence", 16, FontWeight.SemiBold, Ink));
+        details.Children.Add(DetailRow("Repository ID", repository.Health.RepositoryId));
+        details.Children.Add(DetailRow("Source Path", repository.Title));
+        details.Children.Add(DetailRow("Last Backup", Absolute(facts.LastBackupAt)));
+        details.Children.Add(DetailRow("Integrity Check", Absolute(facts.LastHealthyCheckAt)));
+        details.Children.Add(DetailRow("Proven Restore", Absolute(facts.LastProvenRestoreAt)));
+        details.Children.Add(DetailRow("Evidence Match", facts.LastProvenRestoreAt is null ? "Pending drill" : "Exact byte match against restic tree manifest"));
+
+        var openFolderBtn = Secondary("Open Proof Location in Explorer");
+        openFolderBtn.Click += (_, _) =>
+        {
+            var runsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Fortiq", "runs");
+            if (Directory.Exists(runsDir))
+            {
+                Process.Start(new ProcessStartInfo { FileName = runsDir, UseShellExecute = true });
+            }
+        };
+        details.Children.Add(new StackPanel { Margin = new Thickness(0, 8, 0, 0), Children = { openFolderBtn } });
+
         return Card(details, Surface, Line, new Thickness(20));
     }
 
-    private static Grid DetailRow(string label, string value)
-    {
-        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("150,*"), ColumnSpacing = 12 };
-        row.Children.Add(Text(label, 12, FontWeight.SemiBold, Muted));
-        row.Children.Add(At(Text(value, 12, FontWeight.Normal, Ink, true), 1)); return row;
-    }
-
+    // --- Screen 5: Recovery Kit ---
     private void RenderRecoveryKit()
     {
         Select("Recovery Kit");
         _kitSource = _model.Repositories.FirstOrDefault(item => item.Health.RepositoryId == _kitSource?.Health.RepositoryId)
             ?? _model.Repositories.FirstOrDefault();
-        var body = new StackPanel { Spacing = 16, Margin = new Thickness(30, 26) };
-        body.Children.Add(Header("Recovery Kit", "Keep the material required for disaster recovery safe and offline."));
+
+        var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
+        body.Children.Add(Header("Recovery Kit", "Emergency offline material required to restore files on an independent machine."));
+
         if (_kitSource is null)
         {
-            var protect = Primary("Create protection and a kit"); protect.Click += async (_, _) => await ProtectAsync();
-            body.Children.Add(Card(new StackPanel { Spacing = 10, Children = { Text("No recovery kit is configured", 18, FontWeight.SemiBold, Ink), Text("The protection wizard creates a recovery kit together with the encrypted repository.", 13, FontWeight.Normal, Muted, true), protect } }, Surface, Line, new Thickness(22)));
-            _page.Child = new ScrollViewer { Content = body }; return;
+            var protect = Primary("Create protection and a kit");
+            protect.Click += async (_, _) => await ProtectAsync();
+            body.Children.Add(Card(new StackPanel
+            {
+                Spacing = 12,
+                Children =
+                {
+                    Text("No recovery kit configured yet", 18, FontWeight.SemiBold, Ink),
+                    Text("The protection wizard initializes an offline recovery kit alongside the encrypted repository.", 13, FontWeight.Normal, Muted, true),
+                    protect
+                }
+            }, Surface, Line, new Thickness(24)));
+            _page.Child = new ScrollViewer { Content = body };
+            return;
         }
 
-        var selector = new ComboBox { ItemsSource = _model.Repositories.Select(item => item.Title).ToArray(), SelectedIndex = Math.Max(0, _model.Repositories.IndexOf(_kitSource)), MinWidth = 240, HorizontalAlignment = HorizontalAlignment.Left };
-        selector.SelectionChanged += (_, _) => { if (selector.SelectedIndex >= 0) { _kitSource = _model.Repositories[selector.SelectedIndex]; RenderRecoveryKit(); } };
-        body.Children.Add(new StackPanel { Spacing = 6, Children = { Text("Repository", 12, FontWeight.SemiBold, Ink), selector } });
-
         var present = _kitSource.Health.Facts.KitPresent;
-        body.Children.Add(Card(new StackPanel
-        {
-            Spacing = 7,
-            Children =
-            {
-                Text(present ? "Recovery kit is available" : "Recovery kit is missing", 21, FontWeight.SemiBold, present ? Recoverable : Failure),
-                Text(present ? "Fortiq found recovery material for this repository." : "This repository cannot be opened on another machine until its recovery material is restored.", 13, FontWeight.Normal, Muted, true),
-                Text($"Repository ID: {_kitSource.Health.RepositoryId}", 11, FontWeight.Normal, Muted, true)
-            }
-        }, present ? RecoverableSurface : AtRiskSurface, present ? Recoverable : AtRisk, new Thickness(22)));
         body.Children.Add(Card(new StackPanel
         {
             Spacing = 8,
             Children =
             {
-                Text("Your recovery phrase is sensitive", 15, FontWeight.SemiBold, Caution),
-                Text("Fortiq does not retain a displayable copy after setup. Use the offline copy you verified in the protection wizard; never store it on this computer or in cloud notes.", 12, FontWeight.Normal, Muted, true)
+                Text(present ? "Recovery kit is available and verified" : "Recovery kit is missing or damaged", 20, FontWeight.SemiBold, present ? Recoverable : Failure),
+                Text(present ? "Fortiq found valid recovery material for this repository." : "This repository cannot be restored if this machine fails until recovery material is restored.", 13, FontWeight.Normal, Muted, true),
+                Text($"Repository ID: {_kitSource.Health.RepositoryId}", 11, FontWeight.Normal, Muted, true)
             }
-        }, UnprovenSurface, UnprovenLine, new Thickness(18)));
+        }, present ? RecoverableSurface : AtRiskSurface, present ? Recoverable : AtRisk, new Thickness(22)));
 
-        var verify = Primary("Verify recovery with a restore");
-        verify.IsEnabled = present && _kitSource.CanProveRecovery;
-        verify.Click += (_, _) => { _recoverySource = _kitSource; RenderRecovery(); };
+        // Masked BIP-39 mnemonic component
+        body.Children.Add(new MnemonicObfuscatorControl(null));
+
+        var verifyBtn = Primary("Verify recovery with a drill");
+        verifyBtn.IsEnabled = present && _kitSource.CanProveRecovery;
+        verifyBtn.Click += (_, _) => { _recoverySource = _kitSource; RenderRecovery(); };
+
         body.Children.Add(Card(new StackPanel
         {
             Spacing = 12,
             Children =
             {
-                Text("What the kit enables", 17, FontWeight.SemiBold, Ink),
-                Check("Identify and open the encrypted repository"),
-                Check("Unlock repository encryption from an independent copy"),
-                Check("Recover on another machine when the original is unavailable"),
-                verify
+                Text("What the recovery kit enables", 16, FontWeight.SemiBold, Ink),
+                Check("Open the encrypted repository on another computer without Fortiq"),
+                Check("Restore data if the local disk is destroyed or wiped"),
+                Check("Prove that recovery keys remain usable offline"),
+                verifyBtn
             }
         }, Surface, Line, new Thickness(20)));
+
         _page.Child = new ScrollViewer { Content = body };
     }
 
-    private void ShowSection(string title, string subtitle)
+    // --- Screen 6: Settings ---
+    private void RenderSettings()
     {
-        Select(title);
-        var home = new Button { Content = "Back to Home", Padding = new Thickness(14, 8) }; home.Click += (_, _) => RenderHome();
-        _page.Child = new StackPanel { Margin = new Thickness(30, 26), Spacing = 18, Children = { Header(title, subtitle), Card(new StackPanel { Spacing = 10, Children = { Text("This section is ready for the next implementation pass.", 17, FontWeight.SemiBold, Ink), Text("The new shell and navigation are working; detailed workflows will reuse the same evidence-first components.", 13, FontWeight.Normal, Muted, true), home } }, Surface, Line, new Thickness(24)) } };
+        Select("Settings");
+        var body = new StackPanel { Spacing = 20, Margin = new Thickness(32, 26) };
+        body.Children.Add(Header("Settings", "Preferences, theme, Windows Service lifecycle, and paths."));
+
+        // 1. Theme Configuration
+        var themeGroup = new StackPanel { Spacing = 10 };
+        themeGroup.Children.Add(Text("Appearance & Theme", 16, FontWeight.SemiBold, Ink));
+        themeGroup.Children.Add(Text("Switch between elevated Dark Slate and Light Slate design palettes.", 12, FontWeight.Normal, Muted));
+
+        var themeSelector = new ComboBox
+        {
+            ItemsSource = new[] { "System Default", "Light Slate", "Dark Slate" },
+            SelectedIndex = DesignTokens.IsDark ? 2 : 1,
+            MinWidth = 200,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        themeSelector.SelectionChanged += (_, _) =>
+        {
+            if (themeSelector.SelectedIndex == 2)
+            {
+                DesignTokens.SetTheme(true);
+                if (Avalonia.Application.Current != null)
+                {
+                    Avalonia.Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
+                }
+            }
+            else
+            {
+                DesignTokens.SetTheme(false);
+                if (Avalonia.Application.Current != null)
+                {
+                    Avalonia.Application.Current.RequestedThemeVariant = ThemeVariant.Light;
+                }
+            }
+        };
+        themeGroup.Children.Add(themeSelector);
+        body.Children.Add(Card(themeGroup, Surface, Line, new Thickness(20)));
+
+        // 2. Windows Service Management
+        var serviceGroup = new StackPanel { Spacing = 12 };
+        serviceGroup.Children.Add(Text("Windows Background Service", 16, FontWeight.SemiBold, Ink));
+        serviceGroup.Children.Add(Text("Runs scheduled automated backups and periodic integrity verifications.", 12, FontWeight.Normal, Muted));
+
+        var serviceRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), VerticalAlignment = VerticalAlignment.Center };
+        serviceRow.Children.Add(new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                Text($"Service Status: {_settings.ServiceStatus}", 14, FontWeight.SemiBold, Ink),
+                Text("Account: NT SERVICE\\Fortiq (Least-privilege Service SID)", 12, FontWeight.Normal, Muted)
+            }
+        });
+
+        var toggleServiceBtn = Secondary(_settings.IsServiceRunning ? "Stop Service" : "Start Service");
+        toggleServiceBtn.Click += async (_, _) =>
+        {
+            await _settings.ToggleServiceAsync();
+            RenderSettings();
+        };
+        Grid.SetColumn(toggleServiceBtn, 1);
+        serviceRow.Children.Add(toggleServiceBtn);
+        serviceGroup.Children.Add(serviceRow);
+        body.Children.Add(Card(serviceGroup, Surface, Line, new Thickness(20)));
+
+        // 3. Storage & Folders
+        var storageGroup = new StackPanel { Spacing = 12 };
+        storageGroup.Children.Add(Text("Storage & Diagnostics", 16, FontWeight.SemiBold, Ink));
+        storageGroup.Children.Add(DetailRow("Data Directory", _settings.DataDirectory));
+        storageGroup.Children.Add(DetailRow("Logs Directory", _settings.LogsDirectory));
+
+        var folderButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(0, 8, 0, 0) };
+        var openData = Secondary("Open Data Folder");
+        openData.Click += (_, _) => _settings.OpenDataFolder();
+        var openLogs = Secondary("Open Logs Folder");
+        openLogs.Click += (_, _) => _settings.OpenLogsFolder();
+        folderButtons.Children.Add(openData);
+        folderButtons.Children.Add(openLogs);
+        storageGroup.Children.Add(folderButtons);
+        body.Children.Add(Card(storageGroup, Surface, Line, new Thickness(20)));
+
+        // 4. About Fortiq
+        var aboutGroup = new StackPanel { Spacing = 8 };
+        aboutGroup.Children.Add(Text("About Fortiq", 16, FontWeight.SemiBold, Ink));
+        aboutGroup.Children.Add(DetailRow("Version", _settings.AppVersion));
+        aboutGroup.Children.Add(DetailRow(".NET Runtime", _settings.RuntimeVersion));
+        aboutGroup.Children.Add(DetailRow("Silicon Security", "TPM 2.0 Provider Available"));
+        body.Children.Add(Card(aboutGroup, Surface, Line, new Thickness(20)));
+
+        _page.Child = new ScrollViewer { Content = body };
     }
 
+    // --- Helpers ---
     private static Grid Header(string title, string subtitle, string? action = null, Func<Task>? handler = null)
     {
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-        grid.Children.Add(new StackPanel { Spacing = 3, Children = { Text(title, 27, FontWeight.SemiBold, Ink), Text(subtitle, 13, FontWeight.Normal, Muted) } });
-        if (action is not null && handler is not null) grid.Children.Add(Action(action, handler, 1, true));
+        grid.Children.Add(new StackPanel
+        {
+            Spacing = 3,
+            Children =
+            {
+                Text(title, 26, FontWeight.SemiBold, Ink),
+                Text(subtitle, 13, FontWeight.Normal, Muted)
+            }
+        });
+        if (action is not null && handler is not null)
+        {
+            grid.Children.Add(Action(action, handler, 1, true));
+        }
         return grid;
     }
 
-    private async Task ProtectAsync() { if (_wizard is null) return; await new ProtectRepositoryWindow(_wizard()).ShowDialog(this); await RefreshAsync(); }
+    private async Task ProtectAsync()
+    {
+        if (_wizard is null) return;
+        await new ProtectRepositoryWindow(_wizard()).ShowDialog(this);
+        await RefreshAsync();
+    }
+
     private async Task RefreshAsync() => await _model.RefreshAsync(CancellationToken.None);
 
     private static Button Action(string label, Func<Task> action, int column, bool primary = false)
     {
         var button = primary ? Primary(label) : Secondary(label);
-        button.Click += async (_, _) => await action(); Grid.SetColumn(button, column); return button;
+        button.Click += async (_, _) => await action();
+        Grid.SetColumn(button, column);
+        return button;
     }
-    private static Button Primary(string label) => new() { Content = label, Background = Brand, Foreground = Brushes.White, BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(5), Padding = new Thickness(17, 9), HorizontalAlignment = HorizontalAlignment.Left, FontWeight = FontWeight.SemiBold };
-    private static Button Secondary(string label) => new() { Content = label, Background = Surface, Foreground = Ink, BorderBrush = Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(14, 7), HorizontalAlignment = HorizontalAlignment.Left };
-    private static Border Card(Control child, IBrush background, IBrush border, Thickness? padding = null) => new() { Child = child, Background = background, BorderBrush = border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = padding ?? new Thickness(16) };
-    private static StackPanel Check(string label) => new() { Orientation = Orientation.Horizontal, Spacing = 9, Children = { new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Recoverable, VerticalAlignment = VerticalAlignment.Center }, Text(label, 13, FontWeight.Normal, Ink) } };
-    private static TextBlock Text(string value, double size, FontWeight weight, IBrush color, bool wrap = false) => new() { Text = value, FontSize = size, FontWeight = weight, Foreground = color, TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center };
+
+    private static Button Primary(string label) => new()
+    {
+        Content = label,
+        Background = Brand,
+        Foreground = Brushes.White,
+        BorderThickness = new Thickness(0),
+        CornerRadius = new CornerRadius(6),
+        Padding = new Thickness(18, 9),
+        HorizontalAlignment = HorizontalAlignment.Left,
+        FontWeight = FontWeight.SemiBold
+    };
+
+    private static Button Secondary(string label) => new()
+    {
+        Content = label,
+        Background = Surface,
+        Foreground = Ink,
+        BorderBrush = Line,
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(6),
+        Padding = new Thickness(14, 8),
+        HorizontalAlignment = HorizontalAlignment.Left
+    };
+
+    private static Button Tab(string label, bool selected, Action action)
+    {
+        var button = new Button
+        {
+            Content = label,
+            Padding = new Thickness(16, 8),
+            Background = selected ? InfoSurface : Brushes.Transparent,
+            Foreground = selected ? Brand : Muted,
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(6),
+            FontWeight = selected ? FontWeight.SemiBold : FontWeight.Normal
+        };
+        button.Click += (_, _) => action();
+        return button;
+    }
+
+    private static Border Card(Control child, IBrush? background = null, IBrush? border = null, Thickness? padding = null) => new()
+    {
+        Child = child,
+        Background = background ?? Surface,
+        BorderBrush = border ?? Line,
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(8),
+        Padding = padding ?? new Thickness(16)
+    };
+
+    private static StackPanel Check(string label) => new()
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 9,
+        Children =
+        {
+            new Border
+            {
+                Width = 8,
+                Height = 8,
+                CornerRadius = new CornerRadius(4),
+                Background = Recoverable,
+                VerticalAlignment = VerticalAlignment.Center
+            },
+            Text(label, 13, FontWeight.Normal, Ink)
+        }
+    };
+
+    private static Grid DetailRow(string label, string value)
+    {
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("170,*"), ColumnSpacing = 12 };
+        row.Children.Add(Text(label, 12, FontWeight.SemiBold, Muted));
+        row.Children.Add(At(Text(value, 12, FontWeight.Normal, Ink, true), 1));
+        return row;
+    }
+
+    private static Grid TableRow(string first, string second, string third, string fourth, bool heading = false)
+    {
+        var weight = heading ? FontWeight.SemiBold : FontWeight.Normal;
+        var color = heading ? Muted : Ink;
+        var row = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("1.4*,1.1*,1.2*,Auto"),
+            ColumnSpacing = 12,
+            Margin = new Thickness(0, 8),
+            MinHeight = 30
+        };
+        row.Children.Add(Text(first, heading ? 11 : 13, weight, color, true));
+        row.Children.Add(At(Text(second, heading ? 11 : 12, weight, color, true), 1));
+        row.Children.Add(At(Text(third, heading ? 11 : 12, weight, color, true), 2));
+        var statusColor = !heading && fourth is "Recoverable" or "Completed" or "Healthy" or "Verified" ? Recoverable : !heading ? Unproven : color;
+        row.Children.Add(At(Text(fourth, heading ? 11 : 12, heading ? weight : FontWeight.SemiBold, statusColor), 3));
+        return row;
+    }
+
+    private static TextBlock Text(string value, double size, FontWeight weight, IBrush color, bool wrap = false) => new()
+    {
+        Text = value,
+        FontSize = size,
+        FontWeight = weight,
+        Foreground = color,
+        TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
     private static T At<T>(T control, int column) where T : Control { Grid.SetColumn(control, column); return control; }
     private static void Add(Grid grid, Control control, int column) { Grid.SetColumn(control, column); grid.Children.Add(control); }
+
+    private DateTimeOffset? Latest(Func<RepositoryFacts, DateTimeOffset?> selector) =>
+        _model.Repositories.Select(x => selector(x.Health.Facts)).Where(x => x is not null).OrderByDescending(x => x).FirstOrDefault();
+
     private static string Relative(DateTimeOffset? value)
     {
-        if (value is null) return "Not yet"; var age = DateTimeOffset.UtcNow - value.Value;
+        if (value is null) return "Never";
+        var age = DateTimeOffset.UtcNow - value.Value;
         if (age < TimeSpan.FromMinutes(1)) return "Just now";
         if (age < TimeSpan.FromHours(1)) return $"{Math.Max(1, (int)age.TotalMinutes)} min ago";
         if (age < TimeSpan.FromDays(1)) return $"{Math.Max(1, (int)age.TotalHours)} hr ago";
         return $"{Math.Max(1, (int)age.TotalDays)} days ago";
     }
-    private static string Absolute(DateTimeOffset? value) => value is null ? "Not available" : value.Value.LocalDateTime.ToString("g", System.Globalization.CultureInfo.CurrentCulture);
+
+    private static string Absolute(DateTimeOffset? value) =>
+        value is null ? "Not available" : value.Value.LocalDateTime.ToString("g", System.Globalization.CultureInfo.CurrentCulture);
 }

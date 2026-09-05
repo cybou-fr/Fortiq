@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 using Fortiq.Application;
 using Fortiq.Desktop.ViewModels;
@@ -16,7 +17,11 @@ namespace Fortiq.Desktop;
 
 public sealed class FortiqApplication : Avalonia.Application
 {
-    public override void Initialize() => Styles.Add(new FluentTheme());
+    public override void Initialize()
+    {
+        Styles.Add(new FluentTheme());
+        RequestedThemeVariant = ThemeVariant.Light;
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {
@@ -101,9 +106,31 @@ public sealed class FortiqApplication : Avalonia.Application
                 paths.HealthMetrics,
                 protection: new S3StorageProtectionInspector(storage)));
 
+        var settings = new SettingsViewModel(paths.Root, Path.Combine(paths.Root, "logs"));
+        if (OperatingSystem.IsWindows())
+        {
+            settings.RefreshServiceStatusAction = () =>
+            {
+                if (!OperatingSystem.IsWindows()) return Task.FromResult("Not Supported");
+                var svcStatus = WindowsServiceController.QueryStatus("Fortiq");
+                return Task.FromResult(svcStatus.ToString());
+            };
+            settings.StartServiceAction = () =>
+            {
+                if (!OperatingSystem.IsWindows()) return Task.FromResult(false);
+                return Task.FromResult(WindowsServiceController.StartService("Fortiq", TimeSpan.FromSeconds(5)));
+            };
+            settings.StopServiceAction = () =>
+            {
+                if (!OperatingSystem.IsWindows()) return Task.FromResult(false);
+                return Task.FromResult(WindowsServiceController.StopService("Fortiq", TimeSpan.FromSeconds(5)));
+            };
+        }
+
         return new MainWindow(
             new RepositoriesViewModel(new HealthFileSource(paths.HealthReport), prove),
-            () => new ProtectRepositoryViewModel(protect));
+            () => new ProtectRepositoryViewModel(protect),
+            settings);
     }
 
     private static string ResolveEngineRoot()
