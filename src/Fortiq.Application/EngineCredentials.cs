@@ -5,7 +5,7 @@ namespace Fortiq.Application;
 /// must not be able to tell a wrong secret from a missing key, and no repository or snapshot
 /// metadata is revealed by the failure.
 /// </summary>
-public sealed class UnlockFailedException : Exception
+public class UnlockFailedException : Exception
 {
     private const string UnifiedMessage = "UnlockFailed";
 
@@ -19,6 +19,34 @@ public sealed class UnlockFailedException : Exception
     {
     }
 
+    /// <summary>For subtypes that report a configuration problem rather than a failed unlock.</summary>
+    protected UnlockFailedException(string message)
+        : base(message)
+    {
+    }
+}
+
+/// <summary>
+/// Raised when a device key exists but belongs to another Windows identity.
+/// </summary>
+/// <remarks>
+/// This one carries a message, unlike its base, and the distinction is deliberate. The constant
+/// message on <see cref="UnlockFailedException"/> exists so a caller cannot tell a wrong secret from
+/// a missing key. Nothing of that kind is disclosed here: that a key is user-scoped and that the
+/// caller is running as a particular account are both facts the caller already has - the envelope is
+/// on their disk and the account is their own. What it adds is the one thing they could not work out
+/// unaided, which is that the two do not match.
+/// <para>
+/// A derived type rather than a separate one, so every existing handler for a failed unlock still
+/// catches it.
+/// </para>
+/// </remarks>
+public sealed class DeviceKeyIdentityException : UnlockFailedException
+{
+    public DeviceKeyIdentityException(string message)
+        : base(message)
+    {
+    }
 }
 
 /// <summary>

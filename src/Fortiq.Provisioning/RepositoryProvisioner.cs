@@ -11,6 +11,23 @@ namespace Fortiq.Provisioning;
 /// is the only copy: it is not written into the kit, the repository or any log, and Fortiq cannot
 /// produce it again.
 /// </summary>
+/// <summary>Which Windows key store a repository's device key is created in.</summary>
+/// <remarks>
+/// The choice decides who can open it later, and it cannot be changed afterwards without
+/// re-provisioning. A user key belongs to the account that created it: convenient for an operator's
+/// own machine, and unopenable by a Windows service running as any other identity. A machine key can
+/// be opened by identities with rights to the machine store, which is what unattended work needs -
+/// and creating one requires administrator rights.
+/// </remarks>
+public enum DeviceKeyScope
+{
+    /// <summary>The creating account's key store. Unattended service work cannot use it.</summary>
+    CurrentUser,
+
+    /// <summary>The machine key store. Requires administrator rights to create.</summary>
+    Machine
+}
+
 public sealed record ProvisionedRepository(
     RepositoryDescriptor Repository,
     RecoveryKit Kit,
@@ -84,6 +101,7 @@ public sealed class RepositoryProvisioner
         string workingDirectory,
         CancellationToken cancellationToken,
         bool addDeviceUnlock = true,
+        DeviceKeyScope deviceKeyScope = DeviceKeyScope.CurrentUser,
         bool requireImmutableStorage = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryLocation);
@@ -151,11 +169,15 @@ public sealed class RepositoryProvisioner
 
             if (deviceUnlock && OperatingSystem.IsWindows())
             {
+                // A machine-scoped key can be opened by the Windows service; a user-scoped one
+                // cannot, however correct the kit is. Creating a machine key needs administrator
+                // rights, so the caller chooses and the result says which was made rather than
+                // quietly producing a key the service will never open.
                 deviceEnvelope = WindowsTpmEnvelope.Wrap(
                     repository.Id.ToArray(),
                     lease,
                     DeviceKeyName(repository.Id),
-                    machineKey: false,
+                    machineKey: deviceKeyScope == DeviceKeyScope.Machine,
                     _clock);
                 envelopes.Add(deviceEnvelope);
             }

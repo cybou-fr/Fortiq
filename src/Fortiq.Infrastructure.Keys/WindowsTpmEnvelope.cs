@@ -30,6 +30,16 @@ public static class WindowsTpmEnvelope
     private const string FingerprintParameter = "publicKeyFingerprint";
     private const string WrappedMaterialParameter = "wrappedKeyMaterial";
 
+    /// <summary>
+    /// Which key store the device key lives in: <c>user</c> or <c>machine</c>. Envelopes written
+    /// before this parameter existed carry no scope and are read as user-scoped, which is what they
+    /// are.
+    /// </summary>
+    private const string ScopeParameter = "keyScope";
+
+    private const string UserScope = "user";
+    private const string MachineScope = "machine";
+
     /// <summary>True when this machine exposes the platform provider at all.</summary>
     public static bool IsAvailable
     {
@@ -88,7 +98,11 @@ public static class WindowsTpmEnvelope
                 [KeyNameParameter] = Encoding.UTF8.GetBytes(keyName),
                 [AlgorithmParameter] = Encoding.UTF8.GetBytes(KeyAlgorithm),
                 [FingerprintParameter] = Fingerprint(rsa),
-                [WrappedMaterialParameter] = rsa.Encrypt(inputKeyMaterial, RSAEncryptionPadding.OaepSHA256)
+                [WrappedMaterialParameter] = rsa.Encrypt(inputKeyMaterial, RSAEncryptionPadding.OaepSHA256),
+                // Recorded because it decides who can open the key later. A user-scoped key lives in
+                // the creating account's profile, so a Windows service running as a different
+                // identity cannot open it however correct the envelope is.
+                [ScopeParameter] = Encoding.UTF8.GetBytes(machineKey ? MachineScope : UserScope)
             };
 
             // The parameters are part of the envelope's authenticated context, so the key reference
@@ -126,6 +140,7 @@ public static class WindowsTpmEnvelope
 
         var keyName = Text(envelope, KeyNameParameter);
         var provider = Text(envelope, ProviderParameter);
+        var scope = OptionalText(envelope, ScopeParameter) ?? UserScope;
         if (Text(envelope, AlgorithmParameter) != KeyAlgorithm)
         {
             throw new InvalidDataException("Unsupported TPM key algorithm in envelope.");
@@ -134,7 +149,7 @@ public static class WindowsTpmEnvelope
         var inputKeyMaterial = new byte[InputKeyMaterialSize];
         try
         {
-            using var key = OpenKey(keyName, provider);
+            using var key = OpenKey(keyName, provider, scope);
             using var rsa = new RSACng(key);
 
             // The envelope records which key it was created against, so a different key of the same
@@ -166,12 +181,17 @@ public static class WindowsTpmEnvelope
 
         try
         {
-            using var key = OpenKey(Text(envelope, KeyNameParameter), Text(envelope, ProviderParameter));
+            using var key = OpenKey(
+                Text(envelope, KeyNameParameter),
+                Text(envelope, ProviderParameter),
+                OptionalText(envelope, ScopeParameter) ?? UserScope);
+
             key.Delete();
         }
-        catch (CryptographicException)
+        catch (Exception error) when (error is CryptographicException or UnlockFailedException)
         {
-            // A key that is already gone is the state the caller asked for.
+            // A key that is already gone, or one this identity cannot open, leaves the caller in the
+            // state they asked for: this envelope no longer opens anything from here.
         }
     }
 
@@ -190,21 +210,54 @@ public static class WindowsTpmEnvelope
     }
 
     [SupportedOSPlatform("windows")]
-    private static CngKey OpenKey(string keyName, string provider)
+    private static CngKey OpenKey(string keyName, string provider, string scope)
     {
         if (provider != ProviderName)
         {
             throw new InvalidDataException("The envelope names a key storage provider this build does not use.");
         }
 
+        if (scope is not (UserScope or MachineScope))
+        {
+            throw new InvalidDataException($"The envelope names a key scope this build does not understand: {scope}.");
+        }
+
         try
         {
-            return CngKey.Open(keyName, new CngProvider(provider));
+            // A machine key lives in the machine store and any identity with rights to it can open
+            // it; a user key lives in the calling account's profile and nobody else can.
+            return CngKey.Open(
+                keyName,
+                new CngProvider(provider),
+                scope == MachineScope ? CngKeyOpenOptions.MachineKey : CngKeyOpenOptions.UserKey);
         }
         catch (CryptographicException)
         {
-            // The device no longer holds this key, which is one more way for an unlock to fail.
-            throw new UnlockFailedException();
+            // Windows reports a key that was deleted and a key belonging to another account the
+            // same way, so this must not assert which happened. What it can say is the fact the
+            // caller could not work out unaided: the key is user-scoped, so it exists only inside
+            // one account's profile, and this is the account asking. That is the difference between
+            // a fixable configuration and an apparently broken machine - it is also why the message
+            // names both possibilities rather than the more dramatic one.
+            throw scope == UserScope
+                ? new DeviceKeyIdentityException(
+                    $"This device key could not be opened. It is user-scoped, so it exists only in the "
+                    + $"profile of the account that created it, and this process is running as "
+                    + $"'{Identity()}'. Either the key has been removed, or it belongs to another "
+                    + "account - a key a Windows service must open has to be created in the machine store.")
+                : new UnlockFailedException();
+        }
+    }
+
+    private static string Identity()
+    {
+        try
+        {
+            return Environment.UserName;
+        }
+        catch (Exception error) when (error is InvalidOperationException or PlatformNotSupportedException)
+        {
+            return "an unknown account";
         }
     }
 
@@ -217,6 +270,9 @@ public static class WindowsTpmEnvelope
             : throw new InvalidDataException("The envelope is missing a TPM parameter.");
 
     private static string Text(KeyEnvelopeV1 envelope, string name) => Encoding.UTF8.GetString(Parameter(envelope, name));
+
+    private static string? OptionalText(KeyEnvelopeV1 envelope, string name) =>
+        envelope.ProviderParameters.TryGetValue(name, out var value) ? Encoding.UTF8.GetString(value) : null;
 
     private static void RequireWindows()
     {

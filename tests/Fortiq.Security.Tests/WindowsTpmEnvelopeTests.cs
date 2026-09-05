@@ -65,6 +65,66 @@ public sealed class WindowsTpmEnvelopeTests
     }
 
     [SkippableFact]
+    public void AUserScopedKeyIsRecordedAsSuchSoAReaderNeedNotGuess()
+    {
+        Skip.IfNot(WindowsTpmEnvelope.IsAvailable, "This machine has no platform crypto provider.");
+        var envelope = Wrap(out _);
+        try
+        {
+            // Which key store a device key lives in decides who can open it, and a kit that does not
+            // say leaves a service to find out by failing.
+            Assert.Equal("user", Encoding.UTF8.GetString(envelope.ProviderParameters["keyScope"]));
+        }
+        finally
+        {
+            WindowsTpmEnvelope.DeleteKey(envelope);
+        }
+    }
+
+    [SkippableFact]
+    [Trait("PrivilegeMode", "Elevated")]
+    public void AMachineScopedKeyIsRecordedAndOpensFromTheMachineStore()
+    {
+        Skip.IfNot(WindowsTpmEnvelope.IsAvailable, "This machine has no platform crypto provider.");
+        Skip.IfNot(IsElevated, "Creating a key in the machine store requires administrator rights.");
+
+        var keyName = "fortiq-test-machine-" + Guid.NewGuid().ToString("N");
+        using var lease = new BufferKeyLease((byte[])EngineUnlockSecret.Clone());
+        var envelope = WindowsTpmEnvelope.Wrap(RepositoryId, lease, keyName, machineKey: true);
+        try
+        {
+            Assert.Equal("machine", Encoding.UTF8.GetString(envelope.ProviderParameters["keyScope"]));
+
+            // The scope in the envelope is what the unwrap opens against. A machine key opened as a
+            // user key is not found, so this failing would mean the recorded scope is decorative.
+            using var opened = WindowsTpmEnvelope.Unwrap(envelope, RepositoryId);
+            var recovered = new byte[opened.Length];
+            opened.CopyTo(recovered);
+            Assert.Equal(EngineUnlockSecret, recovered);
+        }
+        finally
+        {
+            WindowsTpmEnvelope.DeleteKey(envelope);
+        }
+    }
+
+    /// <summary>Whether this test process can create a key in the machine store.</summary>
+    private static bool IsElevated
+    {
+        get
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return false;
+            }
+
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+    }
+
+    [SkippableFact]
     public void DeletingTheDeviceKeyRevokesTheEnvelopeForGood()
     {
         Skip.IfNot(WindowsTpmEnvelope.IsAvailable, "This machine has no platform crypto provider.");
@@ -72,7 +132,10 @@ public sealed class WindowsTpmEnvelopeTests
 
         WindowsTpmEnvelope.DeleteKey(envelope);
 
-        Assert.Throws<UnlockFailedException>(() => WindowsTpmEnvelope.Unwrap(envelope, RepositoryId));
+        // ThrowsAny, because a user-scoped key reports through a derived type that names the scope
+        // and the calling account. Windows cannot distinguish a deleted key from one belonging to
+        // another identity, so the two arrive here together and both are unlock failures.
+        Assert.ThrowsAny<UnlockFailedException>(() => WindowsTpmEnvelope.Unwrap(envelope, RepositoryId));
     }
 
     [SkippableFact]
