@@ -24,8 +24,26 @@ namespace Fortiq.Recovery.IntegrationTests;
 /// 7. Sovereign Disaster Recovery (Bare-metal restoration using Fortiq.Recover from kit + mnemonic)
 /// 8. Tamper Resistance: Ledger modification detection and health degradation (audit-ledger-tampered)
 /// </summary>
+/// <remarks>
+/// This is the <b>core</b> lane, and its name says so because the distinction is easy to lose. It runs
+/// on a hosted runner, so it installs with <c>InstallService: false</c> and <c>ProvisionAcls: false</c>
+/// and provisions a user-scoped key. Everything it proves is real; what it never touches is the set of
+/// boundaries a pilot machine actually has:
+///
+/// <list type="bullet">
+///   <item>elevated installation under UAC, with restrictive ACLs applied;</item>
+///   <item>a registered Windows service running as LocalSystem;</item>
+///   <item>a machine-scoped TPM key;</item>
+///   <item>service IPC authorization against a real unelevated caller;</item>
+///   <item>survival across a reboot, and scheduled unattended execution.</item>
+/// </list>
+///
+/// Those belong to an installed-Windows lane that does not exist yet. Until it does, a green run here
+/// is evidence about the workflow and not about the deployment - which is why the name changed from
+/// PilotWorkflowEndToEndTests, a name that invited exactly the reading it could not support.
+/// </remarks>
 [SupportedOSPlatform("windows")]
-public sealed class PilotWorkflowEndToEndTests
+public sealed class PilotCoreWorkflowTests
 {
     private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
     private static readonly JsonSerializerOptions JsonCaseInsensitive = new()

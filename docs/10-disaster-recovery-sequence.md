@@ -153,6 +153,22 @@ The separate-process tests prove this workflow on the development host; they do 
 executing these steps on a machine that has never held Fortiq state. The CI job is what closes that
 gap, and its recorded result in step 6 is the evidence — not this document's description of it.
 
+### Two lanes, and what each one is evidence of
+
+`PilotCoreWorkflowTests` runs on a hosted runner and covers the workflow: bundle integrity,
+provisioning, hash-chained receipts, the restore drill, autonomous `Fortiq.Recover`, and tamper
+detection. It installs with no service and no ACLs and uses a user-scoped key, so it is evidence about
+the workflow and not about the deployment.
+
+The installed-Windows lane does not exist yet. It is the one that crosses the boundaries a pilot
+machine actually has — elevated installation under UAC with restrictive ACLs, a service running as
+LocalSystem, a machine-scoped TPM key, IPC authorization refusing a real unelevated caller, and
+survival across a reboot into scheduled unattended execution. Until it is written, no green run
+anywhere in this repository is evidence that those hold.
+
+`scripts/Test-PilotWorkflow.ps1` prints both lists rather than a single verdict, and fails when the
+pilot test skipped rather than reporting a pass having run nothing.
+
 ### Exit code reference
 
 `Fortiq.Recover` returns standard deterministic exit codes (`RecoveryCli.cs`):
