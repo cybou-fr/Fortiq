@@ -82,7 +82,7 @@ public sealed class InstallationManager : IInstallationOperations
         // because nothing was there, and every upgrade after it did not. Stopping first is also the
         // only way the replacement is atomic from the service's point of view: it never sees half of
         // one version and half of another.
-        var serviceWasRunning = StopServiceForReplacement(progress);
+        var serviceWasRunning = StopServiceForReplacement(targetDir, progress);
 
         var (bundleRoot, manifest) = DiscoverManifest(sourceDir);
         if (manifest is not null && bundleRoot is not null)
@@ -188,7 +188,15 @@ public sealed class InstallationManager : IInstallationOperations
     /// Stops the Fortiq service if it is running, so its files can be replaced. Returns whether it
     /// was running, which is what decides if it should be started again afterwards.
     /// </summary>
-    private static bool StopServiceForReplacement(IProgress<InstallProgressReport>? progress)
+    /// <param name="targetDir">Where files are about to be written.</param>
+    /// <remarks>
+    /// The service is stopped only when the files being replaced are its own. Asking "is the machine's
+    /// Fortiq service running" and stopping it regardless made an install into a temporary directory
+    /// reach out and stop the real one - which is what a test installing to a temp path immediately
+    /// did. The reason to stop it is that its binary is about to be overwritten, so that is the
+    /// condition.
+    /// </remarks>
+    private static bool StopServiceForReplacement(string targetDir, IProgress<InstallProgressReport>? progress)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -199,6 +207,18 @@ public sealed class InstallationManager : IInstallationOperations
         {
             var status = WindowsServiceController.QueryStatus(WindowsServiceController.DefaultServiceName);
             if (!status.Exists || !status.Running)
+            {
+                return false;
+            }
+
+            var binary = status.BinaryPath?.Trim('"');
+            if (string.IsNullOrWhiteSpace(binary))
+            {
+                return false;
+            }
+
+            var boundary = Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetDir)) + Path.DirectorySeparatorChar;
+            if (!Path.GetFullPath(binary).StartsWith(boundary, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
