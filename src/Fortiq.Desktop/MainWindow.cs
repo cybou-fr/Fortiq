@@ -33,6 +33,10 @@ public sealed class MainWindow : Window
         Grid.SetColumn(_page, 1); shell.Children.Add(_page); Content = shell;
         _model.PropertyChanged += (_, _) => RenderActive();
         Opened += async (_, _) => await RefreshAsync();
+        var refreshTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        refreshTimer.Tick += async (_, _) => { if (!_model.Busy) await RefreshAsync(); };
+        Opened += (_, _) => refreshTimer.Start();
+        Closed += (_, _) => refreshTimer.Stop();
     }
 
     private Border Navigation()
@@ -55,7 +59,7 @@ public sealed class MainWindow : Window
         menu.Children.Add(Nav("Recovery Kit", RenderRecoveryKit));
         menu.Children.Add(Nav("Settings", () => ShowSection("Settings", "Application, schedule, storage and service settings.")));
         Grid.SetRow(menu, 1); rail.Children.Add(menu);
-        var service = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, Children = { new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(4), Background = Recoverable, VerticalAlignment = VerticalAlignment.Center }, Text("Service running", 11, FontWeight.Normal, Recoverable) } };
+        var service = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, Children = { Text("Local protection", 11, FontWeight.Normal, Muted) } };
         var footer = new StackPanel { Spacing = 4, Margin = new Thickness(4, 0), Children = { Text("Fortiq", 13, FontWeight.SemiBold, Ink), Text("Protect What Matters", 11, FontWeight.Normal, Muted), service } };
         Grid.SetRow(footer, 2); rail.Children.Add(footer);
         return new Border { Background = Surface, BorderBrush = Line, BorderThickness = new Thickness(0, 0, 1, 0), Child = rail };
@@ -126,10 +130,12 @@ public sealed class MainWindow : Window
     private Border Hero()
     {
         var risk = _model.Repositories.Any(x => x.Health.Verdict == HealthVerdict.AtRisk);
-        var unproven = _model.Repositories.Any(x => x.Health.Verdict == HealthVerdict.Unproven);
+        var unavailable = _model.State is HealthStoreState.Stale or HealthStoreState.Corrupt;
+        var unproven = unavailable || _model.Repositories.Any(x => x.Health.Verdict == HealthVerdict.Unproven);
         var tone = risk ? AtRiskSurface : unproven ? UnprovenSurface : RecoverableSurface;
         var accent = risk ? AtRisk : unproven ? Unproven : Recoverable;
-        var detail = risk ? "One or more sources need attention. Review the findings below."
+        var detail = unavailable ? "Current protection is unknown. Refresh the report or check the Fortiq service."
+            : risk ? "One or more sources need attention. Review the findings below."
             : unproven ? "Backups exist, but at least one source still needs a proven restore."
             : "All critical checks are healthy. Fortiq has recently restored and verified your data.";
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
@@ -253,7 +259,8 @@ public sealed class MainWindow : Window
     private void RenderRecovery()
     {
         Select("Recovery");
-        if (_recoverySource is null || !_model.Repositories.Contains(_recoverySource)) _recoverySource = _model.Repositories.FirstOrDefault();
+        _recoverySource = _model.Repositories.FirstOrDefault(item => item.Health.RepositoryId == _recoverySource?.Health.RepositoryId)
+            ?? _model.Repositories.FirstOrDefault();
         var body = new StackPanel { Spacing = 16, Margin = new Thickness(30, 26) };
         body.Children.Add(Header("Prove recovery", "Actually restore data and verify that it can be recovered."));
 
@@ -275,8 +282,9 @@ public sealed class MainWindow : Window
     private Border RecoveryHero(RepositoryRowViewModel repository)
     {
         var proven = repository.Health.Facts.LastProvenRestoreAt;
-        var tone = proven is null ? UnprovenSurface : RecoverableSurface;
-        var accent = proven is null ? Unproven : Recoverable;
+        var current = repository.Health.Verdict == HealthVerdict.Recoverable;
+        var tone = current ? RecoverableSurface : UnprovenSurface;
+        var accent = current ? Recoverable : Unproven;
         var run = Primary(_model.Busy ? "Running recovery proof…" : "Run recovery proof now");
         run.IsEnabled = repository.CanProveRecovery && !_model.Busy;
         run.Click += async (_, _) => await _model.ProveRecoveryAsync(repository, CancellationToken.None);
@@ -286,8 +294,8 @@ public sealed class MainWindow : Window
             Spacing = 6, Margin = new Thickness(0, 0, 18, 0),
             Children =
             {
-                Text(proven is null ? "Recovery has not been proven" : "Latest recovery proof succeeded", 21, FontWeight.SemiBold, Ink, true),
-                Text(proven is null ? "A backup exists, but Fortiq has not yet demonstrated that its files come back." : $"A real restore completed {Relative(proven)} and its output was verified.", 13, FontWeight.Normal, Muted, true)
+                Text(current ? "Recovery is proven by current evidence" : "Current recovery needs verification", 21, FontWeight.SemiBold, Ink, true),
+                Text(current ? $"A real restore completed {Relative(proven)} and its output was verified." : repository.Detail, 13, FontWeight.Normal, Muted, true)
             }
         });
         Grid.SetColumn(run, 1); run.VerticalAlignment = VerticalAlignment.Center; grid.Children.Add(run);
@@ -317,7 +325,8 @@ public sealed class MainWindow : Window
     private void RenderRecoveryKit()
     {
         Select("Recovery Kit");
-        if (_kitSource is null || !_model.Repositories.Contains(_kitSource)) _kitSource = _model.Repositories.FirstOrDefault();
+        _kitSource = _model.Repositories.FirstOrDefault(item => item.Health.RepositoryId == _kitSource?.Health.RepositoryId)
+            ?? _model.Repositories.FirstOrDefault();
         var body = new StackPanel { Spacing = 16, Margin = new Thickness(30, 26) };
         body.Children.Add(Header("Recovery Kit", "Keep the material required for disaster recovery safe and offline."));
         if (_kitSource is null)

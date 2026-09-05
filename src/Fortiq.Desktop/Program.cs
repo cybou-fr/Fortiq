@@ -27,7 +27,14 @@ public sealed class FortiqApplication : Avalonia.Application
             var paths = FortiqStatePaths.Resolve();
 
             var engineRoot = ResolveEngineRoot();
-            IObjectStorageCredentialProvider storage = new EnvironmentObjectStorageCredentialProvider();
+            // The same order the service uses, so both processes resolve one repository's storage
+            // identity the same way. The stored half is Windows-only, and on any other platform the
+            // desktop falls back to the environment rather than refusing to start.
+            IObjectStorageCredentialProvider storage = OperatingSystem.IsWindows()
+                ? new FirstAvailableObjectStorageCredentials(
+                    new StoredObjectStorageCredentials(Path.Combine(paths.Root, "credentials")),
+                    new EnvironmentObjectStorageCredentialProvider())
+                : new EnvironmentObjectStorageCredentialProvider();
 
             var protect = new ProtectRepositoryAdapter(
                 new RepositoryProvisioner(

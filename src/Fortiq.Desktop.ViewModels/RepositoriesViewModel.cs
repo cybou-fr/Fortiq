@@ -16,7 +16,8 @@ public enum HealthStoreState
     NotInitialized,
     Empty,
     Active,
-    Corrupt
+    Corrupt,
+    Stale
 }
 
 public sealed record HealthReadResult(HealthStoreState State, HealthReport? Report = null, string? Detail = null);
@@ -47,7 +48,9 @@ public sealed class RepositoryRowViewModel
     /// What Fortiq is willing to say, in the words a person needs. "Backed up" is never offered on
     /// its own: it is the claim that misleads.
     /// </summary>
-    public string Summary => Health.Verdict switch
+    public string Summary => Health.Findings.Any(finding => finding.Code == "report-stale")
+        ? "Current protection is unknown: the health report is out of date."
+        : Health.Verdict switch
     {
         HealthVerdict.Recoverable => "Recoverable: checked and restored recently.",
         HealthVerdict.Unproven => "Backed up, but recovery has not been proven.",
@@ -67,16 +70,19 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
 {
     private readonly IHealthSource _health;
     private readonly IProveRecovery _prove;
+    private readonly TimeProvider _clock;
+    public static TimeSpan ReportMaxAge { get; } = TimeSpan.FromMinutes(5);
 
     private string? _failure;
     private bool _busy;
     private DateTimeOffset? _reportProducedAt;
     private HealthStoreState _state = HealthStoreState.NotInitialized;
 
-    public RepositoriesViewModel(IHealthSource health, IProveRecovery prove)
+    public RepositoriesViewModel(IHealthSource health, IProveRecovery prove, TimeProvider? clock = null)
     {
         _health = health ?? throw new ArgumentNullException(nameof(health));
         _prove = prove ?? throw new ArgumentNullException(nameof(prove));
+        _clock = clock ?? TimeProvider.System;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -100,6 +106,7 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
         HealthStoreState.NotInitialized => "Protect what matters before you need it.",
         HealthStoreState.Empty => "No protected sources yet.",
         HealthStoreState.Corrupt => "Protection status is temporarily unavailable.",
+        HealthStoreState.Stale => "Protection status is out of date. Refresh or check the Fortiq service.",
         _ => Repositories.Count == 0
             ? "No protected sources yet."
             : Repositories.Any(row => row.Health.Verdict == HealthVerdict.AtRisk)
@@ -116,15 +123,22 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
         try
         {
             var result = await _health.ReadAsync(cancellationToken);
-            State = result.State;
+            var age = result.Report is { } report ? _clock.GetUtcNow() - report.ProducedAt : TimeSpan.Zero;
+            var stale = result.Report is not null && (age > ReportMaxAge || age < -TimeSpan.FromMinutes(1));
+            State = stale ? HealthStoreState.Stale : result.State;
             Repositories.Clear();
             foreach (var repository in result.Report?.Repositories ?? [])
             {
-                Repositories.Add(new RepositoryRowViewModel(repository));
+                Repositories.Add(new RepositoryRowViewModel(stale ? repository with
+                {
+                    Verdict = repository.Verdict == HealthVerdict.AtRisk ? HealthVerdict.AtRisk : HealthVerdict.Unproven,
+                    Findings = [.. repository.Findings, new HealthFinding("report-stale", "This report is out of date; current protection has not been verified.")]
+                } : repository));
             }
 
             ReportProducedAt = result.Report?.ProducedAt;
-            Failure = result.State == HealthStoreState.Corrupt ? result.Detail : null;
+            Failure = stale ? "The health report is older than five minutes or its timestamp is in the future. Current protection is unknown."
+                : result.State == HealthStoreState.Corrupt ? result.Detail : null;
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {

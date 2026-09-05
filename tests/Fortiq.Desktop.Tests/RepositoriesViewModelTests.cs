@@ -9,7 +9,7 @@ namespace Fortiq.Desktop.Tests;
 /// </summary>
 public sealed class RepositoriesViewModelTests
 {
-    private static readonly DateTimeOffset Now = new(2026, 9, 4, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
     [Fact]
     public async Task ABackedUpRepositoryThatWasNeverRestoredIsNotPresentedAsFinished()
@@ -96,6 +96,40 @@ public sealed class RepositoriesViewModelTests
         var model = new RepositoriesViewModel(new FixedHealth(repositories), new FakeProof(true));
         await model.RefreshAsync(CancellationToken.None);
         return model;
+    }
+
+    [Fact]
+    public async Task AnUnchangedReportLosesItsPositiveStatusWhenTheServiceStops()
+    {
+        var clock = new TestClock(Now);
+        var model = new RepositoriesViewModel(new FixedHealth(Health(HealthVerdict.Recoverable)), new FakeProof(true), clock);
+        await model.RefreshAsync(CancellationToken.None);
+        Assert.Equal(HealthVerdict.Recoverable, Assert.Single(model.Repositories).Health.Verdict);
+        clock.Now = Now.AddMinutes(6);
+        await model.RefreshAsync(CancellationToken.None);
+        Assert.Equal(HealthStoreState.Stale, model.State);
+        Assert.Equal(HealthVerdict.Unproven, Assert.Single(model.Repositories).Health.Verdict);
+        Assert.Contains("out of date", model.Headline, StringComparison.Ordinal);
+        Assert.Contains(Assert.Single(model.Repositories).Health.Findings, finding => finding.Code == "report-stale");
+        clock.Now = Now;
+        await model.RefreshAsync(CancellationToken.None);
+        Assert.Equal(HealthStoreState.Active, model.State);
+        Assert.Equal(HealthVerdict.Recoverable, Assert.Single(model.Repositories).Health.Verdict);
+    }
+
+    [Fact]
+    public async Task AFutureDatedReportIsNotEvidenceAboutNow()
+    {
+        var model = new RepositoriesViewModel(new FixedHealth(Health(HealthVerdict.AtRisk, "kit-missing")), new FakeProof(true), new TestClock(Now.AddMinutes(-2)));
+        await model.RefreshAsync(CancellationToken.None);
+        Assert.Equal(HealthStoreState.Stale, model.State);
+        Assert.Equal(HealthVerdict.AtRisk, Assert.Single(model.Repositories).Health.Verdict);
+    }
+
+    private sealed class TestClock(DateTimeOffset now) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = now;
+        public override DateTimeOffset GetUtcNow() => Now;
     }
 
     private static RepositoryHealth Health(HealthVerdict verdict, string? code = null, string id = "a")
