@@ -213,66 +213,124 @@ public sealed class FileSystemOperationReceiptStore : IOperationReceiptStore
         CancellationToken cancellationToken)
     {
         var ledger = await LoadLedgerStateAsync(directory, repositoryId, cancellationToken);
-        var discovered = await DiscoverLatestReceiptStateAsync(directory, repositoryId, cancellationToken);
 
-        // Crash recovery & reconciliation:
-        // If receipts on disk have advanced past the ledger head file (e.g. system crashed between
-        // writing receipt.json and committing repository.ledger), heal and advance the ledger file
-        // immediately to avoid duplicate sequence numbers.
-        if (discovered.Sequence > (ledger?.SequenceNumber ?? 0))
+        var head = ledger is not null && ledger.SequenceNumber > 0 && !string.IsNullOrWhiteSpace(ledger.LastReceiptHash)
+            ? (Sequence: ledger.SequenceNumber, LastHash: ledger.LastReceiptHash)
+            : (Sequence: 0L, LastHash: OperationReceipt.GenesisHash);
+
+        // Crash recovery. A machine that stopped between writing a receipt and committing the ledger
+        // has receipts ahead of the head, and reusing a sequence number would put two receipts at the
+        // same position in the chain.
+        var recovered = await AdvanceOverVerifiedReceiptsAsync(directory, repositoryId, head, cancellationToken);
+
+        if (recovered.Sequence > head.Sequence)
         {
             var ledgerPath = GetLedgerPath(directory, repositoryId);
             var ledgerTemp = ledgerPath + ".partial";
             await using (var ledgerStream = new FileStream(ledgerTemp, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                await JsonSerializer.SerializeAsync(ledgerStream, new LedgerState(discovered.Sequence, discovered.LastHash), SerializerOptions, cancellationToken);
+                await JsonSerializer.SerializeAsync(ledgerStream, new LedgerState(recovered.Sequence, recovered.LastHash), SerializerOptions, cancellationToken);
             }
             File.Move(ledgerTemp, ledgerPath, overwrite: true);
-            return (discovered.Sequence, discovered.LastHash);
         }
 
-        if (ledger is not null && ledger.SequenceNumber > 0 && !string.IsNullOrWhiteSpace(ledger.LastReceiptHash))
-        {
-            return (ledger.SequenceNumber, ledger.LastReceiptHash);
-        }
-
-        return discovered;
+        return recovered;
     }
 
-    private static async Task<(long Sequence, string LastHash)> DiscoverLatestReceiptStateAsync(
+    /// <summary>
+    /// Walks the chain forward from <paramref name="head"/> one receipt at a time, stopping at the
+    /// first receipt that does not prove it belongs there.
+    /// </summary>
+    /// <remarks>
+    /// Recovery used to take the highest sequence number on disk and adopt its hash as the new head.
+    /// That trusts the tail without checking it: a receipt whose content was altered, or whose
+    /// PreviousReceiptHash points at nothing in this chain, would be written into the ledger as the
+    /// verified head - and the verifier would then report the tampering as an established fact of the
+    /// history rather than as a break. Recovery would have signed off on the forgery.
+    ///
+    /// So each step must earn its place: sequence exactly one higher, PreviousReceiptHash equal to the
+    /// head it claims to follow, and a content hash that recomputes to the one recorded. The first
+    /// receipt that fails ends the walk. What lies beyond it is left on disk, unadopted, for the
+    /// verifier to report - which is the right division: this method decides where writing resumes,
+    /// and it is not the place that decides whether a history is sound.
+    /// </remarks>
+    private static async Task<(long Sequence, string LastHash)> AdvanceOverVerifiedReceiptsAsync(
         string directory,
         string repositoryId,
+        (long Sequence, string LastHash) head,
         CancellationToken cancellationToken)
     {
-        long maxSequence = 0;
-        string lastHash = OperationReceipt.GenesisHash;
+        if (!Directory.Exists(directory))
+        {
+            return head;
+        }
 
-        if (!Directory.Exists(directory)) return (0, lastHash);
+        var bySequence = new Dictionary<long, OperationReceipt>();
 
         foreach (var file in Directory.GetFiles(directory, "*.json"))
         {
             if (file.EndsWith(".partial", StringComparison.OrdinalIgnoreCase)) continue;
+
             try
             {
                 var receipt = await LoadReceiptAsync(file, cancellationToken);
-                if (receipt is not null &&
-                    string.Equals(receipt.RepositoryId, repositoryId, StringComparison.OrdinalIgnoreCase) &&
-                    receipt.SequenceNumber > maxSequence)
+                if (receipt is null ||
+                    !string.Equals(receipt.RepositoryId, repositoryId, StringComparison.OrdinalIgnoreCase) ||
+                    receipt.SequenceNumber <= head.Sequence ||
+                    string.IsNullOrWhiteSpace(receipt.ReceiptHash))
                 {
-                    maxSequence = receipt.SequenceNumber;
-                    if (!string.IsNullOrWhiteSpace(receipt.ReceiptHash))
-                    {
-                        lastHash = receipt.ReceiptHash;
-                    }
+                    continue;
+                }
+
+                // Two receipts claiming one position is itself a break. Neither is adopted, and the
+                // walk will stop before reaching them.
+                if (!bySequence.TryAdd(receipt.SequenceNumber, receipt))
+                {
+                    bySequence[receipt.SequenceNumber] = receipt;
                 }
             }
-            catch
+            catch (Exception error) when (error is IOException or JsonException or InvalidDataException)
             {
-                // Skip unparseable files during initial discovery
+                // An unreadable file is not a receipt this walk can step over.
             }
         }
 
-        return (maxSequence, lastHash);
+        var current = head;
+
+        while (bySequence.TryGetValue(current.Sequence + 1, out var next))
+        {
+            var expectedPrevious = current.Sequence == 0 ? OperationReceipt.GenesisHash : current.LastHash;
+
+            if (!string.Equals(next.PreviousReceiptHash ?? OperationReceipt.GenesisHash, expectedPrevious, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            var computed = OperationReceipt.ComputeCanonicalHash(
+                next.OperationId,
+                next.Operation,
+                next.RepositoryId,
+                next.Engine,
+                next.StartedAt,
+                next.CompletedAt,
+                next.EngineResult,
+                next.SnapshotId,
+                next.Source,
+                next.Metrics,
+                next.Warnings,
+                next.SequenceNumber,
+                next.PreviousReceiptHash ?? OperationReceipt.GenesisHash,
+                next.Version);
+
+            if (!string.Equals(computed, next.ReceiptHash, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            current = (next.SequenceNumber, next.ReceiptHash!);
+        }
+
+        return current;
     }
 
     private static async Task<IDisposable> AcquireLockAsync(string directory, string? repositoryId, CancellationToken cancellationToken)
