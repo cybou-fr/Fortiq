@@ -31,6 +31,23 @@ public sealed class FileRecoveryWindow : Window
     private readonly Button _open = FortiqButton.Secondary("Open restored folder");
     private readonly ProgressBar _progress = new() { IsIndeterminate = true, Height = 5 };
     private readonly StackPanel _selectionFields = new() { Spacing = 12 };
+
+    /// <summary>Where it goes, asked after the backup has been chosen and not before.</summary>
+    private readonly StackPanel _destinationFields = new() { Spacing = 12 };
+
+    /// <summary>
+    /// Which of the three questions is on screen: open the backup, choose what, say where.
+    /// </summary>
+    /// <remarks>
+    /// The window already revealed its later fields once the backups were open, so the flow was two
+    /// phases with everything after the first crammed into the second: a snapshot picker, a file tree,
+    /// a search box, a destination picker and a restore button, all at once, on the screen somebody
+    /// reaches after losing data. Splitting the second phase asks one thing at a time.
+    /// </remarks>
+    private int _step = 1;
+
+    private readonly Button _continue = FortiqButton.Primary("Continue");
+    private readonly Button _back = FortiqButton.Secondary("Back");
     private readonly StackPanel _accessFields = new() { Spacing = 10 };
     private readonly PathPickerControl _kit;
     private readonly PathPickerControl _parent;
@@ -185,10 +202,13 @@ public sealed class FileRecoveryWindow : Window
         };
 
         _cancel.Click += (_, _) => _model.Cancel();
+        _continue.Click += (_, _) => { _step = 3; Refresh(); };
+        _back.Click += (_, _) => { _step = 2; Refresh(); };
         _reset.Click += (_, _) =>
         {
             _model.Clear();
             _lastLoadedSnapshot = null;
+            _step = 1;
             ClearSecretFields();
             Refresh();
         };
@@ -222,9 +242,9 @@ public sealed class FileRecoveryWindow : Window
         _selectionFields.Children.Add(new TextBlock { Text = "Backup to restore", FontWeight = FontWeight.SemiBold });
         _selectionFields.Children.Add(_snapshots);
         _selectionFields.Children.Add(_explorerPanel);
-        _selectionFields.Children.Add(Step(3, "Say where it goes", "A new folder, created for this restore. Nothing you already have is overwritten."));
-        _selectionFields.Children.Add(_parent);
-        _selectionFields.Children.Add(_destination);
+        _destinationFields.Children.Add(Step(3, "Say where it goes", "A new folder, created for this restore. Nothing you already have is overwritten."));
+        _destinationFields.Children.Add(_parent);
+        _destinationFields.Children.Add(_destination);
 
         var body = new StackPanel
         {
@@ -240,7 +260,7 @@ public sealed class FileRecoveryWindow : Window
                     TextWrapping = TextWrapping.Wrap,
                     Foreground = DesignTokens.Muted
                 },
-                _accessFields, _load, _reset, _selectionFields
+                _accessFields, _load, _reset, _selectionFields, _destinationFields
             }
         };
         var layout = new DockPanel();
@@ -249,10 +269,19 @@ public sealed class FileRecoveryWindow : Window
             Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(24, 12),
             HorizontalAlignment = HorizontalAlignment.Right, Children = { _cancel, close }
         };
+        // The step's own action sits in the docked bar with the others, so moving through the three
+        // questions never means hunting for the button that moves you.
+        var stepActions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Children = { _back, _continue, _restore, _open }
+        };
+
         var fixedActions = new StackPanel
         {
             Margin = new Thickness(24, 8), Spacing = 10,
-            Children = { _progress, _status, _restore, _open, footer }
+            Children = { _progress, _status, stepActions, footer }
         };
         DockPanel.SetDock(fixedActions, Dock.Bottom);
         layout.Children.Add(fixedActions);
@@ -345,11 +374,27 @@ public sealed class FileRecoveryWindow : Window
             && !string.IsNullOrWhiteSpace(_repository.Text) && !string.IsNullOrWhiteSpace(_phrase.Text)
             && !string.IsNullOrWhiteSpace(_kit.SelectedPath);
         _load.IsVisible = _model.Snapshots.Count == 0;
-        _selectionFields.IsVisible = _model.Snapshots.Count > 0;
-        _accessFields.IsVisible = _model.Snapshots.Count == 0;
-        _reset.IsVisible = _model.Snapshots.Count > 0;
-        _restore.IsVisible = _model.Snapshots.Count > 0 && !_model.Completed;
+        var open = _model.Snapshots.Count > 0;
+        if (!open)
+        {
+            _step = 1;
+        }
+        else if (_step == 1)
+        {
+            // The backups just opened, which is what finishes the first question.
+            _step = 2;
+        }
+
+        _accessFields.IsVisible = !open;
+        _selectionFields.IsVisible = open && _step == 2;
+        _destinationFields.IsVisible = open && _step >= 3;
+        _reset.IsVisible = open;
         _reset.IsEnabled = !_model.Busy;
+
+        _continue.IsVisible = open && _step == 2 && !_model.Completed;
+        _back.IsVisible = open && _step >= 3 && !_model.Completed;
+        _back.IsEnabled = !_model.Busy;
+        _restore.IsVisible = open && _step >= 3 && !_model.Completed;
 
         if (!ReferenceEquals(_snapshots.ItemsSource, _model.Snapshots))
         {
@@ -370,6 +415,7 @@ public sealed class FileRecoveryWindow : Window
         _parent.IsEnabled = !_model.Busy && !_model.Completed;
 
         var hasValidSelection = !isSpecific || _model.SelectedFile is not null;
+        _continue.IsEnabled = !_model.Busy && _snapshots.SelectedItem is RecoverySnapshot && hasValidSelection;
         _restore.IsEnabled = !_model.Busy && !_model.Completed && _snapshots.SelectedItem is RecoverySnapshot && _target is not null && hasValidSelection;
 
         // The button names what it will restore and nothing else. It used to carry the whole sentence -
@@ -388,7 +434,9 @@ public sealed class FileRecoveryWindow : Window
         _open.IsVisible = _model.Completed;
         _progress.IsVisible = _model.Busy || _model.FilesLoading;
         _status.Text = _model.Status;
-        _destination.Text = _target is null ? "Select an existing destination parent folder." : "New recovery folder: " + _target;
+        _destination.Text = _target is null
+            ? "Choose a folder to restore into. Fortiq creates a new one inside it."
+            : "Fortiq will create: " + _target;
     }
 
     private static FuncDataTemplate<SnapshotFileItem> CreateFileItemTemplate()

@@ -105,7 +105,12 @@ public sealed class FileRecoveryViewModel(IFileRecovery recovery) : INotifyPrope
             token.ThrowIfCancellationRequested();
             Snapshots = snapshots.OrderByDescending(item => item.CreatedAt).ToArray();
             if (Snapshots.Count > 0) _access = access;
-            Status = Snapshots.Count == 0 ? "This repository contains no backups." : "Choose a backup and a destination to restore.";
+            // Only what the next step asks for. It used to name the destination too, on a screen that
+            // has not asked for one yet - so the sentence describing what to do listed something not
+            // on it.
+            Status = Snapshots.Count == 0
+                ? "This repository contains no backups."
+                : $"{Snapshots.Count} backup{(Snapshots.Count == 1 ? string.Empty : "s")} found. Choose the one to restore from.";
         });
     }
 
