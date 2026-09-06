@@ -490,17 +490,114 @@ public sealed class ProtectRepositoryWindow : Window
         _content.Children.Add(actions);
     }
 
+    /// <summary>
+    /// The last screen, which used to congratulate somebody on protection that did not exist yet.
+    /// </summary>
+    /// <remarks>
+    /// It said "Protection is ready" the moment the words were confirmed. At that moment the
+    /// repository is empty: the schedule exists and its first run is hours away, so a disk that failed
+    /// that night would take everything. The product already disagreed - a repository with no backup
+    /// is <c>never-backed-up</c>, which the dashboard reports as At risk - so the wizard's last word
+    /// and the first screen behind it contradicted each other.
+    ///
+    /// Now it says where things actually stand, and offers the one action that changes it.
+    /// </remarks>
     private void RenderDone()
+    {
+        switch (_model.FirstBackup)
+        {
+            case FirstBackupState.Running:
+                RenderFirstBackupRunning();
+                return;
+
+            case FirstBackupState.Done:
+                RenderProtected();
+                return;
+
+            default:
+                RenderNotBackedUpYet();
+                return;
+        }
+    }
+
+    /// <summary>Words confirmed, nothing backed up. Said plainly, because it is the truth.</summary>
+    private void RenderNotBackedUpYet()
+    {
+        var body = new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                Text("Your recovery words are confirmed", 22, FontWeight.SemiBold, Ink),
+                Text(_model.BackupScheduled
+                    ? "Nothing has been backed up yet. Fortiq will do it automatically at the scheduled time, "
+                        + "but until the first backup finishes there is nothing to recover."
+                    : _model.SchedulingFailure ?? "Automatic scheduling needs attention.",
+                    13, FontWeight.Normal, Muted, true)
+            }
+        };
+
+        if (_model.FirstBackup == FirstBackupState.Failed && _model.FirstBackupFailure is { } failure)
+        {
+            body.Children.Add(Text(failure, 12, FontWeight.Normal, Failure, true));
+        }
+
+        _content.Children.Add(Card(body, UnprovenSurface, Unproven));
+
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Right };
+
+        if (_model.CanBackUpNow)
+        {
+            var now = Primary(_model.FirstBackup == FirstBackupState.Failed ? "Try the backup again" : "Back up now");
+            now.Click += async (_, _) =>
+            {
+                Render();
+                await _model.RunFirstBackupAsync(CancellationToken.None);
+                Render();
+            };
+            actions.Children.Add(now);
+        }
+
+        var later = _model.CanBackUpNow ? Secondary("Do this later") : Primary("Done");
+        later.Click += (_, _) => Close();
+        actions.Children.Add(later);
+
+        _content.Children.Add(actions);
+    }
+
+    private void RenderFirstBackupRunning()
+    {
+        _content.Children.Add(Card(new StackPanel
+        {
+            Spacing = 12,
+            Children =
+            {
+                Text("Backing up for the first time", 22, FontWeight.SemiBold, Ink),
+                Text("Fortiq is reading the folder and writing it to the backup location. The first one takes "
+                    + "the longest, because everything is new. Leave this window open.", 13, FontWeight.Normal, Muted, true),
+                new ProgressBar { IsIndeterminate = true, Height = 5 }
+            }
+        }, InfoSurface, InfoLine));
+    }
+
+    /// <summary>The only screen entitled to say the folder is protected.</summary>
+    private void RenderProtected()
     {
         _content.Children.Add(Card(new StackPanel
         {
             Spacing = 10,
             Children =
             {
-                Text(_model.BackupScheduled ? "Protection is ready" : "Repository created", 22, FontWeight.SemiBold, Recoverable),
+                Text("Your first backup is complete", 22, FontWeight.SemiBold, Recoverable),
                 Text(_model.BackupScheduled
-                    ? "Your repository is initialized and the first backup is scheduled. Recovery will remain unproven until Fortiq completes a real restore test."
-                    : _model.SchedulingFailure ?? "Automatic scheduling needs attention.", 13, FontWeight.Normal, Muted, true)
+                    ? "This folder is backed up and Fortiq will keep it up to date on its own."
+                    : "This folder is backed up. Nothing will happen automatically on this PC, so run a backup "
+                        + "yourself whenever it matters.",
+                    13, FontWeight.Normal, Muted, true),
+                // Said here rather than left for somebody to discover as an amber verdict later.
+                Text("Recovery has not been tested yet. Fortiq restores a real backup on a schedule and tells "
+                    + "you whether it came back; until then this source counts as unproven.",
+                    12, FontWeight.Normal, Muted, true)
             }
         }, RecoverableSurface, Recoverable));
 

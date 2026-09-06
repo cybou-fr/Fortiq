@@ -55,6 +55,22 @@ public interface IProtectRepository
     Task ConfirmRecoveryPhraseAsync(string repositoryId, CancellationToken cancellationToken);
 }
 
+/// <summary>Whether this source has anything in it yet.</summary>
+public enum FirstBackupState
+{
+    /// <summary>Nothing has been backed up. The repository is empty.</summary>
+    NotStarted,
+
+    /// <summary>A backup is running now.</summary>
+    Running,
+
+    /// <summary>A backup completed, so there is something to recover.</summary>
+    Done,
+
+    /// <summary>A backup was attempted and did not finish.</summary>
+    Failed
+}
+
 /// <summary>Where the wizard is.</summary>
 public enum ProtectStep
 {
@@ -85,6 +101,7 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
     private const int WordsToConfirm = 3;
 
     private readonly IProtectRepository _protect;
+    private readonly IBackupNow? _backup;
     private readonly Func<int, int, int> _pickWord;
 
     private string _repositoryLocation = string.Empty;
@@ -110,17 +127,21 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
     private string? _mnemonic;
     private string? _failure;
     private bool _busy;
+    private FirstBackupState _firstBackup = FirstBackupState.NotStarted;
+    private string? _firstBackupFailure;
     private ProtectStep _step = ProtectStep.Describe;
 
     public ProtectRepositoryViewModel(
         IProtectRepository protect,
         Func<int, int, int>? pickWord = null,
         bool automaticBackupsAvailable = true,
-        string? automaticBackupsUnavailableReason = null)
+        string? automaticBackupsUnavailableReason = null,
+        IBackupNow? backup = null)
     {
         AutomaticBackupsAvailable = automaticBackupsAvailable;
         AutomaticBackupsUnavailableReason = automaticBackupsUnavailableReason;
         _protect = protect ?? throw new ArgumentNullException(nameof(protect));
+        _backup = backup;
         _pickWord = pickWord ?? ((count, _) => Random.Shared.Next(count));
     }
 
@@ -314,6 +335,67 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
         Step = ProtectStep.Done;
         OnPropertyChanged(nameof(RecoveryMnemonic));
         return true;
+    }
+
+    /// <summary>
+    /// Whether this wizard can take the first backup itself.
+    /// </summary>
+    /// <remarks>
+    /// It can wherever the application can: portable does it in this process, and the installed case
+    /// reaches this screen inside the elevated instance that did the provisioning, which is exactly
+    /// the caller the service accepts. Where it cannot, the screen says no backup has happened rather
+    /// than offering a button that would fail.
+    /// </remarks>
+    public bool CanBackUpNow => _backup is not null && RepositoryId is { Length: > 0 };
+
+    /// <summary>Where the first backup has got to, which is what the last screen is about.</summary>
+    public FirstBackupState FirstBackup { get => _firstBackup; private set => Set(ref _firstBackup, value); }
+
+    /// <summary>Why the first backup did not work, in the words the person reads.</summary>
+    public string? FirstBackupFailure { get => _firstBackupFailure; private set => Set(ref _firstBackupFailure, value); }
+
+    /// <summary>
+    /// Takes the first backup, from the screen that would otherwise have claimed one already existed.
+    /// </summary>
+    /// <remarks>
+    /// The final screen used to say "Protection is ready" as soon as the words were confirmed. At that
+    /// moment the repository holds nothing: the schedule exists, the first run is hours away, and if
+    /// the disk died that night there would be nothing to recover. The application already disagreed
+    /// with the wizard - a repository with no backup is <c>never-backed-up</c>, which the dashboard
+    /// reports as At risk - so somebody could close a wizard that said they were protected and land on
+    /// a red screen.
+    ///
+    /// Offered rather than started on arrival. A first backup of a large folder takes as long as it
+    /// takes, and beginning one unasked, in a window that refuses to close while it is busy, would
+    /// trap somebody who only wanted to finish setting up.
+    /// </remarks>
+    public async Task RunFirstBackupAsync(CancellationToken cancellationToken)
+    {
+        if (_backup is null || RepositoryId is not { Length: > 0 } repositoryId || FirstBackup == FirstBackupState.Running)
+        {
+            return;
+        }
+
+        FirstBackup = FirstBackupState.Running;
+        FirstBackupFailure = null;
+        Busy = true;
+        try
+        {
+            var result = await _backup.BackupAsync(repositoryId, cancellationToken);
+            FirstBackup = result.Success ? FirstBackupState.Done : FirstBackupState.Failed;
+            FirstBackupFailure = result.Success
+                ? null
+                : result.Failure ?? "The backup did not complete, and gave no reason.";
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            FirstBackup = FirstBackupState.Failed;
+            FirstBackupFailure = PlainFailure.Describe(error);
+        }
+        finally
+        {
+            Busy = false;
+        }
     }
 
     /// <summary>

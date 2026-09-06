@@ -365,7 +365,12 @@ public sealed class FortiqApplication : Avalonia.Application
 
         return new MainWindow(
             new RepositoriesViewModel(new HealthFileSource(paths.HealthReport), prove, backup: backupNow),
-            () => new ProtectRepositoryViewModel(protect, automaticBackupsAvailable: automaticAvailable, automaticBackupsUnavailableReason: unavailableReason),
+            // The wizard takes the first backup itself, so it needs the same adapter the dashboard uses.
+            () => new ProtectRepositoryViewModel(
+                protect,
+                automaticBackupsAvailable: automaticAvailable,
+                automaticBackupsUnavailableReason: unavailableReason,
+                backup: backupNow),
             settings, installed: installed,
             fileRecovery: () => new FileRecoveryViewModel(new FileRecoveryAdapter(engineRoot, paths.Runs)),
             sourceSettings: (repositoryId, title) => new SourceSettingsViewModel(sourceSettings, repositoryId, title),
@@ -486,9 +491,34 @@ public sealed class FortiqApplication : Avalonia.Application
 
         var automaticAvailable = !OperatingSystem.IsWindows() || Fortiq.Infrastructure.Keys.WindowsTpmEnvelope.IsAvailable;
 
+        // This instance is elevated, which is exactly the caller the service accepts for a backup - so
+        // the first one can be taken here rather than left for the small hours.
+        var schedules = new FileSystemScheduleStore(paths.Schedules);
+        var backup = OperatingSystem.IsWindows()
+            ? new BackupNowAdapter(
+                schedules,
+                new ScheduledBackupRunner(
+                    schedules,
+                    new UnattendedBackup(
+                        engineRoot,
+                        paths.Working,
+                        runDirectory: paths.Runs,
+                        receiptDirectory: paths.Receipts,
+                        storage: storage)),
+                new HealthPublisher(
+                    schedules,
+                    paths.Receipts,
+                    paths.HealthReport,
+                    paths.HealthMetrics,
+                    protection: new S3StorageProtectionInspector(storage),
+                    phrases: new RecoveryPhraseRecord(paths.Schedules)),
+                serviceClient: new ServiceIpcClient())
+            : null;
+
         return new ProtectRepositoryWindow(new ProtectRepositoryViewModel(
             protect,
-            automaticBackupsAvailable: automaticAvailable));
+            automaticBackupsAvailable: automaticAvailable,
+            backup: backup));
     }
 
     private static string ResolveEngineRoot()
