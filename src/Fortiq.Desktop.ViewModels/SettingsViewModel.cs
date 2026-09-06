@@ -1,3 +1,4 @@
+using Fortiq.Application;
 using System.ComponentModel;
 using System.Linq;
 using System.Diagnostics;
@@ -148,21 +149,15 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     /// build am I running". The build stamps a commit onto the end after a '+'; that belongs in a
     /// diagnostic, not beside the product name.
     /// </remarks>
-    private static string ReadVersion()
-    {
-        var informational = typeof(SettingsViewModel).Assembly
-            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
-            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
-            .FirstOrDefault()?.InformationalVersion;
-
-        if (!string.IsNullOrWhiteSpace(informational))
-        {
-            var build = informational.IndexOf('+', StringComparison.Ordinal);
-            return build < 0 ? informational : informational[..build];
-        }
-
-        return typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
-    }
+    /// <summary>
+    /// The version, from the one place that decides it.
+    /// </summary>
+    /// <remarks>
+    /// Read through <see cref="FortiqVersion"/> rather than from this assembly, so the number on the
+    /// Settings screen is the same number the service reports over IPC. Two readers, each asking their
+    /// own assembly, is how the two halves of an installation can each be right and still disagree.
+    /// </remarks>
+    private static string ReadVersion() => FortiqVersion.Current;
 
     public async Task RefreshServiceStatusAsync()
     {

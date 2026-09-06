@@ -117,12 +117,45 @@ public sealed class FortiqApplication : Avalonia.Application
             desktop.MainWindow = loading;
             var closed = false;
             loading.Closed += (_, _) => closed = true;
+            // A tray launch keeps this window invisible and offscreen, so anything that needs reading
+            // has to bring it back first. It was written out once, inside the catch, and a second
+            // failure path that forgot it would be a message displayed at coordinates nobody can see.
+            void Reveal()
+            {
+                if (!isTrayLaunch)
+                {
+                    return;
+                }
+
+                loading.Opacity = 1;
+                loading.ShowInTaskbar = true;
+                loading.Width = 460;
+                loading.Height = 200;
+                loading.WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterScreen;
+            }
+
             async Task InitializeAsync()
             {
                 retry.IsVisible = false;
                 message.Text = "Checking Fortiq installation...";
                 try
                 {
+                    // Before anything else is decided. Fortiq without its engine can show screens and
+                    // back nothing up, and the failure used to arrive during somebody's first backup
+                    // as a message about a manifest file. Retry is already on this window, which is
+                    // the right offer: the usual cause is a package that was copied incompletely, and
+                    // the person can finish copying it and press it.
+                    message.Text = "Checking the backup engine...";
+                    if (await EngineAvailability.DescribeMissingAsync(ResolveEngineRoot(), CancellationToken.None) is { } missing)
+                    {
+                        if (closed) return;
+                        Reveal();
+                        message.Text = missing;
+                        retry.IsVisible = true;
+                        return;
+                    }
+
+                    message.Text = "Checking Fortiq installation...";
                     var inspector = new InstallationInspector();
                     var status = await Task.Run(() => inspector.InspectAsync());
                     if (closed) return;
@@ -165,14 +198,7 @@ public sealed class FortiqApplication : Avalonia.Application
                 catch (Exception error)
                 {
                     if (closed) return;
-                    if (isTrayLaunch)
-                    {
-                        loading.Opacity = 1;
-                        loading.ShowInTaskbar = true;
-                        loading.Width = 460;
-                        loading.Height = 200;
-                        loading.WindowStartupLocation = Avalonia.Controls.WindowStartupLocation.CenterScreen;
-                    }
+                    Reveal();
                     message.Text = "Fortiq could not start. " + error.Message;
                     retry.IsVisible = true;
                 }

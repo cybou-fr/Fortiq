@@ -136,8 +136,14 @@ public sealed class ServiceIpcHost : BackgroundService
                 var responseJson = JsonSerializer.Serialize(response, JsonOptions);
                 await writer.WriteLineAsync(responseJson.AsMemory(), stoppingToken);
             }
-            catch (Exception) when (!stoppingToken.IsCancellationRequested)
+            catch (Exception error) when (!stoppingToken.IsCancellationRequested)
             {
+                // Reading the request, serialising the answer and writing it back all happen out here,
+                // and until now every failure among them was dropped without a word: the caller saw a
+                // connection close and there was nothing, anywhere, saying why. A service whose value
+                // is trustworthy diagnostics cannot be the quietest thing on the machine when it
+                // breaks.
+                LogConnectionFailure(error);
             }
         }
     }
@@ -238,7 +244,12 @@ public sealed class ServiceIpcHost : BackgroundService
             {
                 case "ping":
                 case "status":
-                    return new ServiceIpcProtocol.Response(true, null, "{\"status\":\"ok\"}");
+                    return new ServiceIpcProtocol.Response(
+                        true,
+                        null,
+                        JsonSerializer.Serialize(
+                            new ServiceIpcProtocol.StatusResponse("ok", FortiqVersion.Current),
+                            JsonOptions));
 
                 case "provision":
                     return await HandleProvisionAsync(req.PayloadJson, cancellationToken);
@@ -293,6 +304,27 @@ public sealed class ServiceIpcHost : BackgroundService
     /// The command is recorded, never the payload - a provision payload names paths, and a failure
     /// report is not a reason to copy them somewhere with different permissions.
     /// </remarks>
+    /// <summary>Records a failure that happened around a request rather than inside one.</summary>
+    private static void LogConnectionFailure(Exception error)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            using var log = new EventLog("Application") { Source = "Fortiq" };
+            log.WriteEntry(
+                $"An IPC connection failed outside request handling.{Environment.NewLine}{error}",
+                EventLogEntryType.Warning);
+        }
+        catch (Exception logging) when (logging is System.Security.SecurityException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // A service that cannot write its log still has to keep serving the next caller.
+        }
+    }
+
     private static void LogFailure(string requestJson, Exception error)
     {
         if (!OperatingSystem.IsWindows())

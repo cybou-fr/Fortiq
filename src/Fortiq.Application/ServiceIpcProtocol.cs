@@ -52,4 +52,13 @@ public static class ServiceIpcProtocol
 
     /// <summary>Asks for the lock an interrupted run left in a repository to be cleared.</summary>
     public sealed record ClearLockPayload(string RepositoryId);
+
+    /// <summary>What the service says about itself when asked.</summary>
+    /// <remarks>
+    /// The version is here because the desktop and the service are two files that are updated
+    /// together and can end up not being. Before this, a newer desktop asking an older service to do
+    /// something it had never heard of was answered "Unknown IPC command: 'backup'" - a true sentence
+    /// that names the wrong problem, and one nobody can act on without being told what to compare.
+    /// </remarks>
+    public sealed record StatusResponse(string Status, string Version);
 }

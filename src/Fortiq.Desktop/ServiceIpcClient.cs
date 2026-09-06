@@ -98,7 +98,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
 
         if (!resp.Success)
         {
-            throw new InvalidOperationException(resp.ErrorMessage ?? "Service failed to provision repository.");
+            throw await ExplainAsync("provision", resp.ErrorMessage, "Service failed to provision repository.", cancellationToken);
         }
 
         if (resp.PayloadJson is null)
@@ -136,7 +136,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
 
         if (!resp.Success)
         {
-            throw new InvalidOperationException(resp.ErrorMessage ?? "Service failed to execute restore drill.");
+            throw await ExplainAsync("prove", resp.ErrorMessage, "Service failed to execute restore drill.", cancellationToken);
         }
 
         if (resp.PayloadJson is null)
@@ -173,7 +173,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
 
         if (!resp.Success)
         {
-            throw new InvalidOperationException(resp.ErrorMessage ?? "Service failed to run the backup.");
+            throw await ExplainAsync("backup", resp.ErrorMessage, "Service failed to run the backup.", cancellationToken);
         }
 
         if (resp.PayloadJson is null)
@@ -261,7 +261,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
 
         if (!response.Success)
         {
-            throw new InvalidOperationException(response.ErrorMessage ?? $"The service did not {description}.");
+            throw await ExplainAsync(command, response.ErrorMessage, $"The service did not {description}.", cancellationToken);
         }
     }
 
@@ -274,6 +274,62 @@ public sealed class ServiceIpcClient : IServiceIpcClient
     /// written while a request is outstanding as "stop", so a line goes down the pipe first; if the
     /// pipe is already gone, the service sees that instead, which means the same thing.
     /// </remarks>
+    /// <summary>
+    /// Turns a refusal into an exception carrying something a person can act on.
+    /// </summary>
+    /// <remarks>
+    /// The judgement lives in <see cref="ServiceSkewMessage"/>, which is pure and tested; this is the
+    /// part that needs the pipe. The service's version is asked for only once a request has already
+    /// been refused as unknown, so the extra round trip is spent on a path that has already failed and
+    /// buys a message naming both numbers instead of telling somebody to go and find them.
+    /// </remarks>
+    private async Task<Exception> ExplainAsync(string command, string? reported, string fallback, CancellationToken cancellationToken)
+    {
+        var serviceVersion = ServiceSkewMessage.IsVersionSkew(reported)
+            ? await ServiceVersionAsync(cancellationToken)
+            : null;
+
+        return new InvalidOperationException(
+            ServiceSkewMessage.Describe(command, reported, fallback, serviceVersion));
+    }
+
+    /// <summary>The version the service reports, or null when it will not say.</summary>
+    private async Task<string?> ServiceVersionAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            await client.ConnectAsync(2000, cancellationToken);
+
+            using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
+            using var writer = new StreamWriter(client, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+            var request = new ServiceIpcProtocol.Request("status");
+            await writer.WriteLineAsync(JsonSerializer.Serialize(request, JsonOptions).AsMemory(), cancellationToken);
+
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+            {
+                return null;
+            }
+
+            var response = JsonSerializer.Deserialize<ServiceIpcProtocol.Response>(line, JsonOptions);
+            if (response is not { Success: true, PayloadJson: { } payload })
+            {
+                return null;
+            }
+
+            var status = JsonSerializer.Deserialize<ServiceIpcProtocol.StatusResponse>(payload, JsonOptions);
+            return string.IsNullOrWhiteSpace(status?.Version) ? null : status.Version;
+        }
+        catch (Exception error) when (error is IOException or TimeoutException or JsonException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            // A service too old to answer this is exactly the service this is asking about, and the
+            // message says so without the number rather than failing to appear.
+            return null;
+        }
+    }
+
     private static async Task<string?> ReadOperationResponseAsync(
         StreamReader reader,
         CancellationToken cancellationToken,

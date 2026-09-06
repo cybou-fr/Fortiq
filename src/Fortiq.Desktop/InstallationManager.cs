@@ -716,23 +716,72 @@ public sealed class InstallationManager : IInstallationOperations
         }
     }
 
+    /// <summary>
+    /// Installs from a plain folder, for a source that carries no deployment manifest.
+    /// </summary>
+    /// <remarks>
+    /// Every copy used to be attempted and every <see cref="IOException"/> swallowed, and nothing on
+    /// this path checked what had arrived - <see cref="VerifyInstalledPayload"/> is reached only from
+    /// the bundle path. A file locked by a running process, or a disk that filled up halfway, produced
+    /// an installation missing one library and an installer that reported success. What failed next
+    /// was the service failing to start, or the desktop failing to load an assembly, with nothing
+    /// pointing back at the install that caused it.
+    ///
+    /// The copies are still attempted individually - stopping at the first failure would leave a
+    /// half-installed directory and name only one of possibly several problems - but every failure is
+    /// kept, the result is checked against what was on the source, and the whole thing is refused if
+    /// anything is missing or the wrong size.
+    /// </remarks>
     private static void CopyLocalSource(string sourceDir, string targetDir)
     {
-        var sourceFiles = Directory.EnumerateFiles(sourceDir, "*.*", SearchOption.TopDirectoryOnly);
-        foreach (var file in sourceFiles)
+        var problems = new List<string>();
+        var expected = new List<FileInfo>();
+
+        foreach (var file in Directory.EnumerateFiles(sourceDir, "*.*", SearchOption.TopDirectoryOnly))
         {
             var ext = Path.GetExtension(file);
-            if (BinaryExtensions.Any(valid => string.Equals(ext, valid, StringComparison.OrdinalIgnoreCase)))
+            if (!BinaryExtensions.Any(valid => string.Equals(ext, valid, StringComparison.OrdinalIgnoreCase)))
             {
-                var destFile = Path.Combine(targetDir, Path.GetFileName(file));
-                try
-                {
-                    File.Copy(file, destFile, overwrite: true);
-                }
-                catch (IOException)
-                {
-                }
+                continue;
             }
+
+            expected.Add(new FileInfo(file));
+            var destFile = Path.Combine(targetDir, Path.GetFileName(file));
+            try
+            {
+                File.Copy(file, destFile, overwrite: true);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                problems.Add($"{Path.GetFileName(file)} ({error.Message})");
+            }
+        }
+
+        // Checked against the source rather than trusted from the copy loop: a copy that returned
+        // without throwing and produced a short file is exactly the case a per-call catch cannot see.
+        foreach (var source in expected)
+        {
+            var installed = new FileInfo(Path.Combine(targetDir, source.Name));
+            if (!installed.Exists)
+            {
+                problems.Add(source.Name + " (missing)");
+            }
+            else if (installed.Length != source.Length)
+            {
+                problems.Add(source.Name + " (wrong size)");
+            }
+
+            if (problems.Count >= 10)
+            {
+                break;
+            }
+        }
+
+        if (problems.Count > 0)
+        {
+            throw new InvalidDataException(
+                $"The installation in '{targetDir}' is incomplete: {string.Join(", ", problems)}. " +
+                "Nothing was started from it. Free some disk space, close any running Fortiq, and install again.");
         }
 
         CopyEngines(sourceDir, targetDir);
