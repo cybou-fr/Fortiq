@@ -237,7 +237,7 @@ public sealed class FortiqApplication : Avalonia.Application
         // machine's %ProgramData%, where it has read access and nothing more.
         var paths = installed
             ? FortiqStatePaths.Resolve()
-            : FortiqStatePaths.Resolve(Path.Combine(AppContext.BaseDirectory, "portable-state"));
+            : FortiqStatePaths.Resolve(DesktopPreferencesStore.PortableStateDirectory);
 
         var engineRoot = ResolveEngineRoot();
         // The same order the service uses, so both processes resolve one repository's storage
@@ -312,7 +312,12 @@ public sealed class FortiqApplication : Avalonia.Application
 
         // Reading a schedule needs nothing; changing it goes to the service when there is one. Both
         // halves are the same adapter so the screen does not have to know which mode it is in.
-        var sourceSettings = new SourceSettingsAdapter(schedules, serviceClient);
+        var sourceSettings = new SourceSettingsAdapter(schedules, serviceClient,
+            clearLocalLock: OperatingSystem.IsWindows()
+                ? new StaleLockRecovery(engineRoot, paths.Working,
+                    runDirectory: paths.Runs, receiptDirectory: paths.Receipts, storage: storage).ClearAsync
+                : null,
+            elevate: SourceSettingsElevation.RunIfNeededAsync);
 
         var settings = new SettingsViewModel(paths.Root, Path.Combine(paths.Root, "logs"));
         if (!installed) settings.ServiceStatus = "Portable mode";
@@ -355,7 +360,7 @@ public sealed class FortiqApplication : Avalonia.Application
         var unavailableReason = !installed
             ? "Portable mode: background scheduled backups require an installed service."
             : !tpmAvailable
-                ? "This PC did not provide a device key, so Fortiq cannot unlock the repository on its own. Backups and recovery still work while Fortiq is open."
+                ? "Protection requires a working device-bound key. Recovery from an existing kit and recovery phrase remains available."
                 : null;
 
         return new MainWindow(
@@ -585,6 +590,11 @@ public static class Program
             LogCrash(e.Exception);
             e.SetObserved();
         };
+
+        if (args.Length > 0 && args[0] == SourceSettingsElevation.Verb)
+            return args.Length == 2 && OperatingSystem.IsWindows()
+                ? SourceSettingsElevation.RunWorkerAsync(args[1], new ServiceIpcClient()).GetAwaiter().GetResult()
+                : 1;
 
         if (InstallationCli.IsCliInvocation(args))
         {

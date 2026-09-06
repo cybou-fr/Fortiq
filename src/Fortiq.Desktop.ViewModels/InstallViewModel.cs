@@ -4,6 +4,8 @@ using Fortiq.Platform.Windows;
 
 namespace Fortiq.Desktop.ViewModels;
 
+public sealed class AutostartConfigurationException(string message) : InvalidOperationException(message);
+
 public interface IInstallationOperations
 {
     Task<int> ExecuteInstallAsync(string targetDir, bool installService, bool addToPath, bool autoStartOnLogon, IProgress<(string Message, double Percent)> progress, CancellationToken cancellationToken);
@@ -240,8 +242,12 @@ public sealed class InstallViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            ErrorMessage = "The installation did not complete. " + PlainFailure.Describe(ex);
-            ProgressMessage = "Installation stopped due to an error.";
+            ErrorMessage = ex is AutostartConfigurationException
+                ? ex.Message
+                : "The installation did not complete. " + PlainFailure.Describe(ex);
+            ProgressMessage = ex is AutostartConfigurationException
+                ? "Installation completed. Autostart needs attention."
+                : "Installation stopped due to an error.";
         }
         finally
         {

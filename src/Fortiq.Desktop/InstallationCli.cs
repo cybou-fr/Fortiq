@@ -199,6 +199,7 @@ public static class InstallationCli
             });
 
             await InstallationManager.InstallAsync(options, progress);
+            InstallationManager.ConfigureUserAutostart(targetDir, autoStart);
             if (!silent)
             {
                 Console.WriteLine("Fortiq installed successfully.");
@@ -217,6 +218,7 @@ public static class InstallationCli
         }
 
         var exitCode = await InstallationManager.ElevateAndExecuteAsync(workerArgs);
+        if (exitCode == 0) InstallationManager.ConfigureUserAutostart(targetDir, autoStart);
         if (exitCode == 66)
         {
             Console.Error.WriteLine("Elevation was rejected by the user or prohibited by system policy.");
@@ -257,6 +259,7 @@ public static class InstallationCli
             });
 
             await InstallationManager.UninstallAsync(options, progress);
+            if (OperatingSystem.IsWindows()) WindowsAutostartController.SetAutostartEnabled(false);
             if (!silent)
             {
                 Console.WriteLine("Fortiq uninstalled successfully.");
@@ -274,6 +277,7 @@ public static class InstallationCli
         }
 
         var exitCode = await InstallationManager.ElevateAndExecuteAsync(workerArgs);
+        if (exitCode == 0 && OperatingSystem.IsWindows()) WindowsAutostartController.SetAutostartEnabled(false);
         if (exitCode == 66)
         {
             Console.Error.WriteLine("Elevation was rejected by the user.");

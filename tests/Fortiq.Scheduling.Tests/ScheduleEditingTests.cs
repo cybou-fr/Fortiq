@@ -165,6 +165,36 @@ public sealed class ScheduleEditingTests : IDisposable
             CancellationToken.None));
     }
 
+    [Fact]
+    public async Task PauseOnlyPreservesEveryCustomRecurrenceAndRetentionField()
+    {
+        await WriteDefaultAsync();
+        var document = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(SchedulePath()))!;
+        document["recurrence"] = System.Text.Json.Nodes.JsonNode.Parse("""{"kind":"interval","period":"06:00:00"}""");
+        document["drillRecurrence"] = System.Text.Json.Nodes.JsonNode.Parse("""{"kind":"interval","period":"1.12:00:00"}""");
+        document["retentionRecurrence"] = System.Text.Json.Nodes.JsonNode.Parse("""{"kind":"interval","period":"3.00:00:00"}""");
+        document["retention"] = System.Text.Json.Nodes.JsonNode.Parse("""{"keepLast":13,"keepYearly":2}""");
+        await File.WriteAllTextAsync(SchedulePath(), document.ToJsonString());
+        await Store().UpdateAsync("documents", new SchedulePreferences(false, new TimeOnly(2, 30), null,
+            null, PruneMode.ForgetOnly, UpdateBackupTime: false, UpdateDrill: false, UpdateRetention: false), CancellationToken.None);
+        var after = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(SchedulePath()))!;
+        foreach (var field in new[] { "recurrence", "drillRecurrence", "retentionRecurrence", "retention" })
+            Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(document[field], after[field]), field);
+        Assert.False(Assert.Single(await Store().ReadSchedulesAsync(CancellationToken.None)).Enabled);
+    }
+
+    [Fact]
+    public async Task EditingDailyTimePreservesItsOriginalTimeZone()
+    {
+        await WriteDefaultAsync();
+        await Store().UpdateAsync("documents", new SchedulePreferences(true, new TimeOnly(17, 40), null,
+            null, PruneMode.ForgetOnly), CancellationToken.None);
+        var schedule = Assert.Single(await Store().ReadSchedulesAsync(CancellationToken.None));
+        var recurrence = Assert.IsType<DailyAt>(schedule.Recurrence);
+        Assert.Equal(TimeZoneInfo.Utc.Id, recurrence.TimeZone.Id);
+        Assert.Equal(new TimeOnly(17, 40), recurrence.TimeOfDay);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))

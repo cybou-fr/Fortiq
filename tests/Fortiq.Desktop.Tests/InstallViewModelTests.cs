@@ -25,6 +25,7 @@ public sealed class InstallViewModelTests
     private sealed class FakeOperations : IInstallationOperations
     {
         public int ExitCode { get; set; }
+        public Exception? Failure { get; set; }
         public bool WasCalled { get; private set; }
         public bool AutoStartPassed { get; private set; }
 
@@ -39,8 +40,19 @@ public sealed class InstallViewModelTests
             WasCalled = true;
             AutoStartPassed = autoStartOnLogon;
             progress.Report(("Installing...", 50));
-            return Task.FromResult(ExitCode);
+            return Failure is null ? Task.FromResult(ExitCode) : Task.FromException<int>(Failure);
         }
+    }
+
+    [Fact]
+    public async Task AutostartFailureDoesNotClaimTheInstallationFailed()
+    {
+        var inspector = new FakeInspector();
+        var operations = new FakeOperations { Failure = new AutostartConfigurationException("Fortiq is installed, but autostart needs attention.") };
+        var model = new InstallViewModel(inspector, inspector.ExpectedStatus, operations);
+        await model.InstallAsync();
+        Assert.Equal(operations.Failure.Message, model.ErrorMessage);
+        Assert.Contains("Installation completed", model.ProgressMessage, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -102,11 +102,16 @@ public sealed class RepositoryProvisioner
         CancellationToken cancellationToken,
         bool addDeviceUnlock = true,
         DeviceKeyScope deviceKeyScope = DeviceKeyScope.CurrentUser,
-        bool requireImmutableStorage = false)
+        bool requireImmutableStorage = false,
+        bool requireDeviceUnlock = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryLocation);
         ArgumentException.ThrowIfNullOrWhiteSpace(kitDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+
+        if (requireDeviceUnlock && (!addDeviceUnlock
+            || !WindowsTpmEnvelope.IsAvailableFor(machineKey: deviceKeyScope == DeviceKeyScope.Machine)))
+            throw new InvalidOperationException("Protection requires a working device-bound key. Recovery from an existing kit and recovery phrase remains available.");
 
         var repositoryPath = RepositoryLocation.Normalize(repositoryLocation);
         var inObjectStorage = RepositoryLocation.IsObjectStorage(repositoryPath);
@@ -151,6 +156,8 @@ public sealed class RepositoryProvisioner
 
         try
         {
+            if (requireDeviceUnlock && !deviceUnlock)
+                throw new InvalidOperationException("A device-bound key is required to protect this source.");
             var engineUnlockSecret = RandomNumberGenerator.GetBytes(EnginePasswordV1Encoder.EngineUnlockSecretSize);
             var mnemonic = Bip39Mnemonic.Create();
             using var lease = new BufferKeyLease(engineUnlockSecret);
@@ -183,6 +190,11 @@ public sealed class RepositoryProvisioner
                     machineKey: deviceKeyScope == DeviceKeyScope.Machine,
                     _clock);
                 envelopes.Add(deviceEnvelope);
+                if (requireDeviceUnlock)
+                {
+                    // Prove this identity can open the key before reporting usable protection.
+                    using var verifiedUnlock = WindowsTpmEnvelope.Unwrap(deviceEnvelope, deviceEnvelope.RepositoryId);
+                }
             }
 
             var kit = await RecoveryKitStore.WriteAsync(

@@ -16,6 +16,18 @@ public sealed class TransactionalProvisioningTests
 
     private static string HelperPath => Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
 
+    [Fact]
+    public async Task RequiredDeviceUnlockCannotFallBackToPhraseOnlyProvisioning()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "fortiq-required-key-" + Guid.NewGuid().ToString("N"));
+        var provisioner = new RepositoryProvisioner(root);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => provisioner.CreateAsync(
+            Path.Combine(root, "repository"), Path.Combine(root, "kit"), Path.Combine(root, "work"),
+            CancellationToken.None, addDeviceUnlock: false, requireDeviceUnlock: true));
+        Assert.Contains("device-bound key", error.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(root));
+    }
+
     [SkippableFact]
     public async Task AFailureAfterInitialisationLeavesNoRepositoryBehind()
     {

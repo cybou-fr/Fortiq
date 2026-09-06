@@ -98,9 +98,16 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
             request.RepositoryLocation,
             request.KitDirectory,
             working,
-            cancellationToken);
+            cancellationToken,
+            requireDeviceUnlock: true);
 
         var id = provisioned.Repository.Id.ToString();
+
+        // The same record the service writes on its side of this, and for the same reason: from here
+        // until somebody confirms, this repository is one whose phrase may exist only on a screen.
+        await new RecoveryPhraseRecord(_paths.Schedules)
+            .IssuedAsync(id, DateTimeOffset.UtcNow, cancellationToken);
+
         try
         {
             await WriteScheduleAsync(Path.Combine(_paths.Schedules, "schedules"), id, request, _nightly, cancellationToken);

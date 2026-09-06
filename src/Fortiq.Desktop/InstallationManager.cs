@@ -55,6 +55,7 @@ public sealed class InstallationManager : IInstallationOperations
         {
             var internalProgress = new Progress<InstallProgressReport>(p => progress.Report((p.Message, p.Percent)));
             await InstallAsync(options, internalProgress, cancellationToken);
+            ConfigureUserAutostart(targetDir, autoStartOnLogon);
             return 0;
         }
 
@@ -64,7 +65,16 @@ public sealed class InstallationManager : IInstallationOperations
         var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
         var workerArgs = $"--worker-install {base64}";
 
-        return await ElevateAndExecuteAsync(workerArgs, cancellationToken);
+        var result = await ElevateAndExecuteAsync(workerArgs, cancellationToken);
+        if (result == 0) ConfigureUserAutostart(targetDir, autoStartOnLogon);
+        return result;
+    }
+
+    internal static void ConfigureUserAutostart(string targetDir, bool enabled)
+    {
+        if (OperatingSystem.IsWindows() && enabled
+            && !WindowsAutostartController.SetAutostartEnabled(true, Path.Combine(targetDir, "Fortiq.Desktop.exe")))
+            throw new AutostartConfigurationException("Fortiq is installed, but Windows autostart could not be enabled for your account. Enable it in Settings.");
     }
 
     public static async Task InstallAsync(
@@ -175,13 +185,6 @@ public sealed class InstallationManager : IInstallationOperations
             {
                 progress?.Report(new("Configuring system PATH...", 95));
                 TryAddDirectoryToPath(targetDir);
-            }
-
-            if (options.AutoStartOnLogon)
-            {
-                progress?.Report(new("Configuring Windows autostart on logon...", 98));
-                var installedDesktopExe = Path.Combine(targetDir, "Fortiq.Desktop.exe");
-                WindowsAutostartController.SetAutostartEnabled(true, installedDesktopExe);
             }
 
             if (options.CreateStartMenuShortcut)
@@ -299,7 +302,6 @@ public sealed class InstallationManager : IInstallationOperations
 
         if (OperatingSystem.IsWindows())
         {
-            WindowsAutostartController.SetAutostartEnabled(false);
 
             progress?.Report(new("Stopping and removing the Fortiq service...", 20));
             try

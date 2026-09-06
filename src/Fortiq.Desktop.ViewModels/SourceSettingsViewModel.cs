@@ -20,7 +20,10 @@ public sealed record SourceSettings(
     int? KeepDaily,
     int? KeepWeekly,
     int? KeepMonthly,
-    bool Prune)
+    bool Prune,
+    bool UpdateBackupTime = true,
+    bool UpdateDrill = true,
+    bool UpdateRetention = true)
 {
     /// <summary>Whether anything at all is being forgotten.</summary>
     public bool RetentionConfigured => KeepDaily is not null || KeepWeekly is not null || KeepMonthly is not null;
@@ -293,7 +296,13 @@ public sealed class SourceSettingsViewModel : INotifyPropertyChanged
         KeepDaily,
         KeepWeekly,
         KeepMonthly,
-        Prune);
+        Prune,
+        UpdateBackupTime: Details?.Settings.UpdateBackupTime == true
+            && (BackupHour != Details.Settings.BackupHour || BackupMinute != Details.Settings.BackupMinute),
+        UpdateDrill: Details?.Settings.UpdateDrill == true && DrillEveryDays != Details.Settings.DrillEveryDays,
+        UpdateRetention: Details is not null && (KeepDaily != Details.Settings.KeepDaily
+            || KeepWeekly != Details.Settings.KeepWeekly || KeepMonthly != Details.Settings.KeepMonthly
+            || Prune != Details.Settings.Prune));
 
     private void Apply(SourceSettings settings)
     {

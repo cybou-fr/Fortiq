@@ -30,6 +30,16 @@ QUICK START
   Portable does neither: there is no scheduler, so a portable backup runs when
   you press "Back up now" and at no other time.
 
+  Creating protection and running backups require a working device-bound key.
+  Recovery with an existing kit and the 24 words remains available without one.
+  If stopping an operation leaves a repository locked, open its Source Settings
+  and choose Clear lock. First make sure no other PC is using that repository.
+
+  When launched through Setup, portable state is kept in
+  %LocalAppData%\Fortiq\portable-state, outside the verified package cache.
+  Keep this directory when replacing the downloaded Setup or clearing old caches.
+  A ZIP launched directly keeps portable-state beside its desktop executable.
+
   Installing adds Fortiq to the Start menu. Portable does not: run it from
   this package's desktop folder.
 

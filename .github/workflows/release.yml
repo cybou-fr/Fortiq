@@ -26,6 +26,15 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Require tag to match the product version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $expectedTag = 'v' + (& ./scripts/Get-FortiqVersion.ps1).Full
+          if ($env:GITHUB_REF_NAME -cne $expectedTag) {
+            throw "Release tag '$env:GITHUB_REF_NAME' must be '$expectedTag'."
+          }
+
       - name: Acquire pinned repository engine
         shell: pwsh
         run: ./scripts/Get-Engine.ps1
@@ -71,6 +80,16 @@ jobs:
       - name: Publish release artifacts
         shell: pwsh
         run: ./scripts/New-ReleaseArtifacts.ps1
+
+      - name: Verify the packaged Setup payload can be installed
+        # The same archive is embedded in Setup; test the production extraction and install path.
+        shell: pwsh
+        run: |
+          $archives = @(Get-ChildItem artifacts/release/Fortiq-Community-*.zip)
+          if ($archives.Count -ne 1) { throw 'Expected exactly one Community ZIP.' }
+          $env:FORTIQ_TEST_SETUP_ZIP = $archives[0].FullName
+          dotnet test tests/Fortiq.Desktop.Tests/Fortiq.Desktop.Tests.csproj --configuration Release --filter 'FullyQualifiedName~SetupExtractionThenInstallCopiesTheVerifiedDesktop' --logger trx --results-directory artifacts/setup-smoke
+          if ($LASTEXITCODE -ne 0) { throw 'Setup extraction/install verification failed.' }
 
       - name: State the signing status of this build
         shell: pwsh

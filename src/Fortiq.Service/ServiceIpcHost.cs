@@ -392,7 +392,8 @@ public sealed class ServiceIpcHost : BackgroundService
             working,
             cancellationToken,
             addDeviceUnlock: true,
-            deviceKeyScope: DeviceKeyScope.Machine);
+            deviceKeyScope: DeviceKeyScope.Machine,
+            requireDeviceUnlock: true);
 
         var repositoryId = provisioned.Repository.Id.ToString();
         bool backupScheduled = false;
@@ -622,7 +623,8 @@ public sealed class ServiceIpcHost : BackgroundService
             new TimeOnly(minutes / 60, minutes % 60),
             payload.DrillEveryDays is { } days and > 0 ? TimeSpan.FromDays(days) : null,
             retention,
-            payload.Prune ? PruneMode.ForgetAndPrune : PruneMode.ForgetOnly);
+            payload.Prune ? PruneMode.ForgetAndPrune : PruneMode.ForgetOnly,
+            payload.UpdateBackupTime, payload.UpdateDrill, payload.UpdateRetention);
     }
 
     /// <summary>Clears the lock an interrupted run left in a repository.</summary>

@@ -46,7 +46,10 @@ public static class ServiceIpcProtocol
         int? KeepDaily,
         int? KeepWeekly,
         int? KeepMonthly,
-        bool Prune);
+        bool Prune,
+    bool UpdateBackupTime = true,
+    bool UpdateDrill = true,
+    bool UpdateRetention = true);
 
     public sealed record RemoveSchedulePayload(string RepositoryId);
 

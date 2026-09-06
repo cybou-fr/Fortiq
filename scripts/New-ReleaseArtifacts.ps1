@@ -23,12 +23,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $repositoryRoot = Split-Path $PSScriptRoot -Parent
 $solution = Join-Path $repositoryRoot 'Fortiq.sln'
 $recoverProject = Join-Path $repositoryRoot 'src/Fortiq.Recover/Fortiq.Recover.csproj'
 
 if (Test-Path $OutputDirectory) {
-    Remove-Item -Recurse -Force -LiteralPath $OutputDirectory
+    throw 'OutputDirectory already exists. Choose a new directory to preserve previous release evidence.'
 }
 
 $recoverOutput = Join-Path $OutputDirectory 'recover'

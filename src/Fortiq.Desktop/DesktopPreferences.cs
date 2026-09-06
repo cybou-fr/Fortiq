@@ -29,11 +29,16 @@ public sealed class DesktopPreferencesStore
         Current = Load();
     }
 
+    public static string PortableStateDirectory =>
+        Environment.GetEnvironmentVariable("FORTIQ_PORTABLE_STATE") is { Length: > 0 } state
+            ? Path.GetFullPath(state)
+            : Path.Combine(AppContext.BaseDirectory, "portable-state");
+
     public static DesktopPreferencesStore Resolve(bool installed)
     {
         var dir = installed
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Fortiq")
-            : Path.Combine(AppContext.BaseDirectory, "portable-state");
+            : PortableStateDirectory;
 
         return new DesktopPreferencesStore(dir);
     }

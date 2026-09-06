@@ -106,6 +106,54 @@ public sealed class ServiceIpcAdapterTests
         Assert.False(Directory.Exists(root));
     }
 
+    [Theory]
+    [InlineData("updateSchedule")]
+    [InlineData("removeSchedule")]
+    [InlineData("clearLock")]
+    public async Task SettingsElevationDoesNotAlsoSendAnUnelevatedMutation(string command)
+    {
+        var client = new StubServiceIpcClient();
+        string? elevated = null;
+        var adapter = new SourceSettingsAdapter(new FileSystemScheduleStore(Path.GetTempPath()), client,
+            elevate: (verb, id, settings, token) => { elevated = verb; return Task.FromResult(true); });
+        if (command == "updateSchedule") await adapter.SaveAsync("repo", new SourceSettings(true, 2, 30, null, null, null, null, false), CancellationToken.None);
+        if (command == "removeSchedule") await adapter.RemoveAsync("repo", CancellationToken.None);
+        if (command == "clearLock") await adapter.ClearLockAsync("repo", CancellationToken.None);
+        Assert.Equal(command, elevated);
+        Assert.Null(client.UpdatedSchedule);
+        Assert.Null(client.RemovedSchedule);
+        Assert.Null(client.ClearedLock);
+    }
+
+    [Fact]
+    public async Task SettingsWorkerRejectsProvisionAndMalformedInput()
+    {
+        var client = new StubServiceIpcClient();
+        var request = new SourceSettingsElevation.Request("provision", "repo", null);
+        var encoded = Convert.ToBase64String(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request));
+        Assert.Equal(1, await SourceSettingsElevation.RunWorkerAsync(encoded, client));
+        Assert.Equal(1, await SourceSettingsElevation.RunWorkerAsync("not base64", client));
+        Assert.False(client.ProvisionCalled);
+    }
+
+    [Fact]
+    public async Task PortableClearLockUsesItsOwnScheduleWithoutAService()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "fortiq-local-unlock-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await FileSystemScheduleStore.WriteDefaultScheduleAsync(Path.Combine(root, "schedules"), "repo",
+                Path.Combine(root, "repository"), Path.Combine(root, "kit"), Path.Combine(root, "source"),
+                new TimeOnly(2, 30), CancellationToken.None);
+            BackupSchedule? cleared = null;
+            var adapter = new SourceSettingsAdapter(new FileSystemScheduleStore(root),
+                clearLocalLock: (schedule, token) => { cleared = schedule; return Task.CompletedTask; });
+            await adapter.ClearLockAsync("repo", CancellationToken.None);
+            Assert.Equal("repo", cleared?.Id);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     private sealed class StubServiceIpcClient : IServiceIpcClient
     {
         public bool IsAvailable { get; set; } = true;

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO.Compression;
 using System.Reflection;
 
 namespace Fortiq.Setup;
@@ -36,11 +35,14 @@ internal static class Program
             }
 
             Console.WriteLine("Starting Fortiq…");
-            Process.Start(new ProcessStartInfo(desktop)
+            var start = new ProcessStartInfo(desktop)
             {
                 WorkingDirectory = Path.GetDirectoryName(desktop)!,
-                UseShellExecute = true
-            });
+                UseShellExecute = false
+            };
+            start.Environment["FORTIQ_PORTABLE_STATE"] = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Fortiq", "portable-state");
+            Process.Start(start);
 
             return 0;
         }
@@ -53,64 +55,12 @@ internal static class Program
     /// <summary>Writes the payload out, unless a complete copy of this version is already there.</summary>
     private static string Unpack()
     {
-        var root = Path.Combine(
+        var cache = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Fortiq",
-            "package",
-            Version());
-
-        // Written only when the last file is out. A run interrupted half way leaves no marker, so
-        // the next run unpacks again rather than starting a partial copy.
-        var marker = Path.Combine(root, ".complete");
-        if (File.Exists(marker))
-        {
-            Console.WriteLine($"Already unpacked at {root}");
-            return root;
-        }
-
-        if (Directory.Exists(root))
-        {
-            Directory.Delete(root, recursive: true);
-        }
-
+            "Fortiq", "package", Version());
         using var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream(PayloadResource)
-            ?? throw new InvalidDataException(
-                "This installer was built without its payload, so there is nothing to install. "
-                + "Download the release build rather than one produced from a bare checkout.");
-
-        Console.WriteLine($"Unpacking to {root}");
-        Directory.CreateDirectory(root);
-
-        using var archive = new ZipArchive(payload, ZipArchiveMode.Read);
-        var written = 0;
-        foreach (var entry in archive.Entries)
-        {
-            if (entry.FullName.EndsWith('/'))
-            {
-                continue;
-            }
-
-            var destination = Path.GetFullPath(Path.Combine(root, entry.FullName));
-
-            // A zip entry naming its way out of the directory it is extracted into is the oldest
-            // trick there is. This payload is our own, and it is still checked.
-            if (!destination.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException($"The package contains an entry pointing outside it: {entry.FullName}");
-            }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            entry.ExtractToFile(destination, overwrite: true);
-
-            if (++written % 100 == 0)
-            {
-                Console.WriteLine($"  {written} files…");
-            }
-        }
-
-        File.WriteAllText(marker, Version());
-        Console.WriteLine($"  {written} files.");
-        return root;
+            ?? throw new InvalidDataException("This installer has no payload. Download the release build.");
+        return PackageCache.Prepare(payload, cache);
     }
 
     private static string Version()

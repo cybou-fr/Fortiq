@@ -35,6 +35,7 @@ public sealed class SourceSettingsAdapterTests
 
         var settings = SourceSettingsAdapter.SettingsOf(schedule);
 
+        Assert.False(settings.UpdateBackupTime);
         Assert.Equal(2, settings.BackupHour);
         Assert.Equal(30, settings.BackupMinute);
     }
@@ -46,6 +47,7 @@ public sealed class SourceSettingsAdapterTests
         // is the opposite of what that schedule says.
         var schedule = Schedule(drill: new EveryInterval(TimeSpan.FromHours(6)));
 
+        Assert.False(SourceSettingsAdapter.SettingsOf(schedule).UpdateDrill);
         Assert.Equal(1, SourceSettingsAdapter.SettingsOf(schedule).DrillEveryDays);
     }
 

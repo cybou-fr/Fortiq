@@ -120,7 +120,9 @@ public sealed class SourceSettingsWindow : Window
         void Describe()
         {
             summary.Text = _model.Enabled
-                ? $"Backs up daily at {_model.BackupHour:00}:{_model.BackupMinute:00}."
+                ? _model.Details?.Settings.UpdateBackupTime != true
+                    ? "Custom schedule - preserved when saving other settings."
+                    : $"Backs up daily at {_model.BackupHour:00}:{_model.BackupMinute:00}."
                 // Pausing stops the drills and the retention runs as well as the backups - they are all
                 // occurrences of this one schedule - and the label above says only "back up", so the
                 // rest of what the switch does is said here rather than discovered later.
@@ -137,6 +139,7 @@ public sealed class SourceSettingsWindow : Window
         var hour = Number("Hour", _model.BackupHour, 0, 23, value => { _model.BackupHour = value; Describe(); });
         var minute = Number("Minute", _model.BackupMinute, 0, 59, value => { _model.BackupMinute = value; Describe(); });
         Describe();
+        hour.IsEnabled = minute.IsEnabled = _model.Details?.Settings.UpdateBackupTime == true;
 
         return Card(new StackPanel
         {
@@ -144,7 +147,7 @@ public sealed class SourceSettingsWindow : Window
             Children =
             {
                 Text("When", 16, FontWeight.SemiBold, Ink),
-                Text("The daily backup runs at this time, in this computer's own time zone. "
+                Text("The daily backup runs at this time, in the schedule's time zone. "
                     + "A backup that was missed because the machine was off runs once when it comes back, not once per day missed.",
                     12, FontWeight.Normal, Muted, true),
                 running,
@@ -161,6 +164,9 @@ public sealed class SourceSettingsWindow : Window
 
     private Border DrillCard()
     {
+        if (_model.Details?.Settings.UpdateDrill == false)
+            return Card(Text("Custom recovery drill schedule — preserved when saving other settings.",
+                12, FontWeight.Normal, Muted, true), Surface, Line);
         var on = new CheckBox
         {
             Content = "Prove recovery automatically",

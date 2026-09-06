@@ -200,6 +200,21 @@ public sealed class SourceSettingsViewModelTests
         int? drillEveryDays = 7) =>
         new(enabled, backupHour, backupMinute, drillEveryDays, null, null, null, false);
 
+    [Fact]
+    public async Task RetentionEditDoesNotRequestARecurrenceChange()
+    {
+        var store = new FakeStore(new SourceSettings(true, 2, 30, 1, null, null, null, false,
+            UpdateBackupTime: false, UpdateDrill: false));
+        var model = new SourceSettingsViewModel(store, "repo", "Documents");
+        await model.LoadAsync(CancellationToken.None);
+        model.SetRetentionEnabled(true);
+        await model.SaveAsync(CancellationToken.None);
+        Assert.NotNull(store.Saved);
+        Assert.False(store.Saved.UpdateBackupTime);
+        Assert.False(store.Saved.UpdateDrill);
+        Assert.True(store.Saved.UpdateRetention);
+    }
+
     private sealed class FakeStore(SourceSettings? settings, SourceSettings? keepsInstead = null, Exception? failure = null)
         : ISourceSettingsStore
     {

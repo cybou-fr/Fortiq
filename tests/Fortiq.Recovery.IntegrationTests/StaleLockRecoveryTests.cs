@@ -85,7 +85,8 @@ public sealed class StaleLockRecoveryTests
             workspace.EnsureDirectory("repository"),
             kitDirectory,
             workspace.EnsureDirectory("state-provision"),
-            CancellationToken.None);
+            CancellationToken.None,
+            requireDeviceUnlock: true);
 
         var receipts = workspace.EnsureDirectory("receipts");
         var runs = workspace.EnsureDirectory("runs");

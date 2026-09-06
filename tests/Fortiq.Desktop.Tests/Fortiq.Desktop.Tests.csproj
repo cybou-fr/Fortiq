@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\Fortiq.Setup\PackageCache.cs" Link="PackageCache.cs" />
     <Using Include="Xunit" />
   </ItemGroup>
 

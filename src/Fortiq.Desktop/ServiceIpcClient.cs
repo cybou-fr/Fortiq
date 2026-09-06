@@ -199,7 +199,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
             settings.KeepDaily,
             settings.KeepWeekly,
             settings.KeepMonthly,
-            settings.Prune);
+            settings.Prune, settings.UpdateBackupTime, settings.UpdateDrill, settings.UpdateRetention);
 
         return SendAsync("updateSchedule", payload, "change the schedule", cancellationToken);
     }
