@@ -13,7 +13,9 @@ public sealed record ProtectRepositoryRequest(
     string SourcePath,
     string? StorageAccessKeyId = null,
     string? StorageSecretKey = null,
-    string? StorageRegion = null)
+    string? StorageRegion = null,
+    /// <summary>Minutes past midnight for the daily backup, in this machine's time zone.</summary>
+    int BackupMinuteOfDay = 150)
 {
     public override string ToString() => "ProtectRepositoryRequest { storage credentials = [redacted] }";
 }
@@ -127,6 +129,8 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
     private string? _mnemonic;
     private string? _failure;
     private bool _busy;
+    private int _backupHour = 2;
+    private int _backupMinute = 30;
     private FirstBackupState _firstBackup = FirstBackupState.NotStarted;
     private string? _firstBackupFailure;
     private ProtectStep _step = ProtectStep.Describe;
@@ -242,7 +246,8 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
                     SourcePath,
                     NeedsStorageCredentials ? StorageAccessKeyId : null,
                     NeedsStorageCredentials ? StorageSecretKey : null,
-                    NeedsStorageCredentials ? StorageRegion : null),
+                    NeedsStorageCredentials ? StorageRegion : null,
+                    (BackupHour * 60) + BackupMinute),
                 cancellationToken);
 
             ClearStorageCredentials();
@@ -347,6 +352,17 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
     /// than offering a button that would fail.
     /// </remarks>
     public bool CanBackUpNow => _backup is not null && RepositoryId is { Length: > 0 };
+
+    /// <summary>The hour the daily backup runs, chosen here rather than after the fact.</summary>
+    /// <remarks>
+    /// The wizard used to say custom scheduling was not available in this interface, and the source's
+    /// own settings screen offered exactly that a minute later - so somebody was walked through a
+    /// setup that told them 02:30 was fixed, and then had to go and change it. It was never fixed;
+    /// nothing had asked.
+    /// </remarks>
+    public int BackupHour { get => _backupHour; set => Set(ref _backupHour, Math.Clamp(value, 0, 23)); }
+
+    public int BackupMinute { get => _backupMinute; set => Set(ref _backupMinute, Math.Clamp(value, 0, 59)); }
 
     /// <summary>Where the first backup has got to, which is what the last screen is about.</summary>
     public FirstBackupState FirstBackup { get => _firstBackup; private set => Set(ref _firstBackup, value); }

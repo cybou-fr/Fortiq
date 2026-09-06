@@ -467,7 +467,6 @@ public sealed class MainWindow : Window
 
         body.Children.Add(MetricsGrid());
         body.Children.Add(RepositoriesSummaryCard());
-        body.Children.Add(RecentActivityCard());
 
         _page.Child = new ScrollViewer { Content = body };
     }
@@ -711,39 +710,6 @@ public sealed class MainWindow : Window
         }, Surface, Line, new Thickness(20));
     }
 
-    private Border RecentActivityCard()
-    {
-        var events = _model.Repositories
-            .SelectMany(repository => new (DateTimeOffset? At, string Source, string Operation, string Result)[]
-            {
-                (repository.Health.Facts.LastBackupAt, repository.Title, "Backup", "Completed"),
-                (repository.Health.Facts.LastHealthyCheckAt, repository.Title, "Integrity check", "Healthy"),
-                (repository.Health.Facts.LastProvenRestoreAt, repository.Title, "Proven restore", "Verified")
-            })
-            .Where(item => item.At is not null)
-            .OrderByDescending(item => item.At)
-            .Take(5)
-            .ToArray();
-
-        var list = new StackPanel { Spacing = 4 };
-        list.Children.Add(TableRow("Time", "Source", "Operation", "Result", true));
-        foreach (var item in events)
-        {
-            list.Children.Add(TableRow(Relative(item.At), item.Source, item.Operation, item.Result));
-        }
-
-        return Card(new StackPanel
-        {
-            Spacing = 14,
-            Children =
-            {
-                Text("Recent activity", 16, FontWeight.SemiBold, Ink),
-                list
-            }
-        }, Surface, Line, new Thickness(20));
-    }
-
-    // --- Screen 3: Backups & Activity ---
     /// <summary>The folders somebody gave Fortiq, and what can be done to each of them.</summary>
     private void RenderFolders()
     {

@@ -16,6 +16,9 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
     private readonly RepositoryProvisioner _provisioner;
     private readonly FortiqStatePaths _paths;
     private readonly TimeOnly _nightly;
+
+    /// <summary>What provisioning writes when nobody chose anything: 02:30.</summary>
+    private const int DefaultMinuteOfDay = 150;
     private readonly IServiceIpcClient? _serviceClient;
     private readonly Func<string, ObjectStorageCredentials, CancellationToken, Task>? _storeCredentials;
 
@@ -77,12 +80,39 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
                 request.SourcePath,
                 cancellationToken);
 
+            var schedulingFailure = ipcResponse.SchedulingFailure;
+            if (ipcResponse.BackupScheduled && request.BackupMinuteOfDay != DefaultMinuteOfDay)
+            {
+                try
+                {
+                    await _serviceClient.UpdateScheduleAsync(
+                        ipcResponse.RepositoryId,
+                        new SourceSettings(
+                            Enabled: true,
+                            BackupHour: request.BackupMinuteOfDay / 60,
+                            BackupMinute: request.BackupMinuteOfDay % 60,
+                            DrillEveryDays: null,
+                            KeepDaily: null,
+                            KeepWeekly: null,
+                            KeepMonthly: null,
+                            Prune: false),
+                        cancellationToken);
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    // The repository exists and is scheduled; only the hour is not the one asked for,
+                    // and saying so beats a wizard that reports a time the machine does not hold.
+                    schedulingFailure = "The folder is protected and will be backed up nightly, but the time you "
+                        + $"chose could not be saved: {error.Message} Change it on this source's settings screen.";
+                }
+            }
+
             return new ProtectedRepositoryResult(
                 ipcResponse.RepositoryId,
                 ipcResponse.Mnemonic,
                 ipcResponse.DeviceUnlockAvailable,
                 ipcResponse.BackupScheduled,
-                ipcResponse.SchedulingFailure);
+                schedulingFailure);
         }
 
         // Portable mode only. No service is running for this installation, the state directory is the
@@ -110,7 +140,12 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
 
         try
         {
-            await WriteScheduleAsync(Path.Combine(_paths.Schedules, "schedules"), id, request, _nightly, cancellationToken);
+            await WriteScheduleAsync(
+                Path.Combine(_paths.Schedules, "schedules"),
+                id,
+                request,
+                TimeOf(request),
+                cancellationToken);
         }
         catch (Exception error)
         {
@@ -125,6 +160,15 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
         return new ProtectedRepositoryResult(id, provisioned.RecoveryMnemonic, provisioned.DeviceUnlockAvailable,
             BackupScheduled: false,
             SchedulingFailure: "Portable mode does not run automatic backups. The repository and recovery kit exist, but your files are not backed up. Install Fortiq and configure protection in installed mode to enable automatic backups.");
+    }
+
+    /// <summary>
+    /// The time the person chose, or this adapter's default where a caller did not ask for one.
+    /// </summary>
+    private static TimeOnly TimeOf(ProtectRepositoryRequest request)
+    {
+        var minutes = Math.Clamp(request.BackupMinuteOfDay, 0, (24 * 60) - 1);
+        return new TimeOnly(minutes / 60, minutes % 60);
     }
 
     /// <summary>Records that the recovery phrase was written down.</summary>

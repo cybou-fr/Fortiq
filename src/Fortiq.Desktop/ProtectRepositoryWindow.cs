@@ -380,6 +380,31 @@ public sealed class ProtectRepositoryWindow : Window
         SetActions(Footer("Back", "Next", () => { _setupStep = 2; Render(); }, _primaryEnabled()));
     }
 
+    /// <summary>One part of a time of day, as a number somebody can spin or type.</summary>
+    private static StackPanel TimePart(string label, int value, int maximum, Action<int> assign)
+    {
+        var box = new NumericUpDown
+        {
+            Value = value,
+            Minimum = 0,
+            Maximum = maximum,
+            Increment = 1,
+            FormatString = "0",
+            Width = 110,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        box.Named(label);
+        box.ValueChanged += (_, _) =>
+        {
+            if (box.Value is { } current)
+            {
+                assign((int)current);
+            }
+        };
+
+        return new StackPanel { Spacing = 4, Children = { Text(label, 11, FontWeight.SemiBold, Muted), box } };
+    }
+
     private void Schedule()
     {
         if (!_model.AutomaticBackupsAvailable)
@@ -394,6 +419,16 @@ public sealed class ProtectRepositoryWindow : Window
         }
         _content.Children.Add(SectionTitle("Set the backup schedule", "Automatic background backups minimize data loss between your work sessions."));
 
+        // Asked here rather than left at a constant. This step used to state 02:30 as a fact and add
+        // that custom scheduling was not available in this interface - while the source's own settings
+        // screen offered exactly that a minute after setup finished.
+        var summary = Text(string.Empty, 12, FontWeight.SemiBold, Muted, true);
+        void Describe() => summary.Text = $"Backs up daily at {_model.BackupHour:00}:{_model.BackupMinute:00}.";
+
+        var hour = TimePart("Hour", _model.BackupHour, 23, value => { _model.BackupHour = value; Describe(); });
+        var minute = TimePart("Minute", _model.BackupMinute, 59, value => { _model.BackupMinute = value; Describe(); });
+        Describe();
+
         var scheduleCard = Card(new StackPanel
         {
             Spacing = 10,
@@ -405,12 +440,20 @@ public sealed class ProtectRepositoryWindow : Window
                     Spacing = 8,
                     Children = { Text("Daily Automated Backup", 15, FontWeight.SemiBold, Ink), Badge("Recommended") }
                 },
-                Text("Fortiq will run an unattended backup every night at 02:30 when system activity is low.", 13, FontWeight.Normal, Muted, true)
+                Text("Fortiq backs the folder up once a day, unattended, at the time you choose here.",
+                    13, FontWeight.Normal, Muted, true),
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Children = { hour, minute }
+                },
+                summary
             }
         });
 
         _content.Children.Add(scheduleCard);
-        _content.Children.Add(Info("The default schedule runs at 02:30 in the local time zone. Custom scheduling is not yet available in this interface."));
+        _content.Children.Add(Info("Given in this PC's own time zone. You can change it later on the folder's settings."));
         SetActions(Footer("Back", "Next", () => { _setupStep = 3; Render(); }));
     }
 
@@ -422,7 +465,11 @@ public sealed class ProtectRepositoryWindow : Window
         summary.Children.Add(Summary("Storage Destination", _model.RepositoryLocation));
         summary.Children.Add(Summary("Protected Source", _model.SourcePath));
         summary.Children.Add(Summary("Recovery Kit Location", _model.KitDirectory));
-        summary.Children.Add(Summary("Backup Recurrence", _model.AutomaticBackupsAvailable ? "Nightly at 02:30 (Automatic)" : "Manual / Recovery kit only"));
+        summary.Children.Add(Summary(
+            "Backup Recurrence",
+            _model.AutomaticBackupsAvailable
+                ? $"Nightly at {_model.BackupHour:00}:{_model.BackupMinute:00} (Automatic)"
+                : "Manual / Recovery kit only"));
 
         _content.Children.Add(Card(summary));
         _content.Children.Add(Warning("Next, Fortiq will display your 24-word disaster recovery phrase. You must write it down and keep it offline."));
