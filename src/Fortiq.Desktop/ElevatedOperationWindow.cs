@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -92,6 +93,19 @@ public sealed class ElevatedOperationWindow : Window
             BorderThickness = new Thickness(0)
         };
         _close.Click += (_, _) => Close();
+        AutomationProperties.SetName(_headline, "Operation status");
+        AutomationProperties.SetLiveSetting(_headline, AutomationLiveSetting.Assertive);
+
+        // Escape does nothing while the operation is running, because the button is disabled and
+        // closing the window would not stop the work: it is happening in this process, and the
+        // person would be left with no way to see how it ended.
+        Accessible.Keys(this, _close, cancel: () =>
+        {
+            if (_close.IsEnabled)
+            {
+                Close();
+            }
+        });
 
         Content = new StackPanel
         {

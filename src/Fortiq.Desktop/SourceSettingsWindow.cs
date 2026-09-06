@@ -28,6 +28,9 @@ public sealed class SourceSettingsWindow : Window
     private readonly SourceSettingsViewModel _model;
     private readonly StackPanel _body = new() { Spacing = 18, Margin = new Thickness(28, 24) };
 
+    /// <summary>The Save button as it currently exists. Rebuilt by every render, so it is not readonly.</summary>
+    private Button? _save;
+
     /// <summary>True when this source is no longer protected, so the caller can refresh rather than guess.</summary>
     public bool Changed { get; private set; }
 
@@ -60,6 +63,7 @@ public sealed class SourceSettingsWindow : Window
                 Render();
             }
         };
+        Accessible.Keys(this, () => _save);
         Opened += async (_, _) => await _model.LoadAsync(CancellationToken.None);
         Render();
     }
@@ -87,6 +91,7 @@ public sealed class SourceSettingsWindow : Window
 
         if (_model.Details is null)
         {
+            _save = null;
             var close = Secondary("Close");
             close.Click += (_, _) => Close();
             _body.Children.Add(close);
@@ -317,6 +322,11 @@ public sealed class SourceSettingsWindow : Window
         close.IsEnabled = !_model.Busy;
         close.Click += (_, _) => Close();
 
+        // The window's key handler reads this field rather than being subscribed again here: one
+        // subscription per render would leave a handler behind for every redraw, each holding a
+        // button that has since been thrown away.
+        _save = save;
+
         return new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -360,6 +370,9 @@ public sealed class SourceSettingsWindow : Window
         };
 
         var agreed = false;
+        // Escape only. Enter is deliberately not wired here: this dialog's primary action stops
+        // protecting somebody's data, and a key pressed out of habit must not be what confirms it.
+        Accessible.Keys(dialog);
         cancel.Click += (_, _) => dialog.Close();
         confirm.Click += (_, _) => { agreed = true; dialog.Close(); };
         await dialog.ShowDialog(this);

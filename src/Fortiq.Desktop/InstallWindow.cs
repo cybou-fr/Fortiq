@@ -218,6 +218,8 @@ public sealed class InstallWindow : Window
     {
         var browseButton = new Button
         {
+            // "Browse…" beside a path box is clear on screen and means nothing read aloud on its own.
+            [Avalonia.Automation.AutomationProperties.NameProperty] = "Choose the installation folder",
             Content = "Browse…",
             Padding = new Thickness(14, 6),
             Background = Surface,

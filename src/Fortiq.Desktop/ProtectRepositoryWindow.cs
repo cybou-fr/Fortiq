@@ -80,6 +80,11 @@ public sealed class ProtectRepositoryWindow : Window
             }
         };
 
+        // Escape closes, and the guard below decides whether it may: a wizard that is provisioning a
+        // repository refuses to close from the keyboard for exactly the reasons it refuses the mouse.
+        // Enter takes whatever this step's primary action currently is.
+        Accessible.Keys(this, () => _primaryAction);
+
         Closing += (_, e) =>
         {
             if (_model.CanClose) return;
@@ -549,7 +554,7 @@ public sealed class ProtectRepositoryWindow : Window
         bool masked = false,
         string? placeholder = null)
     {
-        var box = FortiqTextBox.Create(placeholder, masked);
+        var box = FortiqTextBox.Create(placeholder, masked).Named(label);
         box.Text = value;
 
         // Attached after Text is assigned above, so the initial value does not raise this.

@@ -294,6 +294,11 @@ public sealed class MainWindow : Window
         button.Background = selected ? InfoSurface : Brushes.Transparent;
         button.Foreground = selected ? Brand : Ink;
         button.FontWeight = selected ? FontWeight.SemiBold : FontWeight.Normal;
+
+        // Which item is current was said in blue and semibold and in no other way, so somebody using a
+        // screen reader - or looking at this in the greys some people see it in - heard five identical
+        // buttons and no answer to "where am I".
+        button.Named(selected ? $"{button.Content}, current screen" : $"{button.Content}");
     }
 
     /// <summary>Puts the machine's actual protection state in the corner of every screen.</summary>
@@ -310,6 +315,7 @@ public sealed class MainWindow : Window
             _ => (Recoverable, "Recovery proven")
         };
 
+        _statusDot.Decorative();
         _statusDot.Background = brush;
         _statusLabel.Text = label;
         _updateTrayStatus?.Invoke(label);
@@ -331,7 +337,7 @@ public sealed class MainWindow : Window
             return null;
         }
 
-        var dismiss = Secondary("Dismiss");
+        var dismiss = Secondary("Dismiss").Named("Dismiss this failure message");
         dismiss.Padding = new Thickness(10, 4);
         dismiss.FontSize = 11;
         dismiss.VerticalAlignment = VerticalAlignment.Top;
@@ -373,7 +379,7 @@ public sealed class MainWindow : Window
             Spacing = 10,
             Children =
             {
-                new ProgressBar { IsIndeterminate = true, Width = 120, VerticalAlignment = VerticalAlignment.Center },
+                new ProgressBar { IsIndeterminate = true, Width = 120, VerticalAlignment = VerticalAlignment.Center }.Named(running),
                 Text(running, 13, FontWeight.SemiBold, Ink)
             }
         }, InfoSurface, InfoLine, new Thickness(18, 12));
@@ -601,13 +607,17 @@ public sealed class MainWindow : Window
 
             if (_model.CanBackupNow)
             {
-                var backup = Secondary("Back up now");
+                var backup = Secondary("Back up now").Named($"Back up {repository.Title} now");
                 backup.IsEnabled = !_model.Busy && !_elevating;
                 backup.Click += async (_, _) => await BackupNowAsync(repository);
                 actions.Children.Add(backup);
             }
 
-            var prove = Secondary(repository.Health.Verdict == HealthVerdict.Recoverable ? "Proven" : "Prove recovery");
+            var proven = repository.Health.Verdict == HealthVerdict.Recoverable;
+            var prove = Secondary(proven ? "Proven" : "Prove recovery")
+                .Named(proven
+                    ? $"{repository.Title}: recovery already proven"
+                    : $"Prove recovery for {repository.Title}");
             prove.IsEnabled = repository.CanProveRecovery && !_model.Busy && !_elevating;
             prove.Click += async (_, _) => await ProveAsync(repository);
             actions.Children.Add(prove);
@@ -735,7 +745,8 @@ public sealed class MainWindow : Window
 
         grid.Children.Add(leftStack);
 
-        var verifyBtn = Secondary(_auditLedgerVerifying ? "Verifying…" : "Verify chain");
+        var verifyBtn = Secondary(_auditLedgerVerifying ? "Verifying…" : "Verify chain")
+            .Named("Verify that the recorded history has not been edited");
         verifyBtn.IsEnabled = !_auditLedgerVerifying;
         verifyBtn.Click += async (_, _) =>
         {
@@ -834,7 +845,7 @@ public sealed class MainWindow : Window
 
             if (_model.CanBackupNow)
             {
-                var backupBtn = Secondary("Back up now");
+                var backupBtn = Secondary("Back up now").Named($"Back up {repository.Title} now");
                 backupBtn.Padding = new Thickness(10, 4);
                 backupBtn.FontSize = 11;
                 backupBtn.IsEnabled = !_model.Busy && !_elevating;
@@ -844,7 +855,7 @@ public sealed class MainWindow : Window
 
             if (repository.CanProveRecovery && repository.Health.Verdict != HealthVerdict.Recoverable)
             {
-                var proveBtn = Secondary("Prove");
+                var proveBtn = Secondary("Prove").Named($"Prove recovery for {repository.Title}");
                 proveBtn.Padding = new Thickness(10, 4);
                 proveBtn.FontSize = 11;
                 proveBtn.IsEnabled = !_model.Busy && !_elevating;
@@ -854,7 +865,7 @@ public sealed class MainWindow : Window
 
             if (_sourceSettings is not null)
             {
-                var settingsBtn = Secondary("Settings");
+                var settingsBtn = Secondary("Settings").Named($"Settings for {repository.Title}");
                 settingsBtn.Padding = new Thickness(10, 4);
                 settingsBtn.FontSize = 11;
                 settingsBtn.IsEnabled = !_model.Busy && !_elevating;
@@ -1534,6 +1545,7 @@ public sealed class MainWindow : Window
             }
         };
         var launched = false;
+        Accessible.Keys(dialog, reopen);
         cancel.Click += (_, _) => dialog.Close();
         reopen.Click += (_, _) =>
         {
@@ -1652,6 +1664,7 @@ public sealed class MainWindow : Window
     private async Task ShowNoticeAsync(string title, string message)
     {
         var ok = Primary("OK");
+        // A notice with one button is the clearest case for Escape and Enter meaning the same thing.
         var dialog = new Window
         {
             Title = title,
@@ -1668,6 +1681,7 @@ public sealed class MainWindow : Window
         };
 
         ok.Click += (_, _) => dialog.Close();
+        Accessible.Keys(dialog, ok);
         await dialog.ShowDialog(this);
     }
 
