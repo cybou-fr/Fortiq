@@ -74,7 +74,7 @@ public static class ServiceIpcAuthorization
 
         // Everything an operator may do is here by name. Provision is deliberately absent: it falls
         // to the default below, with everything nobody has classified.
-        "backup" or "prove" or "updateschedule" or "removeschedule" or "clearlock" =>
+        "backup" or "prove" or "updateschedule" or "removeschedule" or "clearlock" or "confirmphrase" =>
             ServiceIpcCommandTrust.Operator,
 
         _ => ServiceIpcCommandTrust.Privileged

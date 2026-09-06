@@ -278,7 +278,8 @@ public sealed class FortiqApplication : Avalonia.Application
             paths.Receipts,
             paths.HealthReport,
             paths.HealthMetrics,
-            protection: new S3StorageProtectionInspector(storage));
+            protection: new S3StorageProtectionInspector(storage),
+            phrases: new RecoveryPhraseRecord(paths.Schedules));
 
         var prove = new ProveRecoveryAdapter(
             schedules,

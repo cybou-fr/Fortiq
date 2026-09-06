@@ -39,7 +39,35 @@ public sealed record RepositoryFacts(
     /// <summary>
     /// Receipts this repository holds that predate the chained schema, and so cannot be checked.
     /// </summary>
-    int LegacyReceiptCount = 0);
+    int LegacyReceiptCount = 0,
+    /// <summary>
+    /// Whether anybody is known to have written down the recovery phrase.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see cref="RecoveryPhraseState.Unknown"/>, which says nothing and raises nothing.
+    /// Only a positive record that a phrase was shown and never confirmed is treated as a problem;
+    /// silence is what every repository older than this record has, and most of their owners did write
+    /// their words down.
+    /// </remarks>
+    RecoveryPhraseState RecoveryPhrase = RecoveryPhraseState.Unknown);
+
+/// <summary>Whether the recovery phrase for a repository is known to have been written down.</summary>
+/// <remarks>
+/// The monitoring assembly keeps its own copy of this rather than referencing the scheduling one,
+/// because <see cref="RepositoryFacts"/> is what a report is made of and must not drag configuration
+/// storage into everything that reads a health report.
+/// </remarks>
+public enum RecoveryPhraseState
+{
+    /// <summary>Nothing was recorded either way.</summary>
+    Unknown,
+
+    /// <summary>A phrase was generated and shown, and nobody confirmed writing it down.</summary>
+    Issued,
+
+    /// <summary>Somebody typed the requested words back.</summary>
+    Confirmed
+}
 
 /// <summary>How old each kind of evidence may be before it stops counting.</summary>
 public sealed record HealthThresholds(
@@ -115,6 +143,20 @@ public static class HealthAssessor
             findings.Add(new HealthFinding(
                 "kit-missing",
                 "No recovery kit was found, so this repository cannot be opened on another machine."));
+        }
+
+        if (facts.RecoveryPhrase == RecoveryPhraseState.Issued)
+        {
+            // The backups are fine and the machine can open them; the person cannot. Fortiq generated
+            // a phrase, put it on a screen, and never saw it confirmed - which is what an application
+            // killed or a machine losing power during that step leaves behind. The schedule is written
+            // before the words are shown, so such a repository backs up nightly and passes its drills,
+            // and without this it is indistinguishable from one whose owner has the words in a drawer.
+            findings.Add(new HealthFinding(
+                "recovery-phrase-unconfirmed",
+                "Nobody confirmed writing down this repository's 24 recovery words. Without them it cannot "
+                + "be opened on another machine, whatever else is healthy here. Protect the folder again "
+                + "to be given a new phrase."));
         }
 
         if (facts.LastBackupAt is null)
@@ -230,7 +272,11 @@ public static class HealthAssessor
         // A missing kit, a repository with no backup, a stale backup or a failed run are all things
         // that would hurt today; everything else means the backup exists but nothing has shown it
         // works.
-        if (findings.Any(finding => finding.Code is "kit-missing" or "never-backed-up" or "backup-stale" or "last-run-failed" or "audit-ledger-tampered"))
+        // "recovery-phrase-unconfirmed" sits with the missing kit rather than with the unproven ones:
+        // both mean the data cannot be recovered by the person who owns it, however well the backups
+        // themselves are running.
+        if (findings.Any(finding => finding.Code is "kit-missing" or "never-backed-up" or "backup-stale"
+            or "last-run-failed" or "audit-ledger-tampered" or "recovery-phrase-unconfirmed"))
         {
             return HealthVerdict.AtRisk;
         }

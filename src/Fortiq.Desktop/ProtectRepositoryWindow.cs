@@ -471,12 +471,17 @@ public sealed class ProtectRepositoryWindow : Window
         again.Click += (_, _) => _model.ShowItAgain();
 
         var verify = Primary("Verify recovery kit");
-        verify.Click += (_, _) =>
+        verify.Click += async (_, _) =>
         {
             if (_model.Confirm())
             {
                 Protected = true;
                 Render();
+
+                // After the screen has moved on, never before it. The person has written the words
+                // down; recording that is this machine's business and must not be able to hand them
+                // back a failure for something they did correctly.
+                await _model.RecordConfirmationAsync(CancellationToken.None);
             }
         };
 

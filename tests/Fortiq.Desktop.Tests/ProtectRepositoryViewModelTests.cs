@@ -193,18 +193,42 @@ public sealed class ProtectRepositoryViewModelTests
 
     private sealed class FakeCreator : IProtectRepository
     {
+        public string? Confirmed { get; private set; }
+
+        public Task ConfirmRecoveryPhraseAsync(string repositoryId, CancellationToken cancellationToken)
+        {
+            Confirmed = repositoryId;
+            return Task.CompletedTask;
+        }
+
         public Task<ProtectedRepositoryResult> CreateAsync(ProtectRepositoryRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(new ProtectedRepositoryResult(new string('a', 64), Mnemonic, DeviceUnlockAvailable: true));
     }
 
     private sealed class FailingCreator(string message) : IProtectRepository
     {
+        public string? Confirmed { get; private set; }
+
+        public Task ConfirmRecoveryPhraseAsync(string repositoryId, CancellationToken cancellationToken)
+        {
+            Confirmed = repositoryId;
+            return Task.CompletedTask;
+        }
+
         public Task<ProtectedRepositoryResult> CreateAsync(ProtectRepositoryRequest request, CancellationToken cancellationToken) =>
             Task.FromException<ProtectedRepositoryResult>(new InvalidOperationException(message));
     }
 
     private sealed class UnscheduledCreator : IProtectRepository
     {
+        public string? Confirmed { get; private set; }
+
+        public Task ConfirmRecoveryPhraseAsync(string repositoryId, CancellationToken cancellationToken)
+        {
+            Confirmed = repositoryId;
+            return Task.CompletedTask;
+        }
+
         public Task<ProtectedRepositoryResult> CreateAsync(ProtectRepositoryRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(new ProtectedRepositoryResult(
                 new string('a', 64),
