@@ -176,7 +176,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Failed to check service: {ex.Message}";
+            StatusMessage = "The Fortiq service could not be asked how it is. " + PlainFailure.Describe(ex);
         }
         finally
         {
@@ -209,7 +209,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Service operation failed: {ex.Message}";
+            StatusMessage = "That did not work. " + PlainFailure.Describe(ex);
         }
         finally
         {

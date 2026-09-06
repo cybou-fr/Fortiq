@@ -64,7 +64,7 @@ public sealed class FileRecoveryWindow : Window
         MinWidth = 720;
         MinHeight = 580;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        _kit = new PathPickerControl(this, "Recovery kit folder", "Choose the folder containing kit.json and the recovery envelopes.");
+        _kit = new PathPickerControl(this, "Recovery kit folder", "The folder Fortiq wrote when it protected this data. It holds a file named kit.json.");
         _parent = new PathPickerControl(this, "Destination parent folder", "Fortiq will create a new subfolder here. Choose a location outside your original source, repository and kit.");
         _parent.PathChanged += path =>
         {
@@ -196,7 +196,7 @@ public sealed class FileRecoveryWindow : Window
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true });
             }
             catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException)
-            { _status.Text = "Files were restored, but the folder could not be opened. " + error.Message; }
+            { _status.Text = "Files were restored, but the folder could not be opened. " + PlainFailure.Describe(error); }
         };
         var close = new Button { Content = "Close" };
         close.Click += (_, _) => Close();

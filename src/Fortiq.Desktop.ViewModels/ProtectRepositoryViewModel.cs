@@ -227,7 +227,7 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            Failure = error.Message;
+            Failure = PlainFailure.Describe(error);
         }
         finally
         {

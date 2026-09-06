@@ -21,7 +21,7 @@ public sealed class FortiqTrayIcon : IDisposable
         _trayIcon = new TrayIcon
         {
             Icon = FortiqBrand.WindowIcon(),
-            ToolTipText = "Fortiq — Data Recovery Assurance",
+            ToolTipText = "Fortiq — checking…",
             IsVisible = true
         };
 
@@ -40,9 +40,12 @@ public sealed class FortiqTrayIcon : IDisposable
 
         if (onVerifyNow is not null)
         {
-            var verifyItem = new NativeMenuItem("Verify Backups Now");
-            verifyItem.Click += (_, _) => onVerifyNow();
-            menu.Add(verifyItem);
+            // Was "Verify Backups Now", which is not what the action does: it re-reads the health
+            // report the service publishes. Nothing is verified by clicking it, and a person who
+            // believed otherwise would come away thinking their backups had just been checked.
+            var refreshItem = new NativeMenuItem("Refresh status");
+            refreshItem.Click += (_, _) => onVerifyNow();
+            menu.Add(refreshItem);
         }
 
         menu.Add(new NativeMenuItemSeparator());

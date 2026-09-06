@@ -358,7 +358,7 @@ public sealed class MainWindow : Window
         {
             return (HeroStatusMode.ZeroState,
                 "Protect what matters before you need it",
-                "No protected sources are configured yet. Add your first folder to start automated verifiable backups.",
+                "Nothing on this PC is backed up yet. Choose a folder, and Fortiq will keep it and prove it can bring it back.",
                 "Protect a folder");
         }
 
@@ -603,7 +603,10 @@ public sealed class MainWindow : Window
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(7, 2),
-            Child = Text("SHA-256 Chained (ADR-007)", 11, FontWeight.SemiBold, Brand)
+            // Was "SHA-256 Chained (ADR-007)". The decision record number means nothing to anybody
+            // outside this repository, and naming the hash function does not tell a person what the
+            // badge is claiming. What it is claiming is that the history cannot be edited quietly.
+            Child = Text("Tamper-evident history", 11, FontWeight.SemiBold, Brand)
         };
         badgeStack.Children.Add(shaTag);
 
@@ -627,7 +630,7 @@ public sealed class MainWindow : Window
             }
             catch (Exception ex)
             {
-                _auditChain = AuditChainStatus.Failed(ex.Message);
+                _auditChain = AuditChainStatus.Failed(PlainFailure.Describe(ex));
             }
             finally
             {
@@ -654,8 +657,8 @@ public sealed class MainWindow : Window
                 Spacing = 12,
                 Children =
                 {
-                    Text("No protected sources configured", 18, FontWeight.SemiBold, Ink),
-                    Text("Add a source folder to begin continuous, deduplicated backups.", 13, FontWeight.Normal, Muted),
+                    Text("Nothing is backed up yet", 18, FontWeight.SemiBold, Ink),
+                    Text("Pick a folder that would hurt to lose. Fortiq keeps it, and checks that it comes back.", 13, FontWeight.Normal, Muted),
                     add
                 }
             }, Surface, Line, new Thickness(24));
@@ -742,8 +745,8 @@ public sealed class MainWindow : Window
                 Spacing = 6,
                 Children =
                 {
-                    Text("No backup history yet", 18, FontWeight.SemiBold, Ink),
-                    Text("Audit trail and proof evidence will appear here after the first backup cycle.", 13, FontWeight.Normal, Muted)
+                    Text("Nothing has run yet", 18, FontWeight.SemiBold, Ink),
+                    Text("Every backup and every recovery drill is recorded here once the first one has run.", 13, FontWeight.Normal, Muted)
                 }
             }, Surface, Line, new Thickness(24));
         }
@@ -785,8 +788,8 @@ public sealed class MainWindow : Window
                 Spacing = 12,
                 Children =
                 {
-                    Text("No repositories available to prove", 18, FontWeight.SemiBold, Ink),
-                    Text("Protect a source first before running recovery drills.", 13, FontWeight.Normal, Muted),
+                    Text("Nothing to prove yet", 18, FontWeight.SemiBold, Ink),
+                    Text("A recovery drill restores a real backup and checks what came out. Protect a folder first.", 13, FontWeight.Normal, Muted),
                     protect
                 }
             }, Surface, Line, new Thickness(24)));
@@ -882,8 +885,8 @@ public sealed class MainWindow : Window
                 Spacing = 12,
                 Children =
                 {
-                    Text("No recovery kit configured yet", 18, FontWeight.SemiBold, Ink),
-                    Text("The protection wizard initializes an offline recovery kit alongside the encrypted repository.", 13, FontWeight.Normal, Muted, true),
+                    Text("No recovery kit yet", 18, FontWeight.SemiBold, Ink),
+                    Text("Protecting a folder writes one, alongside the backups themselves. It is what opens them on another computer.", 13, FontWeight.Normal, Muted, true),
                     protect
                 }
             }, Surface, Line, new Thickness(24)));
@@ -927,7 +930,9 @@ public sealed class MainWindow : Window
             }
         }, UnprovenSurface, UnprovenLine, new Thickness(20)));
 
-        var verifyBtn = Primary("Verify recovery with a drill");
+        // It opens the drill screen; it does not run a drill. A button that says it verified
+        // something, and did not, is the same mistake as the tray's old "Verify Backups Now".
+        var verifyBtn = Primary("Go to recovery drill");
         verifyBtn.IsEnabled = present && _kitSource.CanProveRecovery;
         verifyBtn.Click += (_, _) => { _recoverySource = _kitSource; RenderRecovery(); };
 
@@ -1211,7 +1216,7 @@ public sealed class MainWindow : Window
             }
             catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
             {
-                explanation.Text = "Fortiq was not reopened. " + error.Message;
+                explanation.Text = "Fortiq was not reopened. " + PlainFailure.Describe(error);
             }
         };
         await dialog.ShowDialog(this);

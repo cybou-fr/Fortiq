@@ -112,7 +112,7 @@ public sealed class FileRecoveryViewModel(IFileRecovery recovery) : INotifyPrope
         }
         catch (Exception error)
         {
-            Status = "Could not load file list from backup: " + error.Message;
+            Status = "The list of files could not be read. " + PlainFailure.Describe(error);
             Changed(nameof(Status));
         }
         finally
@@ -219,7 +219,7 @@ public sealed class FileRecoveryViewModel(IFileRecovery recovery) : INotifyPrope
         }
         catch (Exception error)
         {
-            Status = "Recovery did not complete. " + error.Message;
+            Status = "Recovery did not complete. " + PlainFailure.Describe(error);
         }
         finally
         {

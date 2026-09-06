@@ -343,7 +343,7 @@ public sealed class ProtectRepositoryWindow : Window
             _content.Children.Add(kitPicker);
         }
 
-        _content.Children.Add(Info("The recovery kit contains the cryptographic proof and instructions needed to restore your files if this computer is destroyed."));
+        _content.Children.Add(Info("The recovery kit is what lets another computer open these backups. Keep it somewhere other than this PC - together with your 24 words, it is how your files come back if this machine is gone."));
         // Object storage without keys cannot be reached at all, so the step is not complete without
         // them. Letting Next through here would move the failure to after the recovery phrase.
         // Kept as a predicate rather than a value, so RefreshActions can ask it again after each

@@ -144,7 +144,7 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
         catch (Exception error) when (error is not OperationCanceledException)
         {
             // A health screen that hides its own failure is the worst kind: it looks calm.
-            Failure = error.Message;
+            Failure = PlainFailure.Describe(error);
             State = HealthStoreState.Corrupt;
             Repositories.Clear();
             ReportProducedAt = null;
@@ -176,7 +176,7 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            outcome = error.Message;
+            outcome = PlainFailure.Describe(error);
         }
         finally
         {

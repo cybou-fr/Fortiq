@@ -190,7 +190,7 @@ public sealed class InstallViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"System inspection failed: {ex.Message}";
+            ErrorMessage = "Fortiq could not finish checking this PC. " + PlainFailure.Describe(ex);
         }
         finally
         {
@@ -240,7 +240,7 @@ public sealed class InstallViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Installation failed: {ex.Message}";
+            ErrorMessage = "The installation did not complete. " + PlainFailure.Describe(ex);
             ProgressMessage = "Installation stopped due to an error.";
         }
         finally
