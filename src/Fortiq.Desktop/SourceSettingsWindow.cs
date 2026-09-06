@@ -30,6 +30,7 @@ public sealed class SourceSettingsWindow : Window
 
     /// <summary>The Save button as it currently exists. Rebuilt by every render, so it is not readonly.</summary>
     private Button? _save;
+    private Border _actionBar = new();
 
     /// <summary>True when this source is no longer protected, so the caller can refresh rather than guess.</summary>
     public bool Changed { get; private set; }
@@ -46,7 +47,24 @@ public sealed class SourceSettingsWindow : Window
         MinHeight = 480;
         Background = CanvasBackground;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Content = new ScrollViewer { Content = _body };
+        // The primary action does not scroll. Save lived at the bottom of the scrolling column, so on
+        // a short window it started life below the fold and somebody had to discover that changing a
+        // setting was not the same as keeping it. The wizard and the installer already dock their
+        // actions; this is the same pattern.
+        var shell = new Grid { RowDefinitions = new RowDefinitions("*,Auto") };
+        shell.Children.Add(new ScrollViewer { Content = _body });
+
+        _actionBar = new Border
+        {
+            Background = Surface,
+            BorderBrush = Line,
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            Padding = new Thickness(28, 14)
+        };
+        Grid.SetRow(_actionBar, 1);
+        shell.Children.Add(_actionBar);
+
+        Content = shell;
 
         // Only the properties that change the shape of the screen redraw it. Redrawing on every
         // change destroyed and rebuilt the controls while somebody was typing in one of them: a
@@ -98,13 +116,46 @@ public sealed class SourceSettingsWindow : Window
             return;
         }
 
+        // Grouped by how often anybody needs it. Everything used to be one column of equal-looking
+        // cards, so deciding when a folder is backed up and clearing a repository lock left by a
+        // crash were presented as the same kind of choice. Most people need the first two and nothing
+        // else, so the rest folds away.
         _body.Children.Add(SchedulingCard());
         _body.Children.Add(DrillCard());
-        _body.Children.Add(RetentionCard());
-        _body.Children.Add(LockCard());
-        _body.Children.Add(StopCard());
-        _body.Children.Add(Buttons());
+        _body.Children.Add(Section("Storage clean-up", "How long backups are kept, and whether space is reclaimed.", RetentionCard()));
+        _body.Children.Add(Section("Troubleshooting", "For when backups say the repository is locked.", LockCard()));
+        _body.Children.Add(DangerZone());
+
+        _actionBar.Child = Buttons();
     }
+
+    /// <summary>
+    /// A group that stays shut until somebody needs it.
+    /// </summary>
+    /// <remarks>
+    /// Collapsed rather than removed: these are real settings and hiding them behind a support call
+    /// would be worse than showing them. What they must not do is compete for attention with the two
+    /// questions everybody actually has - when does this run, and is recovery being tested.
+    /// </remarks>
+    private static Expander Section(string header, string summary, Control content) => new()
+    {
+        Header = new StackPanel
+        {
+            Spacing = 2,
+            Children =
+            {
+                Text(header, 14, FontWeight.SemiBold, Ink),
+                Text(summary, 11, FontWeight.Normal, Muted, true)
+            }
+        },
+        Content = content,
+        IsExpanded = false,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch
+    };
+
+    /// <summary>The one action here that cannot be undone by clicking again.</summary>
+    private Border DangerZone() => StopCard();
 
     private Border SchedulingCard()
     {
@@ -302,7 +353,7 @@ public sealed class SourceSettingsWindow : Window
     {
         var clear = Secondary("Clear the lock").Named("Clear the lock left by an interrupted run");
         clear.IsEnabled = !_model.Busy;
-        clear.Click += async (_, _) => await _model.ClearLockAsync(CancellationToken.None);
+        clear.Click += async (_, _) => await ConfirmClearLockAsync();
 
         return Card(new StackPanel
         {
@@ -320,6 +371,72 @@ public sealed class SourceSettingsWindow : Window
                 clear
             }
         }, Surface, Line);
+    }
+
+    /// <summary>
+    /// Asks before removing a lock, because the dangerous case looks exactly like the safe one.
+    /// </summary>
+    /// <remarks>
+    /// The card already warned that clearing a lock held by another computer interrupts a backup that
+    /// is working - and then offered a single button that did it. This is a rare action taken by
+    /// somebody who has just read a warning; one more click costs them nothing and is the only thing
+    /// standing between the warning and the consequence. Fortiq cannot tell the two locks apart, so
+    /// the confirmation asks the person, who can.
+    /// </remarks>
+    private async Task ConfirmClearLockAsync()
+    {
+        var acknowledged = new CheckBox
+        {
+            Content = "No other computer is backing up to this location right now"
+        };
+        acknowledged.Named("Confirm no other computer is backing up to this location");
+
+        var confirm = Primary("Clear the lock");
+        confirm.Background = AtRisk;
+        confirm.IsEnabled = false;
+        acknowledged.IsCheckedChanged += (_, _) => confirm.IsEnabled = acknowledged.IsChecked == true;
+
+        var cancel = Secondary("Cancel");
+
+        var dialog = new Window
+        {
+            Title = "Clear the repository lock?",
+            Width = 500,
+            Height = 300,
+            Background = CanvasBackground,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(24),
+                Spacing = 14,
+                Children =
+                {
+                    Text("Clear the lock on this repository?", 16, FontWeight.SemiBold, Ink, true),
+                    Text("A lock left by an interrupted run and a lock held by a second computer that is "
+                        + "backing up right now look identical from here. Clearing the second kind interrupts "
+                        + "a backup that is working.", 13, FontWeight.Normal, Muted, true),
+                    acknowledged,
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 10,
+                        Children = { cancel, confirm }
+                    }
+                }
+            }
+        };
+
+        var agreed = false;
+        // Escape only. Enter must not answer a question whose answer interrupts somebody's backup.
+        Accessible.Keys(dialog);
+        cancel.Click += (_, _) => dialog.Close();
+        confirm.Click += (_, _) => { agreed = true; dialog.Close(); };
+        await dialog.ShowDialog(this);
+
+        if (agreed)
+        {
+            await _model.ClearLockAsync(CancellationToken.None);
+        }
     }
 
     private Border StopCard()
@@ -441,6 +558,9 @@ public sealed class SourceSettingsWindow : Window
             Increment = 1,
             FormatString = "0",
             Width = 110,
+            // Without this a fixed-width control inside a stretching stack sits in the middle of it,
+            // so the drill's count floated away from the label naming it.
+            HorizontalAlignment = HorizontalAlignment.Left,
             IsEnabled = !_model.Busy
         };
         AutomationProperties.SetName(box, label);
