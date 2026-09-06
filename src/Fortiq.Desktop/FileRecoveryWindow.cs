@@ -13,19 +13,22 @@ namespace Fortiq.Desktop;
 public sealed class FileRecoveryWindow : Window
 {
     private readonly FileRecoveryViewModel _model;
-    private readonly TextBox _repository = new() { PlaceholderText = "Local repository path or s3:https://endpoint/bucket" };
-    private readonly TextBox _phrase = new() { PasswordChar = '\u2022' };
-    private readonly TextBox _accessKey = new();
-    private readonly TextBox _secretKey = new() { PasswordChar = '\u2022' };
-    private readonly TextBox _region = new();
+    // Fortiq's own controls, like every other screen. This one was built from stock TextBox and
+    // Button, so the screen somebody reaches on the worst day of their year - the one that gets their
+    // data back - looked like a different application from the one that took the backups.
+    private readonly TextBox _repository = FortiqTextBox.Create("Local repository path or s3:https://endpoint/bucket");
+    private readonly TextBox _phrase = FortiqTextBox.Create(masked: true);
+    private readonly TextBox _accessKey = FortiqTextBox.Create();
+    private readonly TextBox _secretKey = FortiqTextBox.Create(masked: true);
+    private readonly TextBox _region = FortiqTextBox.Create();
     private readonly ComboBox _snapshots = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock _destination = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly Button _load = new() { Content = "Find backups" };
-    private readonly Button _restore = new() { Content = "Restore all files from selected backup" };
-    private readonly Button _cancel = new() { Content = "Cancel operation" };
-    private readonly Button _reset = new() { Content = "Use another recovery kit" };
-    private readonly Button _open = new() { Content = "Open restored folder" };
+    private readonly Button _load = FortiqButton.Primary("Find my backups");
+    private readonly Button _restore = FortiqButton.Primary("Restore");
+    private readonly Button _cancel = FortiqButton.Secondary("Stop");
+    private readonly Button _reset = FortiqButton.Secondary("Use another recovery kit");
+    private readonly Button _open = FortiqButton.Secondary("Open restored folder");
     private readonly ProgressBar _progress = new() { IsIndeterminate = true, Height = 5 };
     private readonly StackPanel _selectionFields = new() { Spacing = 12 };
     private readonly StackPanel _accessFields = new() { Spacing = 10 };
@@ -35,7 +38,7 @@ public sealed class FileRecoveryWindow : Window
     // Snapshot Explorer controls
     private readonly RadioButton _restoreAllRadio = new() { Content = "Restore entire backup", IsChecked = true, GroupName = "RestoreMode" };
     private readonly RadioButton _restoreSpecificRadio = new() { Content = "Restore specific file or folder", IsChecked = false, GroupName = "RestoreMode" };
-    private readonly TextBox _fileSearch = new() { PlaceholderText = "Search files in this backup (name or path)..." };
+    private readonly TextBox _fileSearch = FortiqTextBox.Create("Search files in this backup (name or path)...");
 
     /// <summary>
     /// Holds the search back until typing pauses.
@@ -49,7 +52,7 @@ public sealed class FileRecoveryWindow : Window
     /// </remarks>
     private readonly DispatcherTimer _searchDebounce = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly ListBox _fileList = new() { Height = 220, HorizontalAlignment = HorizontalAlignment.Stretch };
-    private readonly TextBlock _fileListStatus = new() { FontSize = 12, Foreground = Brushes.Gray };
+    private readonly TextBlock _fileListStatus = new() { FontSize = 12, Foreground = DesignTokens.Muted };
     private readonly StackPanel _explorerPanel = new() { Spacing = 8 };
 
     private string? _target;
@@ -108,6 +111,7 @@ public sealed class FileRecoveryWindow : Window
             }
             Refresh();
         };
+        _accessFields.Children.Add(Step(1, "Open the backup", "Point Fortiq at the backups and unlock them with your words."));
         _accessFields.Children.Add(Field("Backup repository", _repository));
         _accessFields.Children.Add(_kit);
         _accessFields.Children.Add(Field("Recovery phrase (held only for this session)", _phrase));
@@ -198,7 +202,7 @@ public sealed class FileRecoveryWindow : Window
             catch (Exception error) when (error is System.ComponentModel.Win32Exception or IOException)
             { _status.Text = "Files were restored, but the folder could not be opened. " + PlainFailure.Describe(error); }
         };
-        var close = new Button { Content = "Close" };
+        var close = FortiqButton.Secondary("Close");
         close.Click += (_, _) => Close();
 
         // Build Explorer Panel
@@ -214,9 +218,11 @@ public sealed class FileRecoveryWindow : Window
         _explorerPanel.Children.Add(_fileListStatus);
         _explorerPanel.Children.Add(_fileList);
 
+        _selectionFields.Children.Add(Step(2, "Choose what to restore", "Pick the backup by the date it was taken, and all of it or one file."));
         _selectionFields.Children.Add(new TextBlock { Text = "Backup to restore", FontWeight = FontWeight.SemiBold });
         _selectionFields.Children.Add(_snapshots);
         _selectionFields.Children.Add(_explorerPanel);
+        _selectionFields.Children.Add(Step(3, "Say where it goes", "A new folder, created for this restore. Nothing you already have is overwritten."));
         _selectionFields.Children.Add(_parent);
         _selectionFields.Children.Add(_destination);
 
@@ -225,8 +231,15 @@ public sealed class FileRecoveryWindow : Window
             Margin = new Thickness(24), Spacing = 14,
             Children =
             {
-                new TextBlock { Text = "Restore your files", FontSize = 24, FontWeight = FontWeight.SemiBold },
-                new TextBlock { Text = "Use your recovery kit and phrase, even on a new computer. No running Fortiq service is required. This restores files; it does not change your protection verdict.", TextWrapping = TextWrapping.Wrap },
+                new TextBlock { Text = "Restore your files", FontSize = 24, FontWeight = FontWeight.SemiBold, Foreground = DesignTokens.Ink },
+                new TextBlock
+                {
+                    Text = "Your recovery kit and your 24 words are enough, on this PC or on one that has never had "
+                        + "Fortiq. Restoring files does not count as proof that recovery works - that is what a "
+                        + "recovery drill is for.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = DesignTokens.Muted
+                },
                 _accessFields, _load, _reset, _selectionFields
             }
         };
@@ -402,7 +415,7 @@ public sealed class FileRecoveryWindow : Window
             {
                 Text = item.FormattedSize,
                 FontSize = 11,
-                Foreground = Brushes.Gray,
+                Foreground = DesignTokens.Muted,
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -420,7 +433,7 @@ public sealed class FileRecoveryWindow : Window
             {
                 Text = item.Path,
                 FontSize = 10,
-                Foreground = Brushes.DarkGray,
+                Foreground = DesignTokens.TextMuted,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 Margin = new Thickness(20, 1, 0, 0)
             };
@@ -439,6 +452,38 @@ public sealed class FileRecoveryWindow : Window
         _secretKey.Text = string.Empty;
         _accessKey.Text = string.Empty;
     }
+
+    /// <summary>
+    /// A numbered heading, so the window says how many things it is asking for.
+    /// </summary>
+    /// <remarks>
+    /// The flow was already progressive - the later fields appear once the backups are open - but
+    /// nothing said so, and everything looked like one long form whose end could not be seen from its
+    /// beginning. Somebody who has just lost data should be able to tell, at a glance, that this is
+    /// three questions rather than fifteen.
+    /// </remarks>
+    private static StackPanel Step(int number, string title, string detail) => new()
+    {
+        Spacing = 2,
+        Margin = new Thickness(0, 8, 0, 2),
+        Children =
+        {
+            new TextBlock
+            {
+                Text = $"{number}. {title}",
+                FontSize = 15,
+                FontWeight = FontWeight.SemiBold,
+                Foreground = DesignTokens.Ink
+            },
+            new TextBlock
+            {
+                Text = detail,
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = DesignTokens.Muted
+            }
+        }
+    };
 
     private static StackPanel Field(string name, Control control)
     {
