@@ -1,6 +1,23 @@
 # Fleet & MSP Control Plane Architecture
 
-> **Implementation status: Design intent.** No implementation.
+> **Implementation status: Design intent.** No implementation in this repository's default branch.
+>
+> A prototype of the cryptographic half of this design — canonical JSON, P-256 signed envelopes, the
+> policy and telemetry schemas, and a server-side ingestion engine — was written and is kept on the
+> `fleet-control-plane` branch. It was removed from `main` because nothing shipped it and nothing
+> could: it had no transport, no persistence, no server and no interface, and it was never referenced
+> by the desktop or the service. What it cost, it cost on every build and every change to the
+> monitoring types it read.
+>
+> It was also the one thing in this repository that could reasonably worry somebody who came for the
+> promise that Fortiq talks to no server of ours. A folder named `ControlPlane`, containing a class
+> named `FleetTelemetryClient`, is a fair thing to be alarmed by — and "it never sends anything"
+> is a weaker answer than not being there.
+>
+> Fleet management is a different product from the one this repository builds: it is for somebody
+> administering many machines, and a person protecting their own PC needs no central anything. If it
+> is built, it belongs beside Fortiq with its own promises rather than inside a community edition
+> whose promise is that there is no server.
 
 
 ## Purpose & Scope

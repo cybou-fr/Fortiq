@@ -14,7 +14,7 @@ The core promise of the platform:
 
 ## Current Status (.NET 10 LTS)
 
-Fortiq is under active development. Current code enforces verified security invariants, cryptographic guarantees, and automated recovery tests across **20 source projects** and **8 test projects**.
+Fortiq is under active development. Current code enforces verified security invariants, cryptographic guarantees, and automated recovery tests across **19 source projects** and **7 test projects**.
 
 **This release runs on Windows x64, and only there.** The pinned engine is a `win-x64` build and is the
 only one the manifest describes or the code will run; unattended unlock is a Windows platform key,
