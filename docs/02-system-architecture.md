@@ -44,7 +44,7 @@ design intent.
 - **`Fortiq.Application`**: Engine contracts (`IRepositoryEngine`, `IBackupRepository`, `IRepositoryIdentityReader`), operation commands (`IOperationCommand`, `CreateSnapshot`, `RestoreSnapshot`, `ApplyRetention`), credentials (`IEngineCredentialProvider`, `IKeyLease`), and receipts (`OperationReceipt`).
 
 ### 2. Fortiq Desktop (`src/Fortiq.Desktop`, `src/Fortiq.Desktop.ViewModels`)
-Cross-platform Avalonia UI application built upon clean MVVM separation.
+Avalonia UI application built upon clean MVVM separation. Avalonia is a cross-platform toolkit; the application is not, and this document does not claim it is. It runs on Windows x64, because the pinned engine, the device key, the credential store and the service it talks to are all Windows.
 - **Visual Design System & App Shell**: Windows 11 Fluent v2 styling, light surface hierarchy (`#F6F8FB` canvas, `#FFFFFF` cards), multi-view navigation rail (Home, Protect, Backups, Recovery, Settings), and embedded multi-resolution window/taskbar icon pipeline (`assets/icon.ico`, `Spec 22`, `ADR-015 Revision 1`). Settings is currently a placeholder view.
 - **Zero-State Lifecycle & Resilient Onboarding**: State-driven health reader eliminating false-alarm startup errors on fresh installations, presenting a reassuring onboarding dashboard with system readiness checks.
 - **Native Path Pickers**: Windows folder dialogs use Avalonia StorageProvider directly. Picker abstractions and extended storage guidance remain design intent.

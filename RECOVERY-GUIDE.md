@@ -59,6 +59,26 @@ Fortiq.Recover.exe snapshots --repository <path-or-s3-url> --kit <kit-folder>
 
 Each snapshot is one backup, with the date it was taken. Note the id of the one you want.
 
+### See what is inside a backup
+
+```
+Fortiq.Recover.exe files --repository <path-or-s3-url> --kit <kit-folder> --snapshot <id>
+```
+
+Lists every file the backup holds, with its size and the date it was last changed. Use it to check
+you have picked the right backup before restoring a large one, and to find the exact path of a single
+file you want back.
+
+### Check the repository is intact
+
+```
+Fortiq.Recover.exe check --repository <path-or-s3-url> --kit <kit-folder>
+```
+
+Verifies the repository's own integrity. Worth running before a restore you are relying on, and worth
+running if a restore has already failed: it answers whether the problem is the repository itself.
+It changes nothing, and on a large repository it takes a while.
+
 ### Restore
 
 ```
@@ -66,6 +86,13 @@ Fortiq.Recover.exe restore --repository <path-or-s3-url> --kit <kit-folder> --sn
 ```
 
 Choose an **empty** folder as the target. Fortiq will not restore over existing files.
+
+To bring back one folder or one file instead of everything, add `--source` with the path as `files`
+printed it:
+
+```
+Fortiq.Recover.exe restore --repository <path-or-s3-url> --kit <kit-folder> --snapshot <id> --target <empty-folder> --source <path-inside-the-backup>
+```
 
 ### Where the 24 words go
 

@@ -29,7 +29,7 @@ The Fortiq roadmap is organized around risk reduction and verification milestone
 
 ## Phase 1 — Sovereign Backup & Local Platform (Completed / In Progress)
 
-- [x] **Desktop Application**: Cross-platform Avalonia UI desktop application (`Fortiq.Desktop`) with MVVM architecture (`Fortiq.Desktop.ViewModels`);
+- [x] **Desktop Application**: Avalonia UI desktop application (`Fortiq.Desktop`) with MVVM architecture (`Fortiq.Desktop.ViewModels`), running on Windows x64 — the toolkit is cross-platform, the product is not;
 - [x] **Windows Service**: Unattended background execution host (`Fortiq.Service`) authenticated via device TPM;
 - [x] **Windows Capture**: Volume Shadow Copy Service (VSS) snapshot support (`--use-fs-snapshot`);
 - [ ] **USN Change Journal hints**: specified, no journal reader exists;

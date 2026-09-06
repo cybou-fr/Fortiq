@@ -14,7 +14,16 @@ The core promise of the platform:
 
 ## Current Status (.NET 10 LTS)
 
-Fortiq is under active development. Current code enforces verified security invariants, cryptographic guarantees, and automated recovery tests across **17 source projects** and **7 test projects**:
+Fortiq is under active development. Current code enforces verified security invariants, cryptographic guarantees, and automated recovery tests across **20 source projects** and **8 test projects**.
+
+**This release runs on Windows x64, and only there.** The pinned engine is a `win-x64` build and is the
+only one the manifest describes or the code will run; unattended unlock is a Windows platform key,
+stored object storage credentials are DPAPI, and the background service, its IPC and the installer are
+Windows throughout. The user interface is built on Avalonia, which is a cross-platform toolkit — that
+is a statement about how the screens are written, not about where Fortiq works, and the two have been
+conflated here before. Recovering on another operating system would need a `restic` build for it,
+pinned and verified the same way, which nothing in this repository provides yet.
+
 
 - **Pinned Engine Execution**: Restic 0.19.1 execution via `Fortiq.Infrastructure.Restic` with pre-execution SHA-256 binary validation, handle-locking (`FileShare.Read`), and volume/index identity checks to eliminate TOCTOU attacks.
 - **Envelope Encryption**: Deterministic CBOR (RFC 8949) `KeyEnvelopeV1` specification supporting:
@@ -31,7 +40,7 @@ Fortiq is under active development. Current code enforces verified security inva
 - **Backup Anomaly Observation**: `BackupAnomalyDetector` compares each backup against the same repository's median history and reports deduplication collapse and added-data or changed-file spikes — the shape a source rewritten in place produces, which total backup size alone cannot show. Findings are surfaced with their numbers and never name a cause or change the recoverability verdict.
 - **Scheduled Retention**: opt-in per repository (`ScheduledRetentionRunner`), configured from the source's own screen (`SourceSettingsWindow`) or by hand. A schedule file that says nothing about retention keeps everything forever — there is no safe default for deleting somebody's backups. Runs take the repository exclusively, never catch up on missed occurrences, and a busy repository is left alone rather than waited for.
 - **Automated Restore Drills**: opt-in per-repository recurrence (`ScheduledDrillRunner`), turned on and paced from the source's own screen restores the newest snapshot into a disposable directory unattended, reconciles what came back, and records the proof as a receipt. Drills never catch up on missed occurrences, keep their history apart from the backup's, and a failed drill never stops backups.
-- **Modern Desktop UI & Visual System**: Cross-platform Avalonia UI application (`Fortiq.Desktop`) with a light Fluent v2 palette, native Windows folder dialogs, resilient zero-state onboarding, Protection Setup Wizard with a 4x6 mnemonic card grid and challenge verification, an in-app restore-proof action (`ProveRecoveryAdapter`) that restores the newest snapshot and reconciles what came back, an on-demand backup (`BackupNowAdapter`) for the source that needs one now rather than at its next occurrence, and a settings screen per protected source.
+- **Modern Desktop UI & Visual System**: Avalonia UI application (`Fortiq.Desktop`) with a light Fluent v2 palette, native Windows folder dialogs, resilient zero-state onboarding, Protection Setup Wizard with a 4x6 mnemonic card grid and challenge verification, an in-app restore-proof action (`ProveRecoveryAdapter`) that restores the newest snapshot and reconciles what came back, an on-demand backup (`BackupNowAdapter`) for the source that needs one now rather than at its next occurrence, and a settings screen per protected source.
 
 - **Per-Source Settings**: `SourceSettingsWindow` over `SourceSettingsViewModel` and `SourceSettingsAdapter` sets the backup time, pauses a schedule, paces or disables restore drills, configures retention and pruning, and stops protecting a source. Reading a schedule needs no privilege — the state directory is readable by every account — while writing goes to the service (`updateSchedule`, `removeSchedule`) on an installed machine and straight to disk in portable mode. `FileSystemScheduleStore.UpdateAsync` edits the existing document rather than replacing it, so hand-written fields and weekday restrictions survive a save, and it reads the result back through the schedule reader before committing it. A retention policy that keeps nothing is refused rather than written. Stopping protection removes the schedule and its histories and touches neither the repository, the recovery kit nor the receipts: what was backed up stays openable with the kit and the 24 words.
 
