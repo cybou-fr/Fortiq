@@ -52,6 +52,9 @@ public sealed class InstallWindow : Window
         // "Install Windows background service (NT SERVICE\Fortiq) for scheduled protection" - named a
         // Windows account and left the reader to work out that unticking it means backups stop
         // happening on their own, which is the only thing the choice actually decides.
+        // Left in Advanced rather than on the front page. Backing up with the window closed is what
+        // Fortiq is for; offering it as a tick beside "add to PATH" invites somebody to switch off the
+        // reason they installed it.
         _serviceCheckBox.Content = "Back up automatically, even when Fortiq is closed";
         _serviceCheckBox.IsChecked = _model.InstallService;
         _serviceCheckBox.IsCheckedChanged += (_, _) => _model.InstallService = _serviceCheckBox.IsChecked ?? true;
@@ -75,12 +78,15 @@ public sealed class InstallWindow : Window
             Child = _errorText
         };
 
-        _portableButton = FortiqButton.Secondary("Run as Portable");
+        // It sat beside Install as an equal-looking choice, and the consequence - no scheduler at all,
+        // so backups happen only while the window is open - was discoverable only after choosing it.
+        _portableButton = FortiqButton.Secondary("Use portable mode instead");
+        _portableButton.Named("Use portable mode instead of installing");
         _portableButton.Click += (_, _) => _model.RunPortable();
 
         // Shared styling, so this one keeps its fill when the pointer is over it. Set locally, the
         // Fluent theme repainted the presenter underneath on hover and the button vanished.
-        _installButton = FortiqButton.Primary("Install Fortiq ➔");
+        _installButton = FortiqButton.Primary("Install Fortiq");
 
         _installButton.Click += async (_, _) => await _model.InstallAsync();
 
@@ -98,8 +104,8 @@ public sealed class InstallWindow : Window
                 Children =
                 {
                     Header(),
-                    ReadinessCard(),
-                    OptionsCard(),
+                    WhatWillHappenCard(),
+                    AdvancedSection(),
                     _progressBar,
                     _statusText,
                     _errorBanner
@@ -193,6 +199,72 @@ public sealed class InstallWindow : Window
             },
             Text("A few checks, then choose where to put it. This takes about a minute.", 13, FontWeight.Normal, Muted)
         }
+    };
+
+    /// <summary>
+    /// What installing actually does, in three lines, before any of the machinery.
+    /// </summary>
+    /// <remarks>
+    /// The first screen used to open with Windows components, a platform key, the backup engine, VSS,
+    /// an install directory and three checkboxes - an excellent engineering installer and a poor
+    /// consumer one. Somebody installing a backup program wants to know what they are agreeing to,
+    /// and everything that answers that fits in three lines. The rest is still here, one disclosure
+    /// away, because a machine that cannot run the service is a thing they need to be able to find
+    /// out - it is just not the thing to open with.
+    /// </remarks>
+    private static Border WhatWillHappenCard() => Card(new StackPanel
+    {
+        Spacing = 12,
+        Children =
+        {
+            Text("Fortiq will", 15, FontWeight.SemiBold, Ink),
+            Bullet("back up the folders you choose, on a schedule, in the background"),
+            Bullet("keep running with the window closed, so backups happen while you work"),
+            Bullet("add itself to the Start menu"),
+            Text("Nothing is sent anywhere. There is no Fortiq account and no Fortiq server.",
+                12, FontWeight.SemiBold, Recoverable, true)
+        }
+    });
+
+    private static StackPanel Bullet(string text) => new()
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 8,
+        Children =
+        {
+            new Border
+            {
+                Width = 5,
+                Height = 5,
+                CornerRadius = new CornerRadius(3),
+                Background = Brand,
+                VerticalAlignment = VerticalAlignment.Center
+            },
+            Text(text, 13, FontWeight.Normal, Muted, true)
+        }
+    };
+
+    /// <summary>Everything somebody may need and almost nobody opens.</summary>
+    private Expander AdvancedSection() => new()
+    {
+        Header = new StackPanel
+        {
+            Spacing = 2,
+            Children =
+            {
+                Text("Advanced options", 14, FontWeight.SemiBold, Ink),
+                Text("Where it installs, what starts with Windows, and what this PC can support.", 11, FontWeight.Normal, Muted, true)
+            }
+        },
+        Content = new StackPanel
+        {
+            Spacing = 16,
+            Margin = new Thickness(0, 12, 0, 0),
+            Children = { OptionsCard(), ReadinessCard() }
+        },
+        IsExpanded = false,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch
     };
 
     private Border ReadinessCard() => Card(new StackPanel
@@ -289,17 +361,36 @@ public sealed class InstallWindow : Window
 
     private Grid Footer()
     {
-        var grid = new Grid
+        var portable = new StackPanel
         {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            Spacing = 2,
+            VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
                 _portableButton,
-                _installButton
+                Text("Nothing is installed. Backups run only while Fortiq is open.", 11, FontWeight.Normal, Muted, true)
             }
         };
-        Grid.SetColumn(_portableButton, 0);
-        Grid.SetColumn(_installButton, 2);
+
+        var install = new StackPanel
+        {
+            Spacing = 2,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children =
+            {
+                _installButton,
+                Text("Recommended", 11, FontWeight.SemiBold, Brand)
+            }
+        };
+
+        var grid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            Children = { portable, install }
+        };
+        Grid.SetColumn(portable, 0);
+        Grid.SetColumn(install, 2);
         return grid;
     }
 

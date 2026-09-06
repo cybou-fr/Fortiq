@@ -142,7 +142,20 @@ public sealed class MainWindow : Window
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
             _isExplicitExit = true;
-            _disposeTray();
+
+            // ProcessExit does not run on the UI thread, and a TrayIcon may only be touched from it.
+            // Disposing directly threw every time the application closed - at the very end, where
+            // nobody was looking, but thrown all the same. Closed already disposes it, so this only
+            // has to catch the case where the process ends without the window closing, and it has to
+            // ask the UI thread to do it.
+            try
+            {
+                Avalonia.Threading.Dispatcher.UIThread.Invoke(() => _disposeTray());
+            }
+            catch (Exception error) when (error is InvalidOperationException or TaskCanceledException or ObjectDisposedException)
+            {
+                // The dispatcher has already stopped, which means the tray icon went with it.
+            }
         };
 
         RenderActive();
@@ -221,15 +234,15 @@ public sealed class MainWindow : Window
         // files before they could pick one - three entries for one intention, at the moment they are
         // least able to study an architecture. "Backups" went the same way: the noun says what Fortiq
         // stores, and "Protected folders" says what they gave it.
-        menu.Children.Add(Nav("Home", RenderHome));
-        menu.Children.Add(Nav("Protected folders", RenderFolders));
-        menu.Children.Add(Nav("Restore", RenderRestore));
-        menu.Children.Add(Nav("Activity", RenderActivity));
+        menu.Children.Add(Nav("Home", RenderHome, "\uE80F"));
+        menu.Children.Add(Nav("Protected folders", RenderFolders, "\uE8B7"));
+        menu.Children.Add(Nav("Restore", RenderRestore, "\uE777"));
+        menu.Children.Add(Nav("Activity", RenderActivity, "\uE81C"));
         Grid.SetRow(menu, 1);
         rail.Children.Add(menu);
 
         var bottomStack = new StackPanel { Spacing = 6 };
-        bottomStack.Children.Add(Nav("Settings", RenderSettings));
+        bottomStack.Children.Add(Nav("Settings", RenderSettings, "\uE713"));
 
         // Was a green dot and the words "Local protection active", both hard-coded. It said that on a
         // machine protecting nothing, and it would have said it while every repository was at risk.
@@ -266,11 +279,35 @@ public sealed class MainWindow : Window
         };
     }
 
-    private Button Nav(string label, Action action)
+    /// <summary>
+    /// One rail entry: a glyph, then the word.
+    /// </summary>
+    /// <remarks>
+    /// The glyphs come from Segoe Fluent Icons, which every supported Windows has, and each one is
+    /// paired with its word rather than replacing it - an icon nobody can name is a puzzle, and this
+    /// rail is read by people who are already having a bad day. They are decoration to a screen
+    /// reader, which announces the label and the current-screen state as before.
+    /// </remarks>
+    private Button Nav(string label, Action action, string glyph)
     {
         var button = new Button
         {
-            Content = label,
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = glyph,
+                        FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+                        FontSize = 15,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }.Decorative(),
+                    new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center }
+                }
+            },
             HorizontalContentAlignment = HorizontalAlignment.Left,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(14, 9),
@@ -293,7 +330,7 @@ public sealed class MainWindow : Window
         }
     }
 
-    private static void ApplyNavigationStyle(Button button, bool selected)
+    private void ApplyNavigationStyle(Button button, bool selected)
     {
         button.Background = selected ? InfoSurface : Brushes.Transparent;
         button.Foreground = selected ? Brand : Ink;
@@ -301,8 +338,13 @@ public sealed class MainWindow : Window
 
         // Which item is current was said in blue and semibold and in no other way, so somebody using a
         // screen reader - or looking at this in the greys some people see it in - heard five identical
-        // buttons and no answer to "where am I".
-        button.Named(selected ? $"{button.Content}, current screen" : $"{button.Content}");
+        // buttons and no answer to "where am I". The label is read from the rail's own record rather
+        // than from the button's content, which is a panel now.
+        var label = _navigation.FirstOrDefault(entry => ReferenceEquals(entry.Value, button)).Key;
+        if (label is not null)
+        {
+            button.Named(selected ? $"{label}, current screen" : label);
+        }
     }
 
     /// <summary>Puts the machine's actual protection state in the corner of every screen.</summary>
