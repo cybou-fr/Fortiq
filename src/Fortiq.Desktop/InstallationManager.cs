@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Principal;
 using System.Text;
@@ -15,7 +16,8 @@ public sealed record InstallOptions(
     bool AddToPath = true,
     string? SourceDirectory = null,
     bool ProvisionAcls = true,
-    bool AutoStartOnLogon = true);
+    bool AutoStartOnLogon = true,
+    bool CreateStartMenuShortcut = true);
 
 public sealed record UninstallOptions(
     bool PurgeData = false,
@@ -170,6 +172,23 @@ public sealed class InstallationManager : IInstallationOperations
                 var installedDesktopExe = Path.Combine(targetDir, "Fortiq.Desktop.exe");
                 WindowsAutostartController.SetAutostartEnabled(true, installedDesktopExe);
             }
+
+            if (options.CreateStartMenuShortcut)
+            {
+                progress?.Report(new("Adding Fortiq to the Start menu...", 99));
+                try
+                {
+                    StartMenuShortcut.Create(Path.Combine(targetDir, "Fortiq.Desktop.exe"));
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or COMException or FileNotFoundException)
+                {
+                    // A missing shortcut is an inconvenience; a failed installation over it would be
+                    // worse. The service is registered and the files are in place either way.
+                    progress?.Report(new(
+                        $"Installed, but the Start menu entry could not be created ({error.Message}). " +
+                        $"Fortiq is at {Path.Combine(targetDir, "Fortiq.Desktop.exe")}.", 99));
+                }
+            }
         }
 
         // Put back what was stopped. When InstallService was asked for, the block above has already
@@ -238,6 +257,16 @@ public sealed class InstallationManager : IInstallationOperations
         }
     }
 
+    /// <summary>
+    /// Removes the service, the files, the Start menu entry and the PATH entry.
+    /// </summary>
+    /// <remarks>
+    /// Every step here used to write its failure to <c>Debug.WriteLine</c> - which goes nowhere in a
+    /// release build - and then report "Uninstallation complete. 100%". A registered service and a
+    /// full Program Files directory could survive an uninstall that told the person it had worked,
+    /// and the next thing they would do is install a new version on top of a service they believed
+    /// was gone. Failures are collected and raised at the end, naming what is still on the machine.
+    /// </remarks>
     public static async Task UninstallAsync(
         UninstallOptions options,
         IProgress<InstallProgressReport>? progress = null,
@@ -246,61 +275,94 @@ public sealed class InstallationManager : IInstallationOperations
         ArgumentNullException.ThrowIfNull(options);
         var targetDir = Path.GetFullPath(options.TargetDirectory ?? DefaultInstallPath);
 
+        // A recursive delete of whatever arrives in TargetDirectory is too much power to hand a
+        // string. The installer only ever puts Fortiq in a directory it created and named.
+        if (!LooksLikeAnInstallation(targetDir))
+        {
+            throw new InvalidOperationException(
+                $"'{targetDir}' does not look like a Fortiq installation - it holds no Fortiq.Desktop.exe. " +
+                "Refusing to delete it.");
+        }
+
+        var leftovers = new List<string>();
+
         if (OperatingSystem.IsWindows())
         {
             WindowsAutostartController.SetAutostartEnabled(false);
-        }
 
-        progress?.Report(new("Stopping and removing Windows Service...", 20));
-        if (OperatingSystem.IsWindows())
-        {
+            progress?.Report(new("Stopping and removing the Fortiq service...", 20));
             try
             {
-                WindowsServiceController.StopService(WindowsServiceController.DefaultServiceName, TimeSpan.FromSeconds(10));
-                WindowsServiceController.DeleteService(WindowsServiceController.DefaultServiceName);
+                var status = WindowsServiceController.QueryStatus(WindowsServiceController.DefaultServiceName);
+                if (status.Exists)
+                {
+                    if (status.Running)
+                    {
+                        WindowsServiceController.StopService(WindowsServiceController.DefaultServiceName, TimeSpan.FromSeconds(30));
+                    }
+
+                    WindowsServiceController.DeleteService(WindowsServiceController.DefaultServiceName);
+                }
             }
-            catch (Exception ex)
+            catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                Debug.WriteLine("Warning stopping/deleting service: " + ex.Message);
+                leftovers.Add($"the Windows service 'Fortiq' is still registered ({error.Message})");
             }
 
-            progress?.Report(new("Removing directory from PATH...", 40));
+            progress?.Report(new("Removing the Start menu entry...", 35));
+            if (!StartMenuShortcut.Remove())
+            {
+                leftovers.Add($"the Start menu entry at {StartMenuShortcut.DefaultPath}");
+            }
+
+            progress?.Report(new("Removing the directory from PATH...", 45));
             TryRemoveDirectoryFromPath(targetDir);
         }
 
         progress?.Report(new("Removing program files...", 60));
-        if (Directory.Exists(targetDir))
+        try
         {
-            try
+            if (Directory.Exists(targetDir))
             {
                 Directory.Delete(targetDir, recursive: true);
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("Warning deleting program files: " + ex.Message);
-            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            leftovers.Add($"the program files in {targetDir} ({error.Message})");
         }
 
         if (options.PurgeData)
         {
-            progress?.Report(new("Purging state data directories...", 80));
+            progress?.Report(new("Removing state and evidence...", 80));
             var statePaths = FortiqStatePaths.Resolve();
-            if (Directory.Exists(statePaths.Root))
+            try
             {
-                try
+                if (Directory.Exists(statePaths.Root))
                 {
                     Directory.Delete(statePaths.Root, recursive: true);
                 }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine("Warning purging state directory: " + ex.Message);
-                }
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                leftovers.Add($"the state directory {statePaths.Root} ({error.Message})");
             }
         }
 
-        progress?.Report(new("Uninstallation complete.", 100));
+        if (leftovers.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Fortiq was only partly removed. Still on this machine: " + string.Join("; ", leftovers) +
+                ". Close any running Fortiq window and try again.");
+        }
+
+        progress?.Report(new("Fortiq has been removed.", 100));
         await Task.CompletedTask;
     }
+
+    /// <summary>Whether a directory holds an installation rather than something else entirely.</summary>
+    private static bool LooksLikeAnInstallation(string targetDir) =>
+        Directory.Exists(targetDir) && File.Exists(Path.Combine(targetDir, "Fortiq.Desktop.exe"));
 
     public static async Task<int> ElevateAndExecuteAsync(string arguments, CancellationToken cancellationToken = default)
     {
@@ -567,10 +629,79 @@ public sealed class InstallationManager : IInstallationOperations
             File.Copy(manifestPath, Path.Combine(targetDir, "bundle-manifest.json"), overwrite: true);
         }
 
-        var securityDoc = Path.Combine(bundleRoot, "SECURITY.md");
-        if (File.Exists(securityDoc))
+        // The recovery guide belongs on the machine that has something to recover, not only in the
+        // download folder the person deleted after installing.
+        foreach (var document in new[] { "SECURITY.md", "RECOVERY-GUIDE.md", "LICENSE" })
         {
-            File.Copy(securityDoc, Path.Combine(targetDir, "SECURITY.md"), overwrite: true);
+            var source = Path.Combine(bundleRoot, document);
+            if (File.Exists(source))
+            {
+                File.Copy(source, Path.Combine(targetDir, document), overwrite: true);
+            }
+        }
+
+        VerifyInstalledPayload(targetDir, manifest);
+    }
+
+    /// <summary>
+    /// Checks that what is now in <paramref name="targetDir"/> is what the manifest described.
+    /// </summary>
+    /// <remarks>
+    /// The bundle is verified before the first file is copied, which catches a tampered download but
+    /// says nothing about a copy that stopped halfway - a disk filling up, a file locked by something
+    /// still running. That leaves half of one version beside half of another, and the installer used
+    /// to call it success. An upgrade either lands completely or is reported as not having landed.
+    /// </remarks>
+    private static void VerifyInstalledPayload(string targetDir, BundleManifest manifest)
+    {
+        if (manifest.Files is not { Count: > 0 } files)
+        {
+            return;
+        }
+
+        // Only what CopyBundle flattens into the target: a file sitting directly in a component
+        // folder. Anything deeper - the engines subtree - keeps its own layout, and the documents at
+        // the bundle root are not part of the installed payload.
+        var componentFolders = manifest.Components
+            .Select(component => component.Folder)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var problems = new List<string>();
+        foreach (var file in files)
+        {
+            var segments = file.Path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length != 2 || !componentFolders.Contains(segments[0]))
+            {
+                continue;
+            }
+
+            var extension = Path.GetExtension(file.Path);
+            if (!BinaryExtensions.Any(valid => string.Equals(extension, valid, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var installed = Path.Combine(targetDir, Path.GetFileName(file.Path));
+            if (!File.Exists(installed))
+            {
+                problems.Add(Path.GetFileName(file.Path) + " (missing)");
+            }
+            else if (new FileInfo(installed).Length != file.Length)
+            {
+                problems.Add(Path.GetFileName(file.Path) + " (wrong size)");
+            }
+
+            if (problems.Count >= 10)
+            {
+                break;
+            }
+        }
+
+        if (problems.Count > 0)
+        {
+            throw new InvalidDataException(
+                $"The installation in '{targetDir}' is incomplete: {string.Join(", ", problems)}. " +
+                "Nothing was started from it. Free some disk space, close any running Fortiq, and install again.");
         }
     }
 

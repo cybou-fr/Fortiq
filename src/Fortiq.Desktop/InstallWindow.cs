@@ -159,12 +159,19 @@ public sealed class InstallWindow : Window
             return;
         }
 
-        var available = screen.WorkingArea.Height / screen.Scaling;
-        var fits = Math.Max(MinHeight, available - 60);
-
-        if (Height > fits)
+        var fitsHigh = Math.Max(MinHeight, screen.WorkingArea.Height / screen.Scaling - 60);
+        if (Height > fitsHigh)
         {
-            Height = fits;
+            Height = fitsHigh;
+        }
+
+        // Width was left alone, which is the half that goes wrong on a small laptop held at 125%
+        // scaling: the buttons on the right of every step sit off the edge of the screen, including
+        // the one that starts the installation.
+        var fitsWide = Math.Max(MinWidth, screen.WorkingArea.Width / screen.Scaling - 60);
+        if (Width > fitsWide)
+        {
+            Width = fitsWide;
         }
     }
 

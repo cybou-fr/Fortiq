@@ -28,8 +28,8 @@ QUICK START
   service, so backups run on schedule even when the application is closed.
   Portable does neither: backups run only while Fortiq is open.
 
-  There is no Start Menu entry yet. Run Fortiq from
-  C:\Program Files\Fortiq\Fortiq.Desktop.exe, or from this package.
+  Installing adds Fortiq to the Start menu. Portable does not: run it from
+  this package's desktop folder.
 
 
 THE 24 WORDS ARE THE BACKUP OF YOUR BACKUP

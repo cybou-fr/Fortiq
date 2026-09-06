@@ -897,14 +897,35 @@ public sealed class MainWindow : Window
             Spacing = 8,
             Children =
             {
-                Text(present ? "Recovery kit is available and verified" : "Recovery kit is missing or damaged", 20, FontWeight.SemiBold, present ? Recoverable : Failure),
-                Text(present ? "Fortiq found valid recovery material for this repository." : "This repository cannot be restored if this machine fails until recovery material is restored.", 13, FontWeight.Normal, Muted, true),
-                Text($"Repository ID: {_kitSource.Health.RepositoryId}", 11, FontWeight.Normal, Muted, true)
+                // "Found", not "verified". Fortiq has seen the files; whether they open is what the
+                // recovery drill answers, and the button for that is further down this screen.
+                Text(present ? "Recovery kit found" : "Recovery kit is missing", 20, FontWeight.SemiBold, present ? Recoverable : Failure),
+                Text(present
+                        ? "The offline material for this repository is where Fortiq expects it. A recovery drill is what shows it works."
+                        : "Without it, this repository cannot be opened on another machine. Protect the folder again to write a new kit.",
+                    13, FontWeight.Normal, Muted, true),
+                Text($"Repository: {_kitSource.Health.RepositoryId}", 11, FontWeight.Normal, Muted, true)
             }
         }, present ? RecoverableSurface : AtRiskSurface, present ? Recoverable : AtRisk, new Thickness(22)));
 
-        // Masked BIP-39 mnemonic component
-        body.Children.Add(new MnemonicObfuscatorControl(null));
+        // What used to stand here was a card headed "Disaster Recovery Secret (BIP-39)" showing a row
+        // of dots and a "Show Mnemonic" button - built, on this screen, around a null phrase. It
+        // revealed an empty grid, because Fortiq does not keep the words and never did. The screen
+        // was teaching the opposite of the design it exists to explain, and somebody could reasonably
+        // have left the words unwritten believing the application held a copy.
+        body.Children.Add(Card(new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                Text("Fortiq does not have your 24 words", 16, FontWeight.SemiBold, Caution),
+                Text("They were shown once, while the folder was being protected, and were never stored - "
+                    + "not on this PC, not by Fortiq. That is what makes the backups yours: nobody else can open them. "
+                    + "It also means nobody can give them back to you.", 13, FontWeight.Normal, Muted, true),
+                Text("Take the paper out and read it back today, while the backups still work. "
+                    + "A word you cannot read is the same as a word you do not have.", 13, FontWeight.Normal, Ink, true)
+            }
+        }, UnprovenSurface, UnprovenLine, new Thickness(20)));
 
         var verifyBtn = Primary("Verify recovery with a drill");
         verifyBtn.IsEnabled = present && _kitSource.CanProveRecovery;
@@ -915,10 +936,12 @@ public sealed class MainWindow : Window
             Spacing = 12,
             Children =
             {
-                Text("What the recovery kit enables", 16, FontWeight.SemiBold, Ink),
-                Check("Open the encrypted repository on another computer without Fortiq"),
-                Check("Restore data if the local disk is destroyed or wiped"),
-                Check("Prove that recovery keys remain usable offline"),
+                Text("To restore on a computer that has never had Fortiq", 16, FontWeight.SemiBold, Ink),
+                Check("The repository - the folder, drive or bucket holding the backups"),
+                Check("This recovery kit folder, copied onto that machine"),
+                Check("Your 24 words, typed in from paper"),
+                Text("The recover folder in the Fortiq package does this without installing anything. "
+                    + "RECOVERY-GUIDE.md walks through it.", 12, FontWeight.Normal, Muted, true),
                 verifyBtn
             }
         }, Surface, Line, new Thickness(20)));
@@ -936,11 +959,11 @@ public sealed class MainWindow : Window
         // 1. Theme Configuration
         var themeGroup = new StackPanel { Spacing = 10 };
         themeGroup.Children.Add(Text("Appearance & Theme", 16, FontWeight.SemiBold, Ink));
-        themeGroup.Children.Add(Text("Switch between elevated Dark Slate and Light Slate design palettes.", 12, FontWeight.Normal, Muted));
+        themeGroup.Children.Add(Text("Follow the Windows setting, or pick one and keep it.", 12, FontWeight.Normal, Muted));
 
         var themeSelector = new ComboBox
         {
-            ItemsSource = new[] { "System Default", "Light Slate", "Dark Slate" },
+            ItemsSource = new[] { "Match Windows", "Light", "Dark" },
             SelectedIndex = _preferences.Current.Theme switch
             {
                 AppThemePreference.Dark => 2,
@@ -959,31 +982,7 @@ public sealed class MainWindow : Window
                 _ => AppThemePreference.System
             };
             _preferences.UpdateTheme(selectedTheme);
-            if (selectedTheme == AppThemePreference.Dark)
-            {
-                DesignTokens.SetTheme(true);
-                if (Avalonia.Application.Current != null)
-                {
-                    Avalonia.Application.Current.RequestedThemeVariant = ThemeVariant.Dark;
-                }
-            }
-            else if (selectedTheme == AppThemePreference.Light)
-            {
-                DesignTokens.SetTheme(false);
-                if (Avalonia.Application.Current != null)
-                {
-                    Avalonia.Application.Current.RequestedThemeVariant = ThemeVariant.Light;
-                }
-            }
-            else
-            {
-                if (Avalonia.Application.Current != null)
-                {
-                    Avalonia.Application.Current.RequestedThemeVariant = ThemeVariant.Default;
-                    var isSysDark = Avalonia.Application.Current.ActualThemeVariant == ThemeVariant.Dark;
-                    DesignTokens.SetTheme(isSysDark);
-                }
-            }
+            AppTheme.Apply(selectedTheme);
         };
         themeGroup.Children.Add(themeSelector);
         body.Children.Add(Card(themeGroup, Surface, Line, new Thickness(20)));

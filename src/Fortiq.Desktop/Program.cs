@@ -24,20 +24,7 @@ public sealed class FortiqApplication : Avalonia.Application
 
         var isPortable = Environment.GetCommandLineArgs().Contains("--portable", StringComparer.OrdinalIgnoreCase);
         var preferences = DesktopPreferencesStore.Resolve(!isPortable).Current;
-        if (preferences.Theme == AppThemePreference.Dark)
-        {
-            DesignTokens.SetTheme(true);
-            RequestedThemeVariant = ThemeVariant.Dark;
-        }
-        else if (preferences.Theme == AppThemePreference.Light)
-        {
-            DesignTokens.SetTheme(false);
-            RequestedThemeVariant = ThemeVariant.Light;
-        }
-        else
-        {
-            RequestedThemeVariant = ThemeVariant.Default;
-        }
+        AppTheme.Apply(preferences.Theme);
 
         // Fluent paints checkboxes, radio buttons and focus rings with the accent colour Windows
         // personalisation happens to be set to. On this machine that is magenta, so the setup screen
