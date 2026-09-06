@@ -5,7 +5,25 @@ namespace Fortiq.Desktop.ViewModels;
 
 public sealed record RecoverySnapshot(string Id, DateTimeOffset CreatedAt, string SourcePath)
 {
-    public override string ToString() => $"{CreatedAt.ToLocalTime():g} | {SourcePath} | {Id[..Math.Min(12, Id.Length)]}";
+    /// <summary>
+    /// How a backup is named in the list somebody picks from.
+    /// </summary>
+    /// <remarks>
+    /// It read as a date, then the source path - which they already know, it is the folder being
+    /// restored - then a twelve-character identifier that means nothing to anybody choosing between
+    /// backups. What tells one from another is when it was taken, so that is what it says. The
+    /// identifier stays on the record for anything that needs it.
+    /// </remarks>
+    public override string ToString()
+    {
+        var when = CreatedAt.ToLocalTime();
+        var today = DateTimeOffset.Now.ToLocalTime().Date;
+        var day = when.Date == today ? "Today"
+            : when.Date == today.AddDays(-1) ? "Yesterday"
+            : when.ToString("dddd d MMMM", System.Globalization.CultureInfo.CurrentCulture);
+
+        return $"{day}, {when:HH:mm}";
+    }
 }
 
 public sealed record SnapshotFileItem(

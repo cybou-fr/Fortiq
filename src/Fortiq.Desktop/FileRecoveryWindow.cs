@@ -372,15 +372,16 @@ public sealed class FileRecoveryWindow : Window
         var hasValidSelection = !isSpecific || _model.SelectedFile is not null;
         _restore.IsEnabled = !_model.Busy && !_model.Completed && _snapshots.SelectedItem is RecoverySnapshot && _target is not null && hasValidSelection;
 
+        // The button names what it will restore and nothing else. It used to carry the whole sentence -
+        // "Restore all files from selected backup" - on a screen that has already said which backup and
+        // where it is going, two headings above.
         if (isSpecific && _model.SelectedFile is { } file)
         {
-            _restore.Content = file.IsDirectory
-                ? $"Restore folder: {file.DisplayName}"
-                : $"Restore file: {file.Name} ({file.FormattedSize})";
+            _restore.Content = file.IsDirectory ? $"Restore {file.DisplayName}" : $"Restore {file.Name}";
         }
         else
         {
-            _restore.Content = "Restore all files from selected backup";
+            _restore.Content = "Restore everything";
         }
 
         _cancel.IsEnabled = _model.Busy;

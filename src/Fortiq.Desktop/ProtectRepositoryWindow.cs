@@ -495,7 +495,7 @@ public sealed class ProtectRepositoryWindow : Window
     private void RenderVerify()
     {
         var requested = string.Join(", ", _model.RequestedWordNumbers.Select(number => $"#{number}"));
-        _content.Children.Add(SectionTitle("Verify your recovery phrase", "Type the requested words in order to prove that your offline paper backup is accurate."));
+        _content.Children.Add(SectionTitle("Confirm you wrote the words down", "Type the requested words in order to prove that your offline paper backup is accurate."));
 
         var verifyBox = FortiqTextBox.Create($"Enter words {requested} separated by spaces...");
         verifyBox.Text = _model.ConfirmationInput;
@@ -517,7 +517,11 @@ public sealed class ProtectRepositoryWindow : Window
         var again = Secondary("Show phrase again");
         again.Click += (_, _) => _model.ShowItAgain();
 
-        var verify = Primary("Verify recovery kit");
+        // Not "Verify recovery kit": nothing here opens the kit or checks that it works. What this
+        // button checks is that the words on the person's paper match the ones Fortiq generated.
+        // Saying "verified" about a kit that has never been opened is the claim this whole product
+        // exists to avoid, and only a restore drill earns it.
+        var verify = Primary("Confirm these words");
         verify.Click += async (_, _) =>
         {
             if (_model.Confirm())
