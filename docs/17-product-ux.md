@@ -28,17 +28,26 @@ The shell as implemented:
 ```text
 Fortiq Desktop Application Shell
 ├── Navigation Rail
-│   ├── Home      (Status summary; zero-state onboarding on a fresh machine)
-│   ├── Backups   (Protected sources and backup/check/restore history)
-│   ├── Recovery  (Restore files from a kit; per-source evidence and proof action)
-│   ├── Recovery Kit (Kit status and recovery-proof navigation)
-│   └── Settings  (Theme selection, installed-service control and diagnostic paths)
+│   ├── Home              (Status summary; zero-state onboarding on a fresh machine)
+│   ├── Protected folders (The sources, their actions, and per-source recovery evidence)
+│   ├── Restore           (Restoring files, and what opens a repository on another machine)
+│   ├── Activity          (Every operation from the receipts, and whether that record is intact)
+│   └── Settings          (Theme selection, installed-service control and diagnostic paths)
 └── Active Workspace View
     ├── Header: Status Summary & Primary Action
     └── Content View: Cards with live health badges
 ```
 
-The **Component Hub** (§6) and **Audit Receipts** (§7) views below are design intent; they have no implementation and no navigation entry.
+The rail is named after what somebody wants rather than after how Fortiq is built. It carried
+"Backups", "Recovery" and "Recovery Kit" until the three of them were found to be one intention split
+three ways: telling them apart needed the product's architecture in your head, and the person reading
+that rail has usually just lost a file. Restoring and emergency recovery are now one destination;
+proving recovery moved to the sources, because it restores nothing anybody keeps and is a test of a
+source; and the receipt history moved out from behind a tab into Activity, beside the ledger check
+that says whether it can be believed.
+
+The **Component Hub** (§6) view below is design intent; it has no implementation and no navigation
+entry.
 
 ### 2.1 Zero-State & First-Run Experience (Eliminating Startup Errors)
 On a newly deployed machine where the background service has not yet produced `health.json`, the UI displays a clean, calming **Zero-State Onboarding Dashboard** rather than an intimidating error banner:

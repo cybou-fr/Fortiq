@@ -38,7 +38,6 @@ public sealed class MainWindow : Window
     };
 
     private readonly TextBlock _statusLabel = Text(string.Empty, 11, FontWeight.Normal, Muted);
-    private bool _historySelected;
     private RepositoryRowViewModel? _recoverySource;
     private RepositoryRowViewModel? _kitSource;
     private AuditChainStatus _auditChain = AuditChainStatus.NotChecked;
@@ -217,10 +216,15 @@ public sealed class MainWindow : Window
         // and it is offered as a button on the screens where it makes sense: the welcome card, the
         // dashboard header, and "+ Add source" on Backups, which is also the page that lists what is
         // already protected.
+        // Four destinations named after what somebody wants, not after how Fortiq is built. The old
+        // rail asked people to know the difference between Recovery, Recovery Kit and restoring
+        // files before they could pick one - three entries for one intention, at the moment they are
+        // least able to study an architecture. "Backups" went the same way: the noun says what Fortiq
+        // stores, and "Protected folders" says what they gave it.
         menu.Children.Add(Nav("Home", RenderHome));
-        menu.Children.Add(Nav("Backups", RenderBackups));
-        menu.Children.Add(Nav("Recovery", RenderRecovery));
-        menu.Children.Add(Nav("Recovery Kit", RenderRecoveryKit));
+        menu.Children.Add(Nav("Protected folders", RenderFolders));
+        menu.Children.Add(Nav("Restore", RenderRestore));
+        menu.Children.Add(Nav("Activity", RenderActivity));
         Grid.SetRow(menu, 1);
         rail.Children.Add(menu);
 
@@ -416,9 +420,9 @@ public sealed class MainWindow : Window
     {
         UpdateSidebarStatus();
 
-        if (_activeSection == "Backups") RenderBackups();
-        else if (_activeSection == "Recovery") RenderRecovery();
-        else if (_activeSection == "Recovery Kit") RenderRecoveryKit();
+        if (_activeSection == "Protected folders") RenderFolders();
+        else if (_activeSection == "Restore") RenderRestore();
+        else if (_activeSection == "Activity") RenderActivity();
         else if (_activeSection == "Settings") RenderSettings();
         else RenderHome();
     }
@@ -483,14 +487,14 @@ public sealed class MainWindow : Window
 
         // To the list, where the source with the problem is named and its own buttons are beside it.
         HeroStatusMode.AtRisk when _model.State is not (HealthStoreState.Corrupt or HealthStoreState.Stale)
-            => () => { RenderBackups(); return Task.CompletedTask; },
+            => () => { RenderFolders(); return Task.CompletedTask; },
 
         // To the drill, on the source that needs one - not to the first source in the list.
         HeroStatusMode.Unproven => () =>
         {
             _recoverySource = _model.Repositories.FirstOrDefault(row => row.Health.Verdict == HealthVerdict.Unproven)
                 ?? _model.Repositories.FirstOrDefault();
-            RenderRecovery();
+            RenderFolders();
             return Task.CompletedTask;
         },
 
@@ -740,30 +744,78 @@ public sealed class MainWindow : Window
     }
 
     // --- Screen 3: Backups & Activity ---
-    private void RenderBackups()
+    /// <summary>The folders somebody gave Fortiq, and what can be done to each of them.</summary>
+    private void RenderFolders()
     {
-        Select("Backups");
+        Select("Protected folders");
         var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
-        body.Children.Add(Header("Backups", "The folders Fortiq is protecting, and what it has done with them.", "Protect a folder", ProtectAsync));
+        body.Children.Add(Header(
+            "Protected folders",
+            "What Fortiq is keeping, and whether each one has been shown to come back.",
+            "Protect a folder",
+            ProtectAsync));
         AddBanners(body);
 
-        body.Children.Add(AuditLedgerCard());
+        body.Children.Add(BackupSourcesView());
 
-        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        tabs.Children.Add(Tab("Sources", !_historySelected, () => { _historySelected = false; RenderBackups(); }));
-        // Selecting the tab re-reads the receipts. The screen's own poll deliberately does not: a
-        // history is not a status, and re-reading every file on disk twice a minute to redraw a list
-        // nobody is looking at is work for its own sake.
-        tabs.Children.Add(Tab("History", _historySelected, () =>
+        // Proving recovery is something done to a source, so it lives with the sources rather than on
+        // a screen of its own that people had to know to look for.
+        _recoverySource = _model.Repositories.FirstOrDefault(item => item.Health.RepositoryId == _recoverySource?.Health.RepositoryId)
+            ?? _model.Repositories.FirstOrDefault();
+
+        if (_recoverySource is { } source)
         {
-            _historySelected = true;
-            _historyEvents = null;
-            RenderBackups();
-        }));
-        body.Children.Add(tabs);
+            if (_model.Repositories.Count > 1)
+            {
+                body.Children.Add(SourceSelector(
+                    "Recovery evidence for",
+                    "Protected source to prove recovery for",
+                    source,
+                    picked => { _recoverySource = picked; RenderFolders(); }));
+            }
 
-        body.Children.Add(_historySelected ? BackupHistoryView() : BackupSourcesView());
+            body.Children.Add(RecoveryHero(source));
+            body.Children.Add(RecoveryDetails(source));
+        }
+
         _page.Child = new ScrollViewer { Content = body };
+    }
+
+    /// <summary>Everything Fortiq has done, and whether that record can be trusted.</summary>
+    private void RenderActivity()
+    {
+        Select("Activity");
+        var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
+        body.Children.Add(Header("Activity", "Every backup, check, recovery drill and clean-up this PC has run."));
+        AddBanners(body);
+
+        // The ledger card belongs beside the history rather than above the source list: it says
+        // whether the history below it can be believed, which is a statement about these rows.
+        body.Children.Add(AuditLedgerCard());
+        body.Children.Add(BackupHistoryView());
+        _page.Child = new ScrollViewer { Content = body };
+    }
+
+    /// <summary>A labelled picker over the protected sources.</summary>
+    private StackPanel SourceSelector(string label, string automationName, RepositoryRowViewModel current, Action<RepositoryRowViewModel> pick)
+    {
+        var selector = new ComboBox
+        {
+            ItemsSource = _model.Repositories.Select(item => item.Title).ToArray(),
+            SelectedIndex = Math.Max(0, _model.Repositories.IndexOf(current)),
+            MinWidth = 260,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        selector.Named(automationName);
+        selector.SelectionChanged += (_, _) =>
+        {
+            if (selector.SelectedIndex >= 0)
+            {
+                pick(_model.Repositories[selector.SelectedIndex]);
+            }
+        };
+
+        return new StackPanel { Spacing = 6, Children = { Text(label, 12, FontWeight.SemiBold, Ink), selector } };
     }
 
     private Border AuditLedgerCard()
@@ -820,7 +872,7 @@ public sealed class MainWindow : Window
         verifyBtn.Click += async (_, _) =>
         {
             _auditLedgerVerifying = true;
-            RenderBackups();
+            RenderActivity();
             try
             {
                 var dir = FortiqStatePaths.Resolve().Receipts;
@@ -833,7 +885,7 @@ public sealed class MainWindow : Window
             finally
             {
                 _auditLedgerVerifying = false;
-                RenderBackups();
+                RenderActivity();
             }
         };
 
@@ -1055,9 +1107,9 @@ public sealed class MainWindow : Window
         finally
         {
             _historyLoading = false;
-            if (_activeSection == "Backups")
+            if (_activeSection == "Activity")
             {
-                RenderBackups();
+                RenderActivity();
             }
         }
     }
@@ -1074,69 +1126,6 @@ public sealed class MainWindow : Window
     };
 
     // --- Screen 4: Recovery Proof ---
-    private void RenderRecovery()
-    {
-        Select("Recovery");
-        _recoverySource = _model.Repositories.FirstOrDefault(item => item.Health.RepositoryId == _recoverySource?.Health.RepositoryId)
-            ?? _model.Repositories.FirstOrDefault();
-
-        var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
-        body.Children.Add(Header("Recovery", "Restore files from a recovery kit or run a recovery proof for a protected source."));
-        AddBanners(body);
-        if (_fileRecovery is not null)
-        {
-            var restoreFiles = Primary("Restore files from a recovery kit");
-            restoreFiles.Click += async (_, _) =>
-            {
-                await new FileRecoveryWindow(_fileRecovery()).ShowDialog(this);
-            };
-            body.Children.Add(restoreFiles);
-        }
-
-        if (_recoverySource is null)
-        {
-            var protect = Primary("Protect a folder");
-            protect.Click += async (_, _) => await ProtectAsync();
-            body.Children.Add(Card(new StackPanel
-            {
-                Spacing = 12,
-                Children =
-                {
-                    Text("Nothing to prove yet", 18, FontWeight.SemiBold, Ink),
-                    Text("A recovery drill restores a real backup and checks what came out. Protect a folder first.", 13, FontWeight.Normal, Muted),
-                    protect
-                }
-            }, Surface, Line, new Thickness(24)));
-            _page.Child = new ScrollViewer { Content = body };
-            return;
-        }
-
-        if (_model.Repositories.Count > 1)
-        {
-            var selector = new ComboBox
-            {
-                ItemsSource = _model.Repositories.Select(item => item.Title).ToArray(),
-                SelectedIndex = Math.Max(0, _model.Repositories.IndexOf(_recoverySource)),
-                MinWidth = 260,
-                HorizontalAlignment = HorizontalAlignment.Left
-            };
-            selector.Named("Protected source to prove recovery for");
-            selector.SelectionChanged += (_, _) =>
-            {
-                if (selector.SelectedIndex >= 0)
-                {
-                    _recoverySource = _model.Repositories[selector.SelectedIndex];
-                    RenderRecovery();
-                }
-            };
-            body.Children.Add(new StackPanel { Spacing = 6, Children = { Text("Protected source", 12, FontWeight.SemiBold, Ink), selector } });
-        }
-
-        body.Children.Add(RecoveryHero(_recoverySource));
-        body.Children.Add(RecoveryDetails(_recoverySource));
-        _page.Child = new ScrollViewer { Content = body };
-    }
-
     private Border RecoveryHero(RepositoryRowViewModel repository)
     {
         var proven = repository.Health.Facts.LastProvenRestoreAt;
@@ -1183,119 +1172,115 @@ public sealed class MainWindow : Window
         return Card(details, Surface, Line, new Thickness(20));
     }
 
-    // --- Screen 5: Recovery Kit ---
-    private void RenderRecoveryKit()
+    /// <summary>
+    /// One place to get files back, whichever way somebody has to do it.
+    /// </summary>
+    /// <remarks>
+    /// This was three destinations - Recovery, Recovery Kit, and a button inside the first of them -
+    /// and telling them apart needed the product's own architecture in your head. Somebody who has
+    /// just lost a file is the last person who should have to learn it. Both ways of getting data
+    /// back are here, in the order they are needed: from this PC, where Fortiq already knows where
+    /// everything is, and from a kit and 24 words, which is what works on a machine that has never
+    /// had Fortiq on it.
+    ///
+    /// Proving recovery is not here. It restores nothing anybody keeps; it is a test of a source, and
+    /// it lives with the sources.
+    /// </remarks>
+    private void RenderRestore()
     {
-        Select("Recovery Kit");
+        Select("Restore");
         _kitSource = _model.Repositories.FirstOrDefault(item => item.Health.RepositoryId == _kitSource?.Health.RepositoryId)
             ?? _model.Repositories.FirstOrDefault();
 
         var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
-        body.Children.Add(Header("Recovery Kit", "Emergency offline material required to restore files on an independent machine."));
+        body.Children.Add(Header("Restore", "Getting your files back, on this PC or on a machine that has never had Fortiq."));
+        AddBanners(body);
 
-        if (_kitSource is null)
-        {
-            var protect = Primary("Protect a folder");
-            protect.Click += async (_, _) => await ProtectAsync();
-            body.Children.Add(Card(new StackPanel
-            {
-                Spacing = 12,
-                Children =
-                {
-                    Text("No recovery kit yet", 18, FontWeight.SemiBold, Ink),
-                    Text("Protecting a folder writes one, alongside the backups themselves. It is what opens them on another computer.", 13, FontWeight.Normal, Muted, true),
-                    protect
-                }
-            }, Surface, Line, new Thickness(24)));
-            _page.Child = new ScrollViewer { Content = body };
-            return;
-        }
-
-        // Recovery has offered this since it was written; this screen never did, so a machine
-        // protecting three folders showed the kit of whichever came first and gave no way to reach
-        // the other two - on the screen whose subject is what opens a repository elsewhere.
-        if (_model.Repositories.Count > 1)
-        {
-            var selector = new ComboBox
-            {
-                ItemsSource = _model.Repositories.Select(item => item.Title).ToArray(),
-                SelectedIndex = Math.Max(0, _model.Repositories.IndexOf(_kitSource)),
-                MinWidth = 260,
-                HorizontalAlignment = HorizontalAlignment.Left
-            };
-            selector.Named("Protected source to show the recovery kit for");
-            selector.SelectionChanged += (_, _) =>
-            {
-                if (selector.SelectedIndex >= 0)
-                {
-                    _kitSource = _model.Repositories[selector.SelectedIndex];
-                    RenderRecoveryKit();
-                }
-            };
-            body.Children.Add(new StackPanel { Spacing = 6, Children = { Text("Protected source", 12, FontWeight.SemiBold, Ink), selector } });
-        }
-
-        var present = _kitSource.Health.Facts.KitPresent;
-        body.Children.Add(Card(new StackPanel
-        {
-            Spacing = 8,
-            Children =
-            {
-                // "Found", not "verified". Fortiq has seen the files; whether they open is what the
-                // recovery drill answers, and the button for that is further down this screen.
-                Text(present ? "Recovery kit found" : "Recovery kit is missing", 20, FontWeight.SemiBold, present ? Recoverable : Failure),
-                Text(present
-                        ? "The offline material for this repository is where Fortiq expects it. A recovery drill is what shows it works."
-                        : "Without it, this repository cannot be opened on another machine. Protect the folder again to write a new kit.",
-                    13, FontWeight.Normal, Muted, true),
-                Text($"Repository: {_kitSource.Health.RepositoryId}", 11, FontWeight.Normal, Muted, true)
-            }
-        }, present ? RecoverableSurface : AtRiskSurface, present ? Recoverable : AtRisk, new Thickness(22)));
-
-        // What used to stand here was a card headed "Disaster Recovery Secret (BIP-39)" showing a row
-        // of dots and a "Show Mnemonic" button - built, on this screen, around a null phrase. It
-        // revealed an empty grid, because Fortiq does not keep the words and never did. The screen
-        // was teaching the opposite of the design it exists to explain, and somebody could reasonably
-        // have left the words unwritten believing the application held a copy.
-        body.Children.Add(Card(new StackPanel
-        {
-            Spacing = 10,
-            Children =
-            {
-                Text("Fortiq does not have your 24 words", 16, FontWeight.SemiBold, Caution),
-                Text("They were shown once, while the folder was being protected, and were never stored - "
-                    + "not on this PC, not by Fortiq. That is what makes the backups yours: nobody else can open them. "
-                    + "It also means nobody can give them back to you.", 13, FontWeight.Normal, Muted, true),
-                Text("Take the paper out and read it back today, while the backups still work. "
-                    + "A word you cannot read is the same as a word you do not have.", 13, FontWeight.Normal, Ink, true)
-            }
-        }, UnprovenSurface, UnprovenLine, new Thickness(20)));
-
-        // It opens the drill screen; it does not run a drill. A button that says it verified
-        // something, and did not, is the same mistake as the tray's old "Verify Backups Now".
-        var verifyBtn = Primary("Go to recovery drill");
-        verifyBtn.IsEnabled = present && _kitSource.CanProveRecovery;
-        verifyBtn.Click += (_, _) => { _recoverySource = _kitSource; RenderRecovery(); };
-
-        body.Children.Add(Card(new StackPanel
-        {
-            Spacing = 12,
-            Children =
-            {
-                Text("To restore on a computer that has never had Fortiq", 16, FontWeight.SemiBold, Ink),
-                Check("The repository - the folder, drive or bucket holding the backups"),
-                Check("This recovery kit folder, copied onto that machine"),
-                Check("Your 24 words, typed in from paper"),
-                Text("The recover folder in the Fortiq package does this without installing anything. "
-                    + "RECOVERY-GUIDE.md walks through it.", 12, FontWeight.Normal, Muted, true),
-                verifyBtn
-            }
-        }, Surface, Line, new Thickness(20)));
+        body.Children.Add(RestoreFilesCard());
+        body.Children.Add(EmergencyRecoveryCard());
 
         _page.Child = new ScrollViewer { Content = body };
     }
 
-    // --- Screen 6: Settings ---
+    /// <summary>Getting files back with the kit, which is what the file recovery window does.</summary>
+    private Border RestoreFilesCard()
+    {
+        var body = new StackPanel { Spacing = 12 };
+        body.Children.Add(Text("Restore files", 16, FontWeight.SemiBold, Ink));
+        body.Children.Add(Text(
+            "Pick a backup by the date it was taken and write its files into a new folder. Nothing you "
+            + "already have is overwritten: Fortiq refuses a destination that is not empty.",
+            12, FontWeight.Normal, Muted, true));
+
+        if (_fileRecovery is not null)
+        {
+            var restoreFiles = Primary("Restore files").Named("Restore files from a backup");
+            restoreFiles.Click += async (_, _) => await new FileRecoveryWindow(_fileRecovery()).ShowDialog(this);
+            body.Children.Add(restoreFiles);
+        }
+        else
+        {
+            body.Children.Add(Text("This build has no file recovery window wired up.", 12, FontWeight.Normal, Caution, true));
+        }
+
+        return Card(body, Surface, Line, new Thickness(20));
+    }
+
+    /// <summary>
+    /// What it takes to open a repository somewhere else, and the one thing Fortiq cannot give back.
+    /// </summary>
+    /// <remarks>
+    /// The sentence about Fortiq not holding the 24 words is the most important thing this product
+    /// says about itself, so it stays on a screen somebody reaches in one click rather than being
+    /// filed under a source.
+    /// </remarks>
+    private Border EmergencyRecoveryCard()
+    {
+        var body = new StackPanel { Spacing = 12 };
+        body.Children.Add(Text("Recovery on another computer", 16, FontWeight.SemiBold, Ink));
+        body.Children.Add(Text(
+            "If this PC is gone, your backups are still openable - by anybody holding these three things, "
+            + "and by nobody else.", 12, FontWeight.Normal, Muted, true));
+
+        body.Children.Add(Check("The repository - the folder, drive or bucket holding the backups"));
+        body.Children.Add(Check("The recovery kit folder, copied onto that machine"));
+        body.Children.Add(Check("Your 24 words, typed in from paper"));
+
+        body.Children.Add(Text(
+            "Fortiq does not have your 24 words. They were shown once, while the folder was being "
+            + "protected, and were never stored - not on this PC, not by Fortiq. That is what makes the "
+            + "backups yours: nobody else can open them. It also means nobody can give them back to you.",
+            12, FontWeight.SemiBold, Caution, true));
+
+        body.Children.Add(Text(
+            "The recover folder in the Fortiq package does this without installing anything, and "
+            + "RECOVERY-GUIDE.md walks through it.", 12, FontWeight.Normal, Muted, true));
+
+        if (_kitSource is { } source)
+        {
+            if (_model.Repositories.Count > 1)
+            {
+                body.Children.Add(SourceSelector(
+                    "Recovery kit for",
+                    "Protected source to show the recovery kit for",
+                    source,
+                    picked => { _kitSource = picked; RenderRestore(); }));
+            }
+
+            var present = source.Health.Facts.KitPresent;
+            body.Children.Add(Text(
+                present
+                    // "Found", not "verified". Fortiq has seen the files; whether they open is what a
+                    // recovery drill answers, and that lives with the sources.
+                    ? $"Recovery kit found for {source.Title}. Keep a copy of it somewhere other than this PC."
+                    : $"The recovery kit for {source.Title} is missing. Without it this repository cannot be "
+                        + "opened on another machine. Protect the folder again to write a new one.",
+                12, FontWeight.SemiBold, present ? Recoverable : Failure, true));
+        }
+
+        return Card(body, Surface, Line, new Thickness(20));
+    }
+
     private void RenderSettings()
     {
         Select("Settings");
