@@ -140,6 +140,10 @@ public sealed class SourceSettingsWindow : Window
         var minute = Number("Minute", _model.BackupMinute, 0, 59, value => { _model.BackupMinute = value; Describe(); });
         Describe();
         hour.IsEnabled = minute.IsEnabled = _model.Details?.Settings.UpdateBackupTime == true;
+<<<<<<< HEAD
+=======
+        if (!hour.IsEnabled) summary.Text = "Custom schedule — preserved when saving other settings.";
+>>>>>>> c812cf8226017486fb7d620438d2af3f88a06041
 
         return Card(new StackPanel
         {

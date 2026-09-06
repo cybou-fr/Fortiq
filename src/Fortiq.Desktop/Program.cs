@@ -316,8 +316,12 @@ public sealed class FortiqApplication : Avalonia.Application
             clearLocalLock: OperatingSystem.IsWindows()
                 ? new StaleLockRecovery(engineRoot, paths.Working,
                     runDirectory: paths.Runs, receiptDirectory: paths.Receipts, storage: storage).ClearAsync
+<<<<<<< HEAD
                 : null,
             elevate: SourceSettingsElevation.RunIfNeededAsync);
+=======
+                : null);
+>>>>>>> c812cf8226017486fb7d620438d2af3f88a06041
 
         var settings = new SettingsViewModel(paths.Root, Path.Combine(paths.Root, "logs"));
         if (!installed) settings.ServiceStatus = "Portable mode";
