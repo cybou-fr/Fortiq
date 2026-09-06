@@ -43,6 +43,12 @@ foreach ($component in @(@{Folder='desktop'; Project='Fortiq.Desktop'}, @{Folder
     if (-not (Test-Path -LiteralPath (Join-Path $componentOutput 'Fortiq.PasswordHelper.exe'))) {
         throw 'The published password helper is missing; this bundle is incomplete.'
     }
+    # Debug symbols do not ship. They were 101 MB of a 463 MB bundle - almost a quarter of what
+    # somebody downloads - and nobody in the field can use them. They also carry the build machine's
+    # own layout: every .pdb embedded the developer's home directory as the source root, published
+    # to whoever opens the archive.
+    Get-ChildItem -LiteralPath $componentOutput -Filter '*.pdb' -File | Remove-Item -Force
+
     $engineOutput = Join-Path $componentOutput 'engines'
     $binaryOutput = Join-Path $engineOutput $entry.relativePath
     New-Item -ItemType Directory -Path (Split-Path $binaryOutput -Parent) -Force | Out-Null

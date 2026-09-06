@@ -70,7 +70,43 @@ $archiveName = "Fortiq-Community-$($version.Archive)-$Runtime.zip"
 
 Write-Host "Packaging $archiveName"
 $communityZip = Join-Path $OutputDirectory $archiveName
-Compress-Archive -Path "$bundleDirectory\*" -DestinationPath $communityZip -Force
+if (Test-Path $communityZip) { Remove-Item -LiteralPath $communityZip -Force }
+
+# Written entry by entry, with the names normalised by hand. Neither of the obvious ways works here:
+# Compress-Archive stores the separator it found on disk, and ZipFile.CreateFromDirectory on .NET
+# Framework - which is what Windows PowerShell runs - uses Path.DirectorySeparatorChar too. Both
+# produced 695 entries named "desktop\Avalonia.Base.dll".
+#
+# The ZIP format requires forward slashes (APPNOTE 4.4.17.1). A tool that follows it reads that name
+# as one file with a backslash in it rather than a file inside a folder, so the archive extracts as a
+# heap of oddly named files with no directories. For a package whose whole promise is that it opens
+# on a machine you have never seen, shipping one only Windows Explorer can read is the wrong defect.
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [System.IO.Compression.ZipFile]::Open($communityZip, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+    $prefix = (Resolve-Path $bundleDirectory).Path.TrimEnd([char]92) + [char]92
+    foreach ($file in Get-ChildItem -LiteralPath $bundleDirectory -Recurse -File | Sort-Object FullName) {
+        $name = $file.FullName.Substring($prefix.Length).Replace([char]92, '/')
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $archive, $file.FullName, $name, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
+}
+finally {
+    $archive.Dispose()
+}
+
+# Read back before anything downstream trusts it. A packaging step that cannot be checked is a
+# packaging step that goes wrong quietly.
+$written = [System.IO.Compression.ZipFile]::OpenRead($communityZip)
+try {
+    $malformed = @($written.Entries | Where-Object { $_.FullName -like '*\*' }).Count
+    if ($malformed -gt 0) { throw "$malformed archive entries use backslash separators; this archive will not extract correctly off Windows." }
+    Write-Host "Packaged $($written.Entries.Count) entries"
+}
+finally {
+    $written.Dispose()
+}
 
 Move-Item (Join-Path $sbomDirectory 'sbom.json') (Join-Path $OutputDirectory 'sbom.json')
 Remove-Item -Recurse -Force $sbomDirectory, $tools
