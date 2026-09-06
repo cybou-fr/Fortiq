@@ -14,6 +14,28 @@ public interface IScheduleStore
     Task WriteStateAsync(ScheduleState state, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// The parts of a schedule a person changes from the application, and nothing else.
+/// </summary>
+/// <remarks>
+/// Deliberately not the whole <see cref="BackupSchedule"/>. The repository, the kit and the source
+/// are what the schedule is about: changing them here would not move a backup, it would point the
+/// same history at different data, and the honest way to protect a different folder is to protect a
+/// different folder. What is left is when it runs, whether it runs, how often recovery is proven, and
+/// what may be forgotten.
+/// </remarks>
+/// <param name="Enabled">False pauses the schedule without forgetting anything about it.</param>
+/// <param name="BackupTime">The time of day the daily backup runs, in this machine's time zone.</param>
+/// <param name="DrillEvery">How often recovery is proven unattended. Null turns drills off.</param>
+/// <param name="Retention">What to keep. Null keeps everything, forever, which is the default.</param>
+/// <param name="Prune">Whether forgotten snapshots also have their data removed from the repository.</param>
+public sealed record SchedulePreferences(
+    bool Enabled,
+    TimeOnly BackupTime,
+    TimeSpan? DrillEvery,
+    RetentionPolicy? Retention,
+    PruneMode Prune);
+
 /// <summary>A schedule file that could not safely participate in the latest read.</summary>
 public sealed record ScheduleLoadIssue(string FileName, string Failure);
 
@@ -133,6 +155,160 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
         var temporary = path + ".partial";
         await File.WriteAllTextAsync(temporary, document.ToJsonString(Options), cancellationToken);
         File.Move(temporary, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// Applies the settings somebody chose to an existing schedule file.
+    /// </summary>
+    /// <remarks>
+    /// The document on disk is edited rather than replaced. A schedule file is something a person may
+    /// have written or extended by hand - a weekday list, a field a later version will understand -
+    /// and rewriting it from the fields this screen knows about would silently discard the rest.
+    ///
+    /// Written whole and moved into place, like the state file: a schedule read halfway through a
+    /// write is a schedule with no recurrence, and the reader would report the file as broken.
+    /// </remarks>
+    public async Task UpdateAsync(string scheduleId, SchedulePreferences preferences, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scheduleId);
+        ArgumentNullException.ThrowIfNull(preferences);
+
+        if (preferences.Retention is { } requested && !requested.KeepsSomething)
+        {
+            // The same refusal the reader makes, made before anything is written. A policy that keeps
+            // nothing is an instruction to delete every backup, and it must never be arrived at by a
+            // form somebody left empty.
+            throw new InvalidDataException(
+                "A retention policy that keeps nothing is deletion, not retention. Leave retention off to keep everything.");
+        }
+
+        var path = SchedulePath(scheduleId);
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(path, cancellationToken))
+            ?? throw new InvalidDataException($"The schedule in {Path.GetFileName(path)} is empty.");
+
+        document["enabled"] = preferences.Enabled;
+
+        // The recurrence is replaced rather than edited in place: switching a schedule from an
+        // interval to a daily time would otherwise leave the interval's period beside the new fields,
+        // and the reader takes the kind at its word.
+        var recurrence = new JsonObject
+        {
+            ["kind"] = "dailyAt",
+            ["timeOfDay"] = preferences.BackupTime.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+            ["timeZone"] = TimeZoneInfo.Local.Id
+        };
+
+        // A weekday restriction somebody wrote by hand is theirs, and the screen has no field for it.
+        if (document["recurrence"] is JsonNode existing
+            && existing["kind"]?.GetValue<string>() == "dailyAt"
+            && existing["days"] is JsonArray days)
+        {
+            recurrence["days"] = days.DeepClone();
+        }
+
+        document["recurrence"] = recurrence;
+
+        if (preferences.DrillEvery is { } drill)
+        {
+            document["drillRecurrence"] = new JsonObject
+            {
+                ["kind"] = "interval",
+                ["period"] = drill.ToString("c", System.Globalization.CultureInfo.InvariantCulture)
+            };
+        }
+        else
+        {
+            document.AsObject().Remove("drillRecurrence");
+        }
+
+        if (preferences.Retention is { } retention)
+        {
+            // Retention needs both halves. The recurrence is put beside the policy here so a screen
+            // cannot produce the one shape the reader treats as unconfigured.
+            document["retentionRecurrence"] = new JsonObject
+            {
+                ["kind"] = "interval",
+                ["period"] = TimeSpan.FromDays(1).ToString("c", System.Globalization.CultureInfo.InvariantCulture)
+            };
+
+            var policy = new JsonObject();
+            if (retention.KeepLast is { } last) policy["keepLast"] = last;
+            if (retention.KeepDaily is { } daily) policy["keepDaily"] = daily;
+            if (retention.KeepWeekly is { } weekly) policy["keepWeekly"] = weekly;
+            if (retention.KeepMonthly is { } monthly) policy["keepMonthly"] = monthly;
+            if (retention.KeepYearly is { } yearly) policy["keepYearly"] = yearly;
+            if (retention.KeepWithin is { } within)
+            {
+                policy["keepWithin"] = within.ToString("c", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            document["retention"] = policy;
+            document["prune"] = preferences.Prune == PruneMode.ForgetAndPrune;
+        }
+        else
+        {
+            // Both halves go, so what is left cannot be read as retention by any later version.
+            document.AsObject().Remove("retentionRecurrence");
+            document.AsObject().Remove("retention");
+            document.AsObject().Remove("prune");
+        }
+
+        // Read back before it is committed. The reader is the authority on what a schedule file means,
+        // and a document this method could write but the service could not read would stop the backups
+        // it was meant to adjust.
+        _ = ReadSchedule(document, Path.GetFileName(path));
+
+        var temporary = path + ".partial";
+        await File.WriteAllTextAsync(temporary, document.ToJsonString(Options), cancellationToken);
+        File.Move(temporary, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// Stops protecting a source: the schedule and its histories go, and nothing else does.
+    /// </summary>
+    /// <remarks>
+    /// The repository, the recovery kit and the receipts are left exactly where they are. Somebody who
+    /// stops backing a folder up has not asked to lose the backups they already have, and a product
+    /// whose whole claim is that data comes back must not be the thing that deletes it. What was
+    /// backed up stays openable with the recovery kit and the 24 words for as long as it exists.
+    /// </remarks>
+    public Task RemoveAsync(string scheduleId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scheduleId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var path = SchedulePath(scheduleId);
+        File.Delete(path);
+
+        // The backup's history and the drill's and retention's alongside it. Left behind, they would
+        // be adopted by the next schedule given the same id, which would start life believing it had
+        // already run.
+        foreach (var stateId in new[] { scheduleId, scheduleId + ".drill", scheduleId + ".retention" })
+        {
+            var statePath = Path.Combine(_state, stateId + ".json");
+            if (File.Exists(statePath))
+            {
+                File.Delete(statePath);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private string SchedulePath(string scheduleId)
+    {
+        if (!SafeId(scheduleId))
+        {
+            throw new InvalidDataException("A schedule ID must be letters, digits, '.', '_' or '-'.");
+        }
+
+        var path = Path.Combine(_schedules, scheduleId + ".json");
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException($"No schedule on this machine has the id '{scheduleId}'.", path);
+        }
+
+        return path;
     }
 
     private string StatePath(string scheduleId)

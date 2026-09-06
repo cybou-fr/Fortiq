@@ -17,6 +17,10 @@ namespace Fortiq.Desktop;
 public sealed class MainWindow : Window
 {
     private readonly Func<FileRecoveryViewModel>? _fileRecovery;
+    private readonly Func<string, string, SourceSettingsViewModel>? _sourceSettings;
+    private readonly Func<Task<IReadOnlyList<ReceiptEvent>>>? _history;
+    private IReadOnlyList<ReceiptEvent>? _historyEvents;
+    private bool _historyLoading;
     private readonly bool _installed;
     private readonly RepositoriesViewModel _model;
     private readonly SettingsViewModel _settings;
@@ -44,11 +48,22 @@ public sealed class MainWindow : Window
     private readonly DesktopPreferencesStore _preferences;
     private bool _isExplicitExit;
 
+    /// <summary>
+    /// True while a raised instance is doing the work. Busy on the view model does not cover it: the
+    /// operation is happening in another process, so this window stays idle and its buttons stay live
+    /// unless something says otherwise.
+    /// </summary>
+    private bool _elevating;
+
     public MainWindow(
         RepositoriesViewModel model,
         Func<ProtectRepositoryViewModel>? wizard = null,
-        SettingsViewModel? settings = null, bool installed = false, Func<FileRecoveryViewModel>? fileRecovery = null)
+        SettingsViewModel? settings = null, bool installed = false, Func<FileRecoveryViewModel>? fileRecovery = null,
+        Func<string, string, SourceSettingsViewModel>? sourceSettings = null,
+        Func<Task<IReadOnlyList<ReceiptEvent>>>? history = null)
     {
+        _sourceSettings = sourceSettings;
+        _history = history;
         _installed = installed;
         _fileRecovery = fileRecovery;
         _model = model ?? throw new ArgumentNullException(nameof(model));
@@ -93,7 +108,10 @@ public sealed class MainWindow : Window
         var refreshTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         refreshTimer.Tick += async (_, _) =>
         {
-            if (!_model.Busy) await RefreshAsync();
+            // Not while something is running. A refresh clears the last failure, and a poll that
+            // landed between somebody reading a failed backup and acting on it would take the message
+            // off the screen for them.
+            if (!_model.Busy && !_elevating) await RefreshAsync();
         };
         Opened += (_, _) => refreshTimer.Start();
 
@@ -297,6 +315,84 @@ public sealed class MainWindow : Window
         _updateTrayStatus?.Invoke(label);
     }
 
+    /// <summary>
+    /// The last failure, where the person who caused it is looking.
+    /// </summary>
+    /// <remarks>
+    /// The view model keeps a failed operation's reason deliberately, putting it back after the
+    /// refresh so it survives. Nothing displayed it: the dashboard showed the failure text only while
+    /// the health report itself was unreadable, so a backup or a drill that failed reported the
+    /// failure to a screen that never drew it, and the button looked as though it had worked.
+    /// </remarks>
+    private Border? NoticeBanner()
+    {
+        if (_model.Failure is not { Length: > 0 } failure)
+        {
+            return null;
+        }
+
+        var dismiss = Secondary("Dismiss");
+        dismiss.Padding = new Thickness(10, 4);
+        dismiss.FontSize = 11;
+        dismiss.VerticalAlignment = VerticalAlignment.Top;
+        dismiss.Click += (_, _) => { _model.ClearFailure(); RenderActive(); };
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 12 };
+        grid.Children.Add(new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                Text("That did not work", 14, FontWeight.SemiBold, Failure),
+                Text(failure, 12, FontWeight.Normal, Ink, true)
+            }
+        });
+        Grid.SetColumn(dismiss, 1);
+        grid.Children.Add(dismiss);
+
+        return Card(grid, AtRiskSurface, AtRiskLine, new Thickness(18, 14));
+    }
+
+    /// <summary>What is running right now, said out loud, so a disabled screen is not a hung one.</summary>
+    private Border? ActivityBanner()
+    {
+        // The elevated case first: the work is happening in another process, so nothing on this view
+        // model is busy and only this window knows anything is going on at all.
+        var running = _elevating
+            ? "Running with administrator permission…"
+            : _model.Activity;
+
+        if (running is not { Length: > 0 })
+        {
+            return null;
+        }
+
+        return Card(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Children =
+            {
+                new ProgressBar { IsIndeterminate = true, Width = 120, VerticalAlignment = VerticalAlignment.Center },
+                Text(running, 13, FontWeight.SemiBold, Ink)
+            }
+        }, InfoSurface, InfoLine, new Thickness(18, 12));
+    }
+
+    /// <summary>Puts the running and failed banners at the top of a screen, when there are any.</summary>
+    private void AddBanners(StackPanel body)
+    {
+        if (ActivityBanner() is { } activity)
+        {
+            body.Children.Add(activity);
+        }
+
+        if (NoticeBanner() is { } notice)
+        {
+            body.Children.Add(notice);
+        }
+    }
+
     private void RenderActive()
     {
         UpdateSidebarStatus();
@@ -341,6 +437,7 @@ public sealed class MainWindow : Window
             "Your backups, and whether they have been proven to come back.",
             "Protect a folder",
             ProtectAsync));
+        AddBanners(body);
 
         var (mode, headline, desc, actionText) = ResolveHeroState();
         body.Children.Add(new HeroHealthBanner(mode, headline, desc, actionText, RefreshAsync));
@@ -500,10 +597,22 @@ public sealed class MainWindow : Window
             });
             row.Children.Add(At(Text(repository.Summary, 12, FontWeight.Normal, Muted, true), 1));
 
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+
+            if (_model.CanBackupNow)
+            {
+                var backup = Secondary("Back up now");
+                backup.IsEnabled = !_model.Busy && !_elevating;
+                backup.Click += async (_, _) => await BackupNowAsync(repository);
+                actions.Children.Add(backup);
+            }
+
             var prove = Secondary(repository.Health.Verdict == HealthVerdict.Recoverable ? "Proven" : "Prove recovery");
-            prove.IsEnabled = repository.CanProveRecovery && !_model.Busy;
+            prove.IsEnabled = repository.CanProveRecovery && !_model.Busy && !_elevating;
             prove.Click += async (_, _) => await ProveAsync(repository);
-            row.Children.Add(At(prove, 2));
+            actions.Children.Add(prove);
+
+            row.Children.Add(At(actions, 2));
 
             list.Children.Add(row);
         }
@@ -557,12 +666,21 @@ public sealed class MainWindow : Window
         Select("Backups");
         var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
         body.Children.Add(Header("Backups", "The folders Fortiq is protecting, and what it has done with them.", "Protect a folder", ProtectAsync));
+        AddBanners(body);
 
         body.Children.Add(AuditLedgerCard());
 
         var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         tabs.Children.Add(Tab("Sources", !_historySelected, () => { _historySelected = false; RenderBackups(); }));
-        tabs.Children.Add(Tab("History", _historySelected, () => { _historySelected = true; RenderBackups(); }));
+        // Selecting the tab re-reads the receipts. The screen's own poll deliberately does not: a
+        // history is not a status, and re-reading every file on disk twice a minute to redraw a list
+        // nobody is looking at is work for its own sake.
+        tabs.Children.Add(Tab("History", _historySelected, () =>
+        {
+            _historySelected = true;
+            _historyEvents = null;
+            RenderBackups();
+        }));
         body.Children.Add(tabs);
 
         body.Children.Add(_historySelected ? BackupHistoryView() : BackupSourcesView());
@@ -710,14 +828,43 @@ public sealed class MainWindow : Window
             };
             row.Children.Add(At(Text(statusLabel, 12, FontWeight.SemiBold, statusColor), 3));
 
+            // Both actions live in one cell. A column per button left the row's shape depending on
+            // which buttons that row happened to show, so the columns stopped lining up down the list.
+            var rowActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+
+            if (_model.CanBackupNow)
+            {
+                var backupBtn = Secondary("Back up now");
+                backupBtn.Padding = new Thickness(10, 4);
+                backupBtn.FontSize = 11;
+                backupBtn.IsEnabled = !_model.Busy && !_elevating;
+                backupBtn.Click += async (_, _) => await BackupNowAsync(repository);
+                rowActions.Children.Add(backupBtn);
+            }
+
             if (repository.CanProveRecovery && repository.Health.Verdict != HealthVerdict.Recoverable)
             {
                 var proveBtn = Secondary("Prove");
                 proveBtn.Padding = new Thickness(10, 4);
                 proveBtn.FontSize = 11;
-                proveBtn.IsEnabled = !_model.Busy;
+                proveBtn.IsEnabled = !_model.Busy && !_elevating;
                 proveBtn.Click += async (_, _) => await ProveAsync(repository);
-                row.Children.Add(At(proveBtn, 4));
+                rowActions.Children.Add(proveBtn);
+            }
+
+            if (_sourceSettings is not null)
+            {
+                var settingsBtn = Secondary("Settings");
+                settingsBtn.Padding = new Thickness(10, 4);
+                settingsBtn.FontSize = 11;
+                settingsBtn.IsEnabled = !_model.Busy && !_elevating;
+                settingsBtn.Click += async (_, _) => await OpenSourceSettingsAsync(repository);
+                rowActions.Children.Add(settingsBtn);
+            }
+
+            if (rowActions.Children.Count > 0)
+            {
+                row.Children.Add(At(rowActions, 4));
             }
 
             list.Children.Add(row);
@@ -725,20 +872,38 @@ public sealed class MainWindow : Window
         return Card(list, Surface, Line, new Thickness(20));
     }
 
+    /// <summary>
+    /// The history the receipts actually record, rather than a summary of the newest of each kind.
+    /// </summary>
+    /// <remarks>
+    /// What stood here was three rows per repository - last backup, last check, last proven restore -
+    /// built from the same three timestamps shown on the dashboard above it, each one labelled with a
+    /// result that was true by construction ("Completed", "Healthy", "Verified"). A failed drill, a
+    /// backup that could not reach its repository, a retention run that deleted snapshots: none of it
+    /// appeared, although every one of those events had been written to disk and chained.
+    ///
+    /// This reads the receipts. A failure is a row, and the row says so.
+    /// </remarks>
     private Border BackupHistoryView()
     {
-        var events = _model.Repositories
-            .SelectMany(repository => new (DateTimeOffset? At, string Source, string Operation, string Result)[]
-            {
-                (repository.Health.Facts.LastBackupAt, repository.Title, "Backup", "Completed"),
-                (repository.Health.Facts.LastHealthyCheckAt, repository.Title, "Integrity check", "Healthy"),
-                (repository.Health.Facts.LastProvenRestoreAt, repository.Title, "Proven restore", "Verified")
-            })
-            .Where(item => item.At is not null)
-            .OrderByDescending(item => item.At)
-            .ToArray();
+        if (_history is null)
+        {
+            return Card(Text("This build has no receipt reader wired to the history view.", 13, FontWeight.Normal, Muted, true),
+                Surface, Line, new Thickness(24));
+        }
 
-        if (events.Length == 0)
+        if (_historyEvents is null)
+        {
+            if (!_historyLoading)
+            {
+                _historyLoading = true;
+                _ = LoadHistoryAsync();
+            }
+
+            return Card(Text("Reading the receipts…", 13, FontWeight.Normal, Muted), Surface, Line, new Thickness(24));
+        }
+
+        if (_historyEvents.Count == 0)
         {
             return Card(new StackPanel
             {
@@ -746,19 +911,87 @@ public sealed class MainWindow : Window
                 Children =
                 {
                     Text("Nothing has run yet", 18, FontWeight.SemiBold, Ink),
-                    Text("Every backup and every recovery drill is recorded here once the first one has run.", 13, FontWeight.Normal, Muted)
+                    Text("Every backup, integrity check, recovery drill and retention run is recorded here once the first one has run.", 13, FontWeight.Normal, Muted, true)
                 }
             }, Surface, Line, new Thickness(24));
         }
 
+        var titles = _model.Repositories.ToDictionary(
+            repository => repository.Health.RepositoryId,
+            repository => repository.Title,
+            StringComparer.OrdinalIgnoreCase);
+
         var list = new StackPanel { Spacing = 4 };
         list.Children.Add(TableRow("Time", "Source", "Operation", "Result", true));
-        foreach (var item in events)
+
+        foreach (var entry in _historyEvents)
         {
-            list.Children.Add(TableRow(Relative(item.At), item.Source, item.Operation, item.Result));
+            var source = titles.TryGetValue(entry.RepositoryId, out var title) ? title : entry.RepositoryId;
+            list.Children.Add(TableRow(
+                Relative(entry.CompletedAt),
+                source,
+                OperationName(entry.Operation),
+                entry.Succeeded ? "Succeeded" : "Failed"));
+
+            if (!entry.Succeeded && entry.Detail is { Length: > 0 } detail)
+            {
+                var reason = Text(detail, 11, FontWeight.Normal, Muted, true);
+                reason.Margin = new Thickness(0, 0, 0, 6);
+                list.Children.Add(reason);
+            }
         }
-        return Card(list, Surface, Line, new Thickness(20));
+
+        var unverifiable = _historyEvents.Count(entry => !entry.Verifiable);
+        var body = new StackPanel { Spacing = 12 };
+        body.Children.Add(list);
+
+        if (unverifiable > 0)
+        {
+            // Shown rather than hidden, and never counted as evidence: a receipt written before the
+            // chained schema carries no hash, so a file claiming a restore succeeded cannot be told
+            // apart from one somebody wrote.
+            body.Children.Add(Text(
+                $"{unverifiable} of these entries were written before Fortiq chained its receipts. They are history, "
+                + "not evidence: nothing about them can be checked. A fresh backup and drill replace them.",
+                11, FontWeight.Normal, Caution, true));
+        }
+
+        return Card(body, Surface, Line, new Thickness(20));
     }
+
+    private async Task LoadHistoryAsync()
+    {
+        try
+        {
+            _historyEvents = await _history!();
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            // An unreadable receipt directory is worth saying out loud on the screen whose subject is
+            // the receipts.
+            _historyEvents = [];
+            _model.ReportReadFailure(PlainFailure.Describe(error));
+        }
+        finally
+        {
+            _historyLoading = false;
+            if (_activeSection == "Backups")
+            {
+                RenderBackups();
+            }
+        }
+    }
+
+    /// <summary>The operation as somebody who did not write the receipt would name it.</summary>
+    private static string OperationName(string operation) => operation switch
+    {
+        "backup" => "Backup",
+        "check" => "Integrity check",
+        "restoreProof" => "Recovery drill",
+        "restore" => "Restore",
+        "retention" => "Retention",
+        _ => operation
+    };
 
     // --- Screen 4: Recovery Proof ---
     private void RenderRecovery()
@@ -769,6 +1002,7 @@ public sealed class MainWindow : Window
 
         var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
         body.Children.Add(Header("Recovery", "Restore files from a recovery kit or run a recovery proof for a protected source."));
+        AddBanners(body);
         if (_fileRecovery is not null)
         {
             var restoreFiles = Primary("Restore files from a recovery kit");
@@ -830,7 +1064,7 @@ public sealed class MainWindow : Window
         var accent = current ? Recoverable : Unproven;
 
         var run = Primary(_model.Busy ? "Running restore drill…" : "Run recovery proof now");
-        run.IsEnabled = repository.CanProveRecovery && !_model.Busy;
+        run.IsEnabled = repository.CanProveRecovery && !_model.Busy && !_elevating;
         run.Click += async (_, _) => await ProveAsync(repository);
 
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
@@ -1179,14 +1413,112 @@ public sealed class MainWindow : Window
 
     private async Task ProveAsync(RepositoryRowViewModel repository)
     {
-        if (await EnsurePrivilegesAsync())
-            await _model.ProveRecoveryAsync(repository, CancellationToken.None);
+        if (NeedsElevation())
+        {
+            await RunElevatedAsync("--prove", repository.Health.RepositoryId);
+            return;
+        }
+
+        await _model.ProveRecoveryAsync(repository, CancellationToken.None);
     }
 
+    private async Task BackupNowAsync(RepositoryRowViewModel repository)
+    {
+        if (NeedsElevation())
+        {
+            await RunElevatedAsync("--backup", repository.Health.RepositoryId);
+            return;
+        }
+
+        await _model.BackupNowAsync(repository, CancellationToken.None);
+    }
+
+    /// <summary>Whether this instance has to hand the work to a raised one.</summary>
+    private bool NeedsElevation() =>
+        _installed && OperatingSystem.IsWindows() && !WindowsPrivilegeChecker.IsElevated();
+
+    /// <summary>
+    /// Runs one operation in an instance Windows has raised, and waits for it.
+    /// </summary>
+    /// <remarks>
+    /// The same shape as protecting a folder: one prompt, one window that does the one thing, and this
+    /// window still here afterwards. What stood here before, for the recovery drill, asked the person
+    /// to reopen the whole application as an administrator and then closed it - which leaves a backup
+    /// client holding full rights on the machine for as long as it is open, and loses whatever they
+    /// were looking at, to save a prompt they are going to see anyway.
+    /// </remarks>
+    private async Task RunElevatedAsync(string verb, string repositoryId)
+    {
+        if (_elevating)
+        {
+            return;
+        }
+
+        var executable = Path.Combine(AppContext.BaseDirectory, "Fortiq.Desktop.exe");
+        if (!File.Exists(executable))
+        {
+            await ShowNoticeAsync(
+                "Fortiq could not be started",
+                $"'{executable}' is missing, so this operation cannot be run with the permissions it " +
+                "needs. Reinstall Fortiq.");
+            return;
+        }
+
+        _elevating = true;
+        RenderActive();
+        try
+        {
+            using var elevated = Process.Start(new ProcessStartInfo(executable)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                ArgumentList = { verb, repositoryId }
+            });
+
+            if (elevated is null)
+            {
+                return;
+            }
+
+            await elevated.WaitForExitAsync();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Declining the prompt is an answer, not a fault, and saying so beats a button that
+            // appears to do nothing.
+            await ShowNoticeAsync(
+                "Permission not granted",
+                verb == "--backup"
+                    ? "Running a backup needs administrator approval, because the background service reads "
+                        + "the folder and unlocks the repository with a key bound to this machine. Nothing was changed."
+                    : "Running a recovery drill needs administrator approval, because the background service "
+                        + "restores the snapshot and records the proof. Nothing was changed.");
+            return;
+        }
+        finally
+        {
+            _elevating = false;
+        }
+
+        // Whatever the elevated pass did, this window's picture of the machine is now out of date.
+        await RefreshAsync();
+    }
+
+    /// <summary>
+    /// Asks for the whole application to be reopened elevated, for the one action that needs it.
+    /// </summary>
+    /// <remarks>
+    /// Starting and stopping the Windows service is done in this process through the service control
+    /// manager, so unlike a backup or a drill there is no one-shot instance to hand it to. It is also
+    /// the rarest thing anybody does here, which is why the coarse route is acceptable for it and was
+    /// not acceptable for the operations people use every week.
+    /// </remarks>
     private async Task<bool> EnsurePrivilegesAsync()
     {
-        if (!_installed || !OperatingSystem.IsWindows() || Fortiq.Platform.Windows.WindowsPrivilegeChecker.IsElevated())
+        if (!NeedsElevation())
+        {
             return true;
+        }
 
         var explanation = Text("This action requires administrator permission. Reopen Fortiq as administrator, then repeat the action. Windows will ask for your approval.", 14, FontWeight.Normal, Ink, true);
         var reopen = Primary("Reopen as administrator");
@@ -1222,6 +1554,30 @@ public sealed class MainWindow : Window
         await dialog.ShowDialog(this);
         if (launched) ExplicitExit();
         return false;
+    }
+
+    /// <summary>Opens one source's own settings, and refreshes if anything changed.</summary>
+    /// <remarks>
+    /// Reading a schedule needs no privilege, so the window opens without a prompt on every machine.
+    /// Saving is what may need the service, and the adapter behind the window raises that as a plain
+    /// failure the window shows - rather than this screen guessing in advance and demanding elevation
+    /// from somebody who only wanted to look.
+    /// </remarks>
+    private async Task OpenSourceSettingsAsync(RepositoryRowViewModel repository)
+    {
+        if (_sourceSettings is null)
+        {
+            return;
+        }
+
+        var window = new SourceSettingsWindow(_sourceSettings(repository.Health.RepositoryId, repository.Title));
+        await window.ShowDialog(this);
+
+        if (window.Changed)
+        {
+            _historyEvents = null;
+            await RefreshAsync();
+        }
     }
 
     private async Task ProtectAsync()
@@ -1411,7 +1767,13 @@ public sealed class MainWindow : Window
         row.Children.Add(Text(first, heading ? 11 : 13, weight, color, true));
         row.Children.Add(At(Text(second, heading ? 11 : 12, weight, color, true), 1));
         row.Children.Add(At(Text(third, heading ? 11 : 12, weight, color, true), 2));
-        var statusColor = !heading && fourth is "Recoverable" or "Completed" or "Healthy" or "Verified" ? Recoverable : !heading ? Unproven : color;
+        // A failure is red, a success is green, and anything else is amber. The history reads from
+        // receipts that record both outcomes, so "not obviously good" and "went wrong" had to stop
+        // being the same colour.
+        var statusColor = heading ? color
+            : fourth is "Recoverable" or "Completed" or "Healthy" or "Verified" or "Succeeded" ? Recoverable
+            : fourth is "Failed" or "At risk" ? Failure
+            : Unproven;
         row.Children.Add(At(Text(fourth, heading ? 11 : 12, heading ? weight : FontWeight.SemiBold, statusColor), 3));
         return row;
     }

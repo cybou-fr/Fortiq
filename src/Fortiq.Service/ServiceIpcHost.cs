@@ -37,6 +37,7 @@ public sealed class ServiceIpcHost : BackgroundService
     private readonly IScheduleStore _schedules;
     private readonly ProvenRestore _restore;
     private readonly HealthPublisher _health;
+    private readonly ScheduledBackupRunner _backups;
 
     public ServiceIpcHost(
         FortiqStatePaths paths,
@@ -45,6 +46,7 @@ public sealed class ServiceIpcHost : BackgroundService
         IScheduleStore schedules,
         ProvenRestore restore,
         HealthPublisher health,
+        ScheduledBackupRunner backups,
         string? helperPath = null)
     {
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
@@ -53,6 +55,7 @@ public sealed class ServiceIpcHost : BackgroundService
         _schedules = schedules ?? throw new ArgumentNullException(nameof(schedules));
         _restore = restore ?? throw new ArgumentNullException(nameof(restore));
         _health = health ?? throw new ArgumentNullException(nameof(health));
+        _backups = backups ?? throw new ArgumentNullException(nameof(backups));
         _helperPath = helperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
     }
 
@@ -161,6 +164,15 @@ public sealed class ServiceIpcHost : BackgroundService
 
                 case "prove":
                     return await HandleProveAsync(req.PayloadJson, cancellationToken);
+
+                case "backup":
+                    return await HandleBackupAsync(req.PayloadJson, cancellationToken);
+
+                case "updateschedule":
+                    return await HandleUpdateScheduleAsync(req.PayloadJson, cancellationToken);
+
+                case "removeschedule":
+                    return await HandleRemoveScheduleAsync(req.PayloadJson, cancellationToken);
 
                 default:
                     return new ServiceIpcProtocol.Response(false, $"Unknown IPC command: '{req.Command}'");
@@ -359,31 +371,138 @@ public sealed class ServiceIpcHost : BackgroundService
         return new ServiceIpcProtocol.Response(true, null, JsonSerializer.Serialize(proveResp, JsonOptions));
     }
 
-    private async Task<BackupSchedule?> FindScheduleAsync(string repositoryId, CancellationToken cancellationToken)
+    /// <summary>Backs up one repository now, because somebody asked rather than because it is due.</summary>
+    /// <remarks>
+    /// The same runner the scheduler uses, so a manual backup and a nightly one are one code path with
+    /// one history. Health is published afterwards whatever happened: the screen that asked for this
+    /// is the screen that has to show what came of it, and a backup whose result only appears at the
+    /// next poll looks like a button that did nothing.
+    /// </remarks>
+    private async Task<ServiceIpcProtocol.Response> HandleBackupAsync(string? payloadJson, CancellationToken cancellationToken)
     {
-        BackupSchedule? byId = null;
-        foreach (var schedule in await _schedules.ReadSchedulesAsync(cancellationToken))
+        if (string.IsNullOrWhiteSpace(payloadJson))
         {
-            if (string.Equals(schedule.Id, repositoryId, StringComparison.OrdinalIgnoreCase))
-            {
-                byId = schedule;
-            }
-
-            try
-            {
-                var kit = await RecoveryKitStore.ReadAsync(schedule.KitDirectory, cancellationToken);
-                if (string.Equals(kit.Manifest.RepositoryId, repositoryId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return schedule;
-                }
-            }
-            catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException)
-            {
-            }
+            return new ServiceIpcProtocol.Response(false, "Missing backup payload.");
         }
 
-        return byId;
+        var payload = JsonSerializer.Deserialize<ServiceIpcProtocol.BackupPayload>(payloadJson, JsonOptions);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.RepositoryId))
+        {
+            return new ServiceIpcProtocol.Response(false, "Invalid backup payload.");
+        }
+
+        // The desktop knows repositories by their repository id; schedules are keyed by their own id,
+        // and the two are only the same when the schedule was written by provisioning. Resolving
+        // through the kit is what makes the button work for a schedule somebody wrote by hand.
+        var schedule = await FindScheduleAsync(payload.RepositoryId, cancellationToken);
+        if (schedule is null)
+        {
+            return new ServiceIpcProtocol.Response(false, $"No schedule found on machine for repository '{payload.RepositoryId}'.");
+        }
+
+        ScheduleRunOutcome outcome;
+        try
+        {
+            outcome = await _backups.RunNowAsync(schedule.Id, cancellationToken);
+        }
+        finally
+        {
+            await _health.PublishAsync(cancellationToken);
+        }
+
+        var backupResp = new ServiceIpcProtocol.BackupResponse(
+            outcome.Failure is null && outcome.SnapshotId is not null,
+            outcome.SnapshotId,
+            outcome.Failure);
+
+        return new ServiceIpcProtocol.Response(true, null, JsonSerializer.Serialize(backupResp, JsonOptions));
     }
+
+    /// <summary>Applies the settings somebody chose on the source's screen.</summary>
+    /// <remarks>
+    /// The schedules directory is readable by any user on the machine and writable only by the
+    /// service, its administrators and SYSTEM - which is why showing these settings needs nothing and
+    /// changing them comes through here. Health is republished afterwards so the screen reflects a
+    /// paused schedule immediately rather than at the next poll.
+    /// </remarks>
+    private async Task<ServiceIpcProtocol.Response> HandleUpdateScheduleAsync(string? payloadJson, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return new ServiceIpcProtocol.Response(false, "Missing schedule payload.");
+        }
+
+        var payload = JsonSerializer.Deserialize<ServiceIpcProtocol.SchedulePreferencesPayload>(payloadJson, JsonOptions);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.RepositoryId))
+        {
+            return new ServiceIpcProtocol.Response(false, "Invalid schedule payload.");
+        }
+
+        var schedule = await FindScheduleAsync(payload.RepositoryId, cancellationToken);
+        if (schedule is null)
+        {
+            return new ServiceIpcProtocol.Response(false, $"No schedule found on machine for repository '{payload.RepositoryId}'.");
+        }
+
+        var store = _schedules as FileSystemScheduleStore
+            ?? throw new InvalidOperationException("This machine's schedules are not stored in a form this service can edit.");
+
+        await store.UpdateAsync(schedule.Id, SchedulePreferencesFrom(payload), cancellationToken);
+        await _health.PublishAsync(cancellationToken);
+        return new ServiceIpcProtocol.Response(true);
+    }
+
+    /// <summary>Stops protecting a source, and does not touch what has already been backed up.</summary>
+    private async Task<ServiceIpcProtocol.Response> HandleRemoveScheduleAsync(string? payloadJson, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return new ServiceIpcProtocol.Response(false, "Missing schedule payload.");
+        }
+
+        var payload = JsonSerializer.Deserialize<ServiceIpcProtocol.RemoveSchedulePayload>(payloadJson, JsonOptions);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.RepositoryId))
+        {
+            return new ServiceIpcProtocol.Response(false, "Invalid schedule payload.");
+        }
+
+        var schedule = await FindScheduleAsync(payload.RepositoryId, cancellationToken);
+        if (schedule is null)
+        {
+            return new ServiceIpcProtocol.Response(false, $"No schedule found on machine for repository '{payload.RepositoryId}'.");
+        }
+
+        var store = _schedules as FileSystemScheduleStore
+            ?? throw new InvalidOperationException("This machine's schedules are not stored in a form this service can edit.");
+
+        await store.RemoveAsync(schedule.Id, cancellationToken);
+        await _health.PublishAsync(cancellationToken);
+        return new ServiceIpcProtocol.Response(true);
+    }
+
+    /// <summary>Turns the wire's plain numbers back into the domain's own vocabulary.</summary>
+    internal static SchedulePreferences SchedulePreferencesFrom(ServiceIpcProtocol.SchedulePreferencesPayload payload)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        var minutes = Math.Clamp(payload.BackupMinuteOfDay, 0, (24 * 60) - 1);
+        var retention = payload.KeepDaily is null && payload.KeepWeekly is null && payload.KeepMonthly is null
+            ? null
+            : new RetentionPolicy(
+                KeepDaily: payload.KeepDaily,
+                KeepWeekly: payload.KeepWeekly,
+                KeepMonthly: payload.KeepMonthly);
+
+        return new SchedulePreferences(
+            payload.Enabled,
+            new TimeOnly(minutes / 60, minutes % 60),
+            payload.DrillEveryDays is { } days and > 0 ? TimeSpan.FromDays(days) : null,
+            retention,
+            payload.Prune ? PruneMode.ForgetAndPrune : PruneMode.ForgetOnly);
+    }
+
+    private Task<BackupSchedule?> FindScheduleAsync(string repositoryId, CancellationToken cancellationToken) =>
+        ScheduleLookup.FindForRepositoryAsync(_schedules, repositoryId, cancellationToken);
 
     /// <summary>
     /// Decides whether the client on <paramref name="pipe"/> may issue <paramref name="command"/>.

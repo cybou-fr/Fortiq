@@ -1,4 +1,4 @@
-﻿using System.IO.Pipes;
+using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using Fortiq.Application;
@@ -10,6 +10,9 @@ public interface IServiceIpcClient
     Task<bool> IsServiceAvailableAsync(CancellationToken cancellationToken = default);
     Task<ServiceIpcProtocol.ProvisionResponse> ProvisionAsync(string repositoryLocation, string kitDirectory, string sourcePath, CancellationToken cancellationToken = default);
     Task<bool> ProveRecoveryAsync(string repositoryId, CancellationToken cancellationToken = default);
+    Task<ServiceIpcProtocol.BackupResponse> BackupAsync(string repositoryId, CancellationToken cancellationToken = default);
+    Task UpdateScheduleAsync(string repositoryId, ViewModels.SourceSettings settings, CancellationToken cancellationToken = default);
+    Task RemoveScheduleAsync(string repositoryId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -143,6 +146,113 @@ public sealed class ServiceIpcClient : IServiceIpcClient
         var proveResp = JsonSerializer.Deserialize<ServiceIpcProtocol.ProveResponse>(resp.PayloadJson, JsonOptions);
         return proveResp is null || proveResp.Success;
     }
+    public async Task<ServiceIpcProtocol.BackupResponse> BackupAsync(string repositoryId, CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Service IPC is only supported on Windows.");
+        }
+
+        await using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000, cancellationToken);
+
+        using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
+        using var writer = new StreamWriter(client, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+        var payload = new ServiceIpcProtocol.BackupPayload(repositoryId);
+        var req = new ServiceIpcProtocol.Request("backup", JsonSerializer.Serialize(payload, JsonOptions));
+
+        await writer.WriteLineAsync(JsonSerializer.Serialize(req, JsonOptions).AsMemory(), cancellationToken);
+
+        var line = await ReadOperationResponseAsync(reader, cancellationToken)
+            ?? throw new InvalidOperationException("Service closed connection unexpectedly during backup.");
+
+        var resp = JsonSerializer.Deserialize<ServiceIpcProtocol.Response>(line, JsonOptions)
+            ?? throw new InvalidOperationException("Malformed IPC response received from service.");
+
+        if (!resp.Success)
+        {
+            throw new InvalidOperationException(resp.ErrorMessage ?? "Service failed to run the backup.");
+        }
+
+        if (resp.PayloadJson is null)
+        {
+            throw new InvalidOperationException("Service returned empty backup payload.");
+        }
+
+        return JsonSerializer.Deserialize<ServiceIpcProtocol.BackupResponse>(resp.PayloadJson, JsonOptions)
+            ?? throw new InvalidOperationException("Failed to decode service backup response.");
+    }
+
+    public Task UpdateScheduleAsync(string repositoryId, ViewModels.SourceSettings settings, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var payload = new ServiceIpcProtocol.SchedulePreferencesPayload(
+            repositoryId,
+            settings.Enabled,
+            (settings.BackupHour * 60) + settings.BackupMinute,
+            settings.DrillEveryDays,
+            settings.KeepDaily,
+            settings.KeepWeekly,
+            settings.KeepMonthly,
+            settings.Prune);
+
+        return SendAsync("updateSchedule", payload, "change the schedule", cancellationToken);
+    }
+
+    public Task RemoveScheduleAsync(string repositoryId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+
+        return SendAsync(
+            "removeSchedule",
+            new ServiceIpcProtocol.RemoveSchedulePayload(repositoryId),
+            "stop protecting that source",
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// One request whose answer is only whether it worked.
+    /// </summary>
+    /// <remarks>
+    /// The commands that return something each parse their own reply; these two do not, and writing
+    /// the connect-write-read sequence out twice more would be three chances to get the timeout or the
+    /// error path subtly different from the others.
+    /// </remarks>
+    private async Task SendAsync<TPayload>(
+        string command,
+        TPayload payload,
+        string description,
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Service IPC is only supported on Windows.");
+        }
+
+        await using var client = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000, cancellationToken);
+
+        using var reader = new StreamReader(client, Encoding.UTF8, leaveOpen: true);
+        using var writer = new StreamWriter(client, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+
+        var request = new ServiceIpcProtocol.Request(command, JsonSerializer.Serialize(payload, JsonOptions));
+        await writer.WriteLineAsync(JsonSerializer.Serialize(request, JsonOptions).AsMemory(), cancellationToken);
+
+        var line = await ReadOperationResponseAsync(reader, cancellationToken)
+            ?? throw new InvalidOperationException($"Service closed connection unexpectedly; it did not {description}.");
+
+        var response = JsonSerializer.Deserialize<ServiceIpcProtocol.Response>(line, JsonOptions)
+            ?? throw new InvalidOperationException("Malformed IPC response received from service.");
+
+        if (!response.Success)
+        {
+            throw new InvalidOperationException(response.ErrorMessage ?? $"The service did not {description}.");
+        }
+    }
+
     private static async Task<string?> ReadOperationResponseAsync(StreamReader reader, CancellationToken cancellationToken)
     {
         try

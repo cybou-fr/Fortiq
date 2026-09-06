@@ -87,6 +87,52 @@ public sealed class ScheduledBackupRunner
         return outcomes;
     }
 
+    /// <summary>
+    /// Runs one schedule now, because somebody asked for it, whether or not it is due.
+    /// </summary>
+    /// <remarks>
+    /// A person asking for a backup is not the same event as a clock reaching 02:30, but what happens
+    /// afterwards must be: the attempt is recorded in the same state, so the schedule's own history is
+    /// one history rather than two, and a manual run counts as the occurrence a later pass would
+    /// otherwise repeat.
+    ///
+    /// A paused schedule still runs when it is asked to. Pausing is how somebody says "not on your
+    /// own", which is a statement about the clock and not about them: refusing here would mean a
+    /// person who had turned the nightly run off could no longer back the folder up at all, and the
+    /// button that proves recovery already works on a paused source.
+    /// </remarks>
+    public async Task<ScheduleRunOutcome> RunNowAsync(string scheduleId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scheduleId);
+
+        var schedules = await _store.ReadSchedulesAsync(cancellationToken);
+        var schedule = schedules.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, scheduleId, StringComparison.OrdinalIgnoreCase));
+
+        if (schedule is null)
+        {
+            return new ScheduleRunOutcome(
+                scheduleId,
+                DueVerdict.Disabled,
+                Failure: $"No schedule on this machine has the id '{scheduleId}', so there is nothing to back up.");
+        }
+
+        ScheduleState state;
+        try
+        {
+            state = await _store.ReadStateAsync(schedule.Id, cancellationToken);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            return new ScheduleRunOutcome(
+                schedule.Id,
+                DueVerdict.Disabled,
+                Failure: $"The recorded history for this schedule could not be read: {error.Message}");
+        }
+
+        return await RunOneAsync(schedule, state, cancellationToken);
+    }
+
     private async Task<ScheduleRunOutcome> RunOneAsync(
         BackupSchedule schedule,
         ScheduleState state,

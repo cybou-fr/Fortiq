@@ -1,4 +1,4 @@
-﻿using System.Runtime.Versioning;
+using System.Runtime.Versioning;
 using Fortiq.Infrastructure.ObjectStorage;
 using Fortiq.Infrastructure.Receipts;
 using Fortiq.Operations;
@@ -155,7 +155,8 @@ public static class Program
             provider.GetRequiredService<IObjectStorageCredentialProvider>(),
             provider.GetRequiredService<IScheduleStore>(),
             provider.GetRequiredService<ProvenRestore>(),
-            provider.GetRequiredService<HealthPublisher>()));
+            provider.GetRequiredService<HealthPublisher>(),
+            provider.GetRequiredService<ScheduledBackupRunner>()));
 
         builder.Services.AddHostedService<SchedulerWorker>();
         builder.Services.AddHostedService(provider => provider.GetRequiredService<ServiceIpcHost>());

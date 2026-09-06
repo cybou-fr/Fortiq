@@ -63,6 +63,18 @@ public sealed class FortiqApplication : Avalonia.Application
                 return;
             }
 
+            // The same one-shot pattern as --protect, for the two operations that also act with the
+            // service's privileges. Without them, a standard pass could show the state of the machine
+            // and change nothing about it.
+            if (OperatingSystem.IsWindows() && ElevatedOperationArguments.TryParse(args, out var elevatedOperation, out var elevatedRepository))
+            {
+                var window = CreateElevatedOperationWindow(elevatedOperation, elevatedRepository);
+                desktop.MainWindow = window;
+                window.Closed += (_, _) => desktop.Shutdown(window.Succeeded ? 0 : 1);
+                window.Show();
+                return;
+            }
+
             var isPortable = args.Contains("--portable", StringComparer.OrdinalIgnoreCase);
             var isTrayLaunch = args.Contains("--tray", StringComparer.OrdinalIgnoreCase)
                 || args.Contains("--minimized", StringComparer.OrdinalIgnoreCase);
@@ -235,6 +247,13 @@ public sealed class FortiqApplication : Avalonia.Application
             storeCredentials: storeCredentials);
 
         var schedules = new FileSystemScheduleStore(paths.Schedules);
+        var health = new HealthPublisher(
+            schedules,
+            paths.Receipts,
+            paths.HealthReport,
+            paths.HealthMetrics,
+            protection: new S3StorageProtectionInspector(storage));
+
         var prove = new ProveRecoveryAdapter(
             schedules,
             new ProvenRestore(
@@ -243,13 +262,30 @@ public sealed class FortiqApplication : Avalonia.Application
                 runDirectory: paths.Runs,
                 receiptDirectory: paths.Receipts,
                 storage: storage),
-            new HealthPublisher(
-                schedules,
-                paths.Receipts,
-                paths.HealthReport,
-                paths.HealthMetrics,
-                protection: new S3StorageProtectionInspector(storage)),
+            health,
             serviceClient: serviceClient);
+
+        // Portable runs the backup in this process; installed hands it to the service, which holds the
+        // machine key and the receipt directory. The runner is composed either way, because the same
+        // adapter serves both and the portable half is the one that has to work without a service.
+        var backupNow = OperatingSystem.IsWindows()
+            ? new BackupNowAdapter(
+                schedules,
+                new ScheduledBackupRunner(
+                    schedules,
+                    new UnattendedBackup(
+                        engineRoot,
+                        paths.Working,
+                        runDirectory: paths.Runs,
+                        receiptDirectory: paths.Receipts,
+                        storage: storage)),
+                health,
+                serviceClient: serviceClient)
+            : null;
+
+        // Reading a schedule needs nothing; changing it goes to the service when there is one. Both
+        // halves are the same adapter so the screen does not have to know which mode it is in.
+        var sourceSettings = new SourceSettingsAdapter(schedules, serviceClient);
 
         var settings = new SettingsViewModel(paths.Root, Path.Combine(paths.Root, "logs"));
         if (!installed) settings.ServiceStatus = "Portable mode";
@@ -296,10 +332,82 @@ public sealed class FortiqApplication : Avalonia.Application
                 : null;
 
         return new MainWindow(
-            new RepositoriesViewModel(new HealthFileSource(paths.HealthReport), prove),
+            new RepositoriesViewModel(new HealthFileSource(paths.HealthReport), prove, backup: backupNow),
             () => new ProtectRepositoryViewModel(protect, automaticBackupsAvailable: automaticAvailable, automaticBackupsUnavailableReason: unavailableReason),
             settings, installed: installed,
-            fileRecovery: () => new FileRecoveryViewModel(new FileRecoveryAdapter(engineRoot, paths.Runs)));
+            fileRecovery: () => new FileRecoveryViewModel(new FileRecoveryAdapter(engineRoot, paths.Runs)),
+            sourceSettings: (repositoryId, title) => new SourceSettingsViewModel(sourceSettings, repositoryId, title),
+            history: () => ReceiptTimeline.ReadAsync(paths.Receipts, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// Composes one privileged operation for the elevated pass that runs it.
+    /// </summary>
+    /// <remarks>
+    /// Installed mode only, and elevated, so the service accepts the request this time. Composed here
+    /// rather than by building a whole main window and borrowing its adapters: that would start a tray
+    /// icon, a refresh timer and a health read for a process whose entire job is one operation.
+    /// </remarks>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static ElevatedOperationWindow CreateElevatedOperationWindow(ElevatedOperation operation, string repositoryId)
+    {
+        var paths = FortiqStatePaths.Resolve();
+        var engineRoot = ResolveEngineRoot();
+
+        IObjectStorageCredentialProvider storage = OperatingSystem.IsWindows()
+            ? new FirstAvailableObjectStorageCredentials(
+                new StoredObjectStorageCredentials(Path.Combine(paths.Root, "credentials")),
+                new EnvironmentObjectStorageCredentialProvider())
+            : new EnvironmentObjectStorageCredentialProvider();
+
+        var schedules = new FileSystemScheduleStore(paths.Schedules);
+        var health = new HealthPublisher(
+            schedules,
+            paths.Receipts,
+            paths.HealthReport,
+            paths.HealthMetrics,
+            protection: new S3StorageProtectionInspector(storage));
+
+        var serviceClient = OperatingSystem.IsWindows() ? new ServiceIpcClient() : null;
+
+        if (operation == ElevatedOperation.Backup)
+        {
+            var backup = new BackupNowAdapter(
+                schedules,
+                new ScheduledBackupRunner(
+                    schedules,
+                    new UnattendedBackup(
+                        engineRoot,
+                        paths.Working,
+                        runDirectory: paths.Runs,
+                        receiptDirectory: paths.Receipts,
+                        storage: storage)),
+                health,
+                serviceClient: serviceClient);
+
+            return new ElevatedOperationWindow(operation, repositoryId, async (id, token) =>
+            {
+                var result = await backup.BackupAsync(id, token);
+                return (result.Success, result.Failure);
+            });
+        }
+
+        var prove = new ProveRecoveryAdapter(
+            schedules,
+            new ProvenRestore(
+                engineRoot,
+                paths.Working,
+                runDirectory: paths.Runs,
+                receiptDirectory: paths.Receipts,
+                storage: storage),
+            health,
+            serviceClient: serviceClient);
+
+        return new ElevatedOperationWindow(operation, repositoryId, async (id, token) =>
+        {
+            var proven = await prove.ProveAsync(id, token);
+            return (proven, proven ? null : "The restore did not produce what the snapshot says it should.");
+        });
     }
 
     /// <summary>

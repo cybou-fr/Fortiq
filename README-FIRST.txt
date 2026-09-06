@@ -27,7 +27,8 @@ QUICK START
 
   Installing puts Fortiq in C:\Program Files\Fortiq and registers a background
   service, so backups run on schedule even when the application is closed.
-  Portable does neither: backups run only while Fortiq is open.
+  Portable does neither: there is no scheduler, so a portable backup runs when
+  you press "Back up now" and at no other time.
 
   Installing adds Fortiq to the Start menu. Portable does not: run it from
   this package's desktop folder.

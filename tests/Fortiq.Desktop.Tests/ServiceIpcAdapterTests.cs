@@ -1,4 +1,4 @@
-﻿using System.Runtime.Versioning;
+using System.Runtime.Versioning;
 using Fortiq.Application;
 using Fortiq.Desktop;
 using Fortiq.Desktop.ViewModels;
@@ -114,6 +114,10 @@ public sealed class ServiceIpcAdapterTests
         public string? LastRepositoryId { get; private set; }
         public ServiceIpcProtocol.ProvisionResponse? ProvisionResult { get; set; }
         public bool ProveResult { get; set; } = true;
+        public bool BackupCalled { get; private set; }
+        public ServiceIpcProtocol.BackupResponse? BackupResult { get; set; }
+        public SourceSettings? UpdatedSchedule { get; private set; }
+        public string? RemovedSchedule { get; private set; }
 
         public Task<bool> IsServiceAvailableAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(IsAvailable);
@@ -134,6 +138,27 @@ public sealed class ServiceIpcAdapterTests
             ProveCalled = true;
             LastRepositoryId = repositoryId;
             return Task.FromResult(ProveResult);
+        }
+
+        public Task<ServiceIpcProtocol.BackupResponse> BackupAsync(string repositoryId, CancellationToken cancellationToken = default)
+        {
+            BackupCalled = true;
+            LastRepositoryId = repositoryId;
+            return Task.FromResult(BackupResult ?? new ServiceIpcProtocol.BackupResponse(true, "snapshot-1"));
+        }
+
+        public Task UpdateScheduleAsync(string repositoryId, SourceSettings settings, CancellationToken cancellationToken = default)
+        {
+            LastRepositoryId = repositoryId;
+            UpdatedSchedule = settings;
+            return Task.CompletedTask;
+        }
+
+        public Task RemoveScheduleAsync(string repositoryId, CancellationToken cancellationToken = default)
+        {
+            LastRepositoryId = repositoryId;
+            RemovedSchedule = repositoryId;
+            return Task.CompletedTask;
         }
     }
 }

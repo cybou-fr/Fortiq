@@ -31,6 +31,22 @@ public interface IProveRecovery
     Task<bool> ProveAsync(string repositoryId, CancellationToken cancellationToken);
 }
 
+/// <summary>What one on-demand backup did.</summary>
+/// <param name="Success">Whether a snapshot was written.</param>
+/// <param name="SnapshotId">The snapshot, when there is one.</param>
+/// <param name="Failure">Why it did not work, in words the person can act on.</param>
+public sealed record BackupNowResult(bool Success, string? SnapshotId = null, string? Failure = null);
+
+/// <summary>
+/// Backs a repository up now, at somebody's request. Separate from the schedule that runs unattended,
+/// and deliberately not a second way of doing it: both end in the same run, the same receipt and the
+/// same state.
+/// </summary>
+public interface IBackupNow
+{
+    Task<BackupNowResult> BackupAsync(string repositoryId, CancellationToken cancellationToken);
+}
+
 /// <summary>One repository as the person sees it.</summary>
 public sealed class RepositoryRowViewModel
 {
@@ -70,20 +86,31 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
 {
     private readonly IHealthSource _health;
     private readonly IProveRecovery _prove;
+    private readonly IBackupNow? _backup;
     private readonly TimeProvider _clock;
     public static TimeSpan ReportMaxAge { get; } = TimeSpan.FromMinutes(5);
 
     private string? _failure;
+    private bool _failureIsSticky;
+    private string? _activity;
     private bool _busy;
     private DateTimeOffset? _reportProducedAt;
     private HealthStoreState _state = HealthStoreState.NotInitialized;
 
-    public RepositoriesViewModel(IHealthSource health, IProveRecovery prove, TimeProvider? clock = null)
+    public RepositoriesViewModel(
+        IHealthSource health,
+        IProveRecovery prove,
+        TimeProvider? clock = null,
+        IBackupNow? backup = null)
     {
         _health = health ?? throw new ArgumentNullException(nameof(health));
         _prove = prove ?? throw new ArgumentNullException(nameof(prove));
+        _backup = backup;
         _clock = clock ?? TimeProvider.System;
     }
+
+    /// <summary>Whether this machine can start a backup at all. False leaves the button off the screen.</summary>
+    public bool CanBackupNow => _backup is not null;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -92,6 +119,13 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
     public string? Failure { get => _failure; private set => Set(ref _failure, value); }
 
     public bool Busy { get => _busy; private set => Set(ref _busy, value); }
+
+    /// <summary>What is running right now, named. Null when nothing is.</summary>
+    /// <remarks>
+    /// "Busy" alone disables every button and explains nothing; on an operation that can take minutes,
+    /// a screen that has gone quiet and grey is indistinguishable from one that has hung.
+    /// </remarks>
+    public string? Activity { get => _activity; private set => Set(ref _activity, value); }
 
     public DateTimeOffset? ReportProducedAt { get => _reportProducedAt; private set => Set(ref _reportProducedAt, value); }
 
@@ -116,11 +150,52 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
                     : "Your data is recoverable."
     };
 
+    /// <summary>
+    /// Reports a failure to read something the screen was showing, such as the receipt history.
+    /// </summary>
+    /// <remarks>
+    /// Sticky like an operation's failure, and for the same reason: a screen that could not read the
+    /// history has not become able to read it thirty seconds later, and a message that leaves on its
+    /// own turns an unreadable directory into an empty one.
+    /// </remarks>
+    public void ReportReadFailure(string failure)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(failure);
+        ReportOperationFailure(failure);
+    }
+
+    /// <summary>Puts the last failure away, because the person has read it.</summary>
+    public void ClearFailure()
+    {
+        _failureIsSticky = false;
+        Failure = null;
+    }
+
+    /// <summary>
+    /// Records why an operation the person started did not work, and keeps it there until they put it
+    /// away or start another one.
+    /// </summary>
+    /// <remarks>
+    /// The screen polls every thirty seconds, and a refresh clears the failure it found last time -
+    /// which is right for a failure about reading the report, and wrong for a failure about a backup
+    /// somebody watched fail: within half a minute the message would leave the screen on its own,
+    /// while the state that caused it had not changed.
+    /// </remarks>
+    private void ReportOperationFailure(string failure)
+    {
+        Failure = failure;
+        _failureIsSticky = true;
+    }
+
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         if (Busy) return;
         Busy = true;
-        Failure = null;
+        if (!_failureIsSticky)
+        {
+            Failure = null;
+        }
+
         try
         {
             var result = await _health.ReadAsync(cancellationToken);
@@ -138,13 +213,20 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
             }
 
             ReportProducedAt = result.Report?.ProducedAt;
-            Failure = stale ? "The health report is older than five minutes or its timestamp is in the future. Current protection is unknown."
+            var readFailure = stale
+                ? "The health report is older than five minutes or its timestamp is in the future. Current protection is unknown."
                 : result.State == HealthStoreState.Corrupt ? result.Detail : null;
+            if (readFailure is not null || !_failureIsSticky)
+            {
+                Failure = readFailure;
+                _failureIsSticky = false;
+            }
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
             // A health screen that hides its own failure is the worst kind: it looks calm.
             Failure = PlainFailure.Describe(error);
+            _failureIsSticky = false;
             State = HealthStoreState.Corrupt;
             Repositories.Clear();
             ReportProducedAt = null;
@@ -165,7 +247,7 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
         }
 
         Busy = true;
-        Failure = null;
+        ClearFailure();
         string? outcome = null;
         try
         {
@@ -188,7 +270,51 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
         await RefreshAsync(cancellationToken);
         if (outcome is not null)
         {
-            Failure = outcome;
+            ReportOperationFailure(outcome);
+        }
+    }
+
+    /// <summary>Backs one repository up now and shows what happened.</summary>
+    /// <remarks>
+    /// A backup that failed is reported as a failure and not as a silent refresh. The order is the one
+    /// the recovery proof uses and for the same reason: refresh first so the screen shows the state
+    /// that now exists, then put the outcome back, because an outcome cleared by the refresh would
+    /// leave somebody believing a backup worked when it did not.
+    /// </remarks>
+    public async Task BackupNowAsync(RepositoryRowViewModel repository, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        if (Busy || _backup is null)
+        {
+            return;
+        }
+
+        Busy = true;
+        ClearFailure();
+        Activity = $"Backing up {repository.Title}…";
+        string? outcome = null;
+        try
+        {
+            var result = await _backup.BackupAsync(repository.Health.RepositoryId, cancellationToken);
+            if (!result.Success)
+            {
+                outcome = result.Failure ?? "The backup did not complete, and gave no reason.";
+            }
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            outcome = PlainFailure.Describe(error);
+        }
+        finally
+        {
+            Busy = false;
+            Activity = null;
+        }
+
+        await RefreshAsync(cancellationToken);
+        if (outcome is not null)
+        {
+            ReportOperationFailure(outcome);
         }
     }
 

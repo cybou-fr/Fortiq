@@ -1,6 +1,5 @@
-﻿using System.Runtime.Versioning;
+using System.Runtime.Versioning;
 using Fortiq.Desktop.ViewModels;
-using Fortiq.Infrastructure.Keys;
 using Fortiq.Operations;
 using Fortiq.Scheduling;
 
@@ -73,38 +72,6 @@ public sealed class ProveRecoveryAdapter : IProveRecovery
         }
     }
 
-    /// <summary>
-    /// Finds the schedule for a repository. The screen knows the repository by the identity in its
-    /// kit, which is the identity the repository states about itself - not by the path, which two
-    /// schedules could share and which can change without the repository changing.
-    /// </summary>
-    private async Task<BackupSchedule?> FindAsync(string repositoryId, CancellationToken cancellationToken)
-    {
-        BackupSchedule? byId = null;
-        foreach (var schedule in await _schedules.ReadSchedulesAsync(cancellationToken))
-        {
-            if (string.Equals(schedule.Id, repositoryId, StringComparison.OrdinalIgnoreCase))
-            {
-                byId = schedule;
-            }
-
-            try
-            {
-                var kit = await RecoveryKitStore.ReadAsync(schedule.KitDirectory, cancellationToken);
-                if (string.Equals(kit.Manifest.RepositoryId, repositoryId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return schedule;
-                }
-            }
-            catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException)
-            {
-                // A kit that cannot be read cannot identify its repository. The report already says
-                // that repository is at risk; skipping it here keeps one bad kit from hiding the rest.
-            }
-        }
-
-        // The health report falls back to the schedule ID when there is no readable kit, so the
-        // button has to be able to follow it back the same way.
-        return byId;
-    }
+    private Task<BackupSchedule?> FindAsync(string repositoryId, CancellationToken cancellationToken) =>
+        ScheduleLookup.FindForRepositoryAsync(_schedules, repositoryId, cancellationToken);
 }

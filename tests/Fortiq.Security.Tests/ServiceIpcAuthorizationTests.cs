@@ -27,6 +27,9 @@ public sealed class ServiceIpcAuthorizationTests
     [Theory]
     [InlineData("provision")]
     [InlineData("prove")]
+    [InlineData("backup")]
+    [InlineData("updateSchedule")]
+    [InlineData("removeSchedule")]
     [InlineData("PROVISION")]
     public void PrivilegedCommandsAreRefusedToAnUnelevatedCaller(string command)
     {
@@ -39,6 +42,9 @@ public sealed class ServiceIpcAuthorizationTests
     [Theory]
     [InlineData("provision")]
     [InlineData("prove")]
+    [InlineData("backup")]
+    [InlineData("updateSchedule")]
+    [InlineData("removeSchedule")]
     public void PrivilegedCommandsAreAllowedToAnElevatedCaller(string command)
     {
         Assert.True(ServiceIpcAuthorization.Authorize(command, callerIsAdministrator: true, "MACHINE\\admin").Allowed);
