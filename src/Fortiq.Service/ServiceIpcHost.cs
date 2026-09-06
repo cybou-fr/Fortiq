@@ -648,7 +648,11 @@ public sealed class ServiceIpcHost : BackgroundService
         try
         {
             var principal = NamedPipeClientInspector.PrincipalOf(pipe);
-            return ServiceIpcAuthorization.Authorize(command, principal.IsAdministrator, principal.AccountName);
+            return ServiceIpcAuthorization.Authorize(
+                command,
+                principal.IsAdministrator,
+                principal.IsOperator,
+                principal.AccountName);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
         {

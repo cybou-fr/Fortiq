@@ -61,10 +61,16 @@ public static class NamedPipeClientInspector
     /// <param name="IsAdministrator">
     /// True when the client's token carries the Administrators group as an enabled member.
     /// </param>
+    /// <param name="IsOperator">
+    /// True when the client's token carries the local Fortiq Operators group as an enabled member.
+    /// False on a machine that does not have the group, which is every installation made before it
+    /// existed - and leaves the administrator check as the only way through, exactly as before.
+    /// </param>
     public sealed record NamedPipeClientPrincipal(
         SecurityIdentifier? User,
         string AccountName,
-        bool IsAdministrator);
+        bool IsAdministrator,
+        bool IsOperator = false);
 
     /// <summary>
     /// Resolves who is on the other end of <paramref name="pipe"/>, evaluated inside the client's own
@@ -88,6 +94,7 @@ public static class NamedPipeClientInspector
         SecurityIdentifier? user = null;
         var accountName = "unknown";
         var administrator = false;
+        var operatorMember = false;
 
         pipe.RunAsClient(() =>
         {
@@ -95,9 +102,13 @@ public static class NamedPipeClientInspector
             user = identity.User;
             accountName = identity.Name;
             administrator = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+
+            // Read from the client's own token, inside their impersonation, like the line above it.
+            // Asking about the group any other way would answer a question about the service.
+            operatorMember = FortiqOperatorsGroup.IsMember(identity);
         });
 
-        return new NamedPipeClientPrincipal(user, accountName, administrator);
+        return new NamedPipeClientPrincipal(user, accountName, administrator, operatorMember);
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]

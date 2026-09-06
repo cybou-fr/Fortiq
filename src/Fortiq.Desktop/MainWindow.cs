@@ -1437,7 +1437,7 @@ public sealed class MainWindow : Window
 
     private async Task ProveAsync(RepositoryRowViewModel repository)
     {
-        if (NeedsElevation())
+        if (NeedsElevation(operatorIsEnough: true))
         {
             await RunElevatedAsync("--prove", repository.Health.RepositoryId);
             return;
@@ -1448,7 +1448,7 @@ public sealed class MainWindow : Window
 
     private async Task BackupNowAsync(RepositoryRowViewModel repository)
     {
-        if (NeedsElevation())
+        if (NeedsElevation(operatorIsEnough: true))
         {
             await RunElevatedAsync("--backup", repository.Health.RepositoryId);
             return;
@@ -1457,9 +1457,27 @@ public sealed class MainWindow : Window
         await _model.BackupNowAsync(repository, CancellationToken.None);
     }
 
-    /// <summary>Whether this instance has to hand the work to a raised one.</summary>
-    private bool NeedsElevation() =>
-        _installed && OperatingSystem.IsWindows() && !WindowsPrivilegeChecker.IsElevated();
+    /// <summary>
+    /// Whether this instance has to hand the work to a raised one.
+    /// </summary>
+    /// <remarks>
+    /// A member of the local Fortiq Operators group may back up and prove recovery as themselves, so
+    /// asking them to elevate would be a prompt with nothing behind it - and the point of the group is
+    /// that an everyday backup does not need a client running with full rights over the machine.
+    ///
+    /// Protecting a folder is not in that set and passes false: provisioning makes the service read a
+    /// path of the caller's choosing and hands back the phrase that opens the result, so it stays with
+    /// administrators however this session is being run.
+    /// </remarks>
+    private bool NeedsElevation(bool operatorIsEnough)
+    {
+        if (!_installed || !OperatingSystem.IsWindows() || WindowsPrivilegeChecker.IsElevated())
+        {
+            return false;
+        }
+
+        return !operatorIsEnough || !FortiqOperatorsGroup.IsCurrentUserMember();
+    }
 
     /// <summary>
     /// Runs one operation in an instance Windows has raised, and waits for it.
@@ -1539,7 +1557,7 @@ public sealed class MainWindow : Window
     /// </remarks>
     private async Task<bool> EnsurePrivilegesAsync()
     {
-        if (!NeedsElevation())
+        if (!NeedsElevation(operatorIsEnough: false))
         {
             return true;
         }

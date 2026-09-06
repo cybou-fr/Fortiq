@@ -120,6 +120,17 @@ public sealed class InstallationManager : IInstallationOperations
                 throw new InvalidOperationException($"Security provisioning failed: could not set state directory ACLs on '{statePaths.Root}': {ex.Message}", ex);
             }
 
+            // Created here because creating a local group needs administrative rights, and this is the
+            // one moment Fortiq has them. It is created empty: nobody may run anything through it
+            // until an administrator puts an account in, which is what makes it a delegation rather
+            // than a widening. A machine that refuses it is left exactly as it was - administrators
+            // only - so the installation carries on and says so rather than failing.
+            progress?.Report(new($"Creating the '{FortiqOperatorsGroup.Name}' group...", 70));
+            if (!FortiqOperatorsGroup.TryCreate(out var groupFailure) && groupFailure is not null)
+            {
+                progress?.Report(new(groupFailure, 70));
+            }
+
             if (options.InstallService)
             {
                 progress?.Report(new("Registering Windows Service 'Fortiq'...", 75));

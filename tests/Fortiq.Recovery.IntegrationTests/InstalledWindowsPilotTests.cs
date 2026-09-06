@@ -38,6 +38,45 @@ public sealed class InstalledWindowsPilotTests
     private static readonly System.Text.Json.JsonSerializerOptions ManifestJson = new() { WriteIndented = true };
 
     [SkippableFact]
+    public void AnElevatedInstallCanCreateTheOperatorsGroupAndCreatingItTwiceIsNotAFailure()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Local groups are a Windows concern.");
+        Skip.IfNot(WindowsPrivilegeChecker.IsElevated(), "Creating a local group needs an elevated session.");
+
+        // Installation is not a thing that happens once on a machine - it happens again on every
+        // update - so the second attempt has to be as uneventful as the first. A group that already
+        // exists is the expected state, not an error to be reported to somebody installing an update.
+        Assert.True(FortiqOperatorsGroup.TryCreate(out var first), first);
+        Assert.True(FortiqOperatorsGroup.Exists());
+        Assert.NotNull(FortiqOperatorsGroup.Sid());
+
+        Assert.True(FortiqOperatorsGroup.TryCreate(out var second), second);
+        Assert.Null(second);
+    }
+
+    [SkippableFact]
+    public void TheOperatorsGroupIsCreatedWithNobodyInIt()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Local groups are a Windows concern.");
+        Skip.IfNot(WindowsPrivilegeChecker.IsElevated(), "Creating a local group needs an elevated session.");
+
+        // The whole point of the group is that it is a delegation somebody makes deliberately. A
+        // group that arrived with members - the installing administrator, say, or worse, Users -
+        // would be a default that silently widened who can drive the service.
+        Assert.True(FortiqOperatorsGroup.TryCreate(out _));
+
+        var sid = FortiqOperatorsGroup.Sid();
+        Assert.NotNull(sid);
+
+        // The elevated runner is an administrator, so it is authorised either way; what is asserted is
+        // that the group itself has not been used to grant it anything.
+        using var identity = WindowsIdentity.GetCurrent();
+        Assert.False(
+            FortiqOperatorsGroup.IsMember(identity),
+            "The installer put the current account into the operators group; it must be created empty.");
+    }
+
+    [SkippableFact]
     public async Task AnElevatedInstallDeploysTheBundleItVerified()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Installed-mode deployment is a Windows concern.");

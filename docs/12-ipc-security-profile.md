@@ -33,10 +33,23 @@ Every server-side named pipe instance:
 - Verifies the caller before acting on a privileged payload. What that means differs by pipe, and the
   difference matters: `PasswordPipeServer` checks the client's process, its open binary handle and,
   optionally, its Authenticode signature, because it is handing over an unlock secret. `ServiceIpcHost`
-  checks the caller's account and whether that account is exercising administrator rights, because it
-  is being asked to act as LocalSystem. Neither can check at connection time — Windows discloses a
-  pipe client's identity only once the client has written — so both read the request, authorise, and
-  only then interpret what was asked for.
+  checks the caller's account and what that account is exercising — administrator rights, or membership
+  of the local `Fortiq Operators` group — because it is being asked to act as LocalSystem. Neither can
+  check at connection time — Windows discloses a pipe client's identity only once the client has
+  written — so both read the request, authorise, and only then interpret what was asked for.
+
+- Draws that line per command, at two levels (`ServiceIpcAuthorization`). `provision` makes LocalSystem
+  read a path the caller names and returns the phrase that opens the result, which is the ability to
+  read any file on the machine: it requires administrator rights and membership of the operators group
+  is explicitly not enough for it. `backup`, `prove`, `updateSchedule`, `removeSchedule` and `clearLock`
+  act on a source an administrator has already protected, cannot be repointed at another path and hand
+  nothing back, so a member of the operators group may issue them. Anything unclassified falls to the
+  administrator level, so a command added to the dispatch and forgotten here fails closed.
+
+  The group is created empty by the installer (`FortiqOperatorsGroup`) and stays empty until an
+  administrator puts an account in it. A machine that does not have the group — every installation
+  predating it — answers "not a member" for everybody, which leaves the administrator check as the only
+  way through and is the behaviour those machines already had.
 
 ---
 
