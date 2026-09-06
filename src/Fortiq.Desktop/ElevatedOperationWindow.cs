@@ -32,7 +32,7 @@ public enum ElevatedOperation
 /// says plainly what came of it, and exits when the person closes it. Its exit code is for the parent:
 /// zero when the operation succeeded, non-zero otherwise.
 /// </remarks>
-public sealed class ElevatedOperationWindow : Window
+public sealed class ElevatedOperationWindow : Window, IDisposable
 {
     private readonly ElevatedOperation _operation;
     private readonly string _repositoryId;
@@ -40,6 +40,8 @@ public sealed class ElevatedOperationWindow : Window
     private readonly TextBlock _headline;
     private readonly TextBlock _detail;
     private readonly Button _close;
+    private readonly Button _stop;
+    private readonly CancellationTokenSource _running = new();
 
     /// <summary>False until the operation has reported success. Read by the process's exit code.</summary>
     public bool Succeeded { get; private set; }
@@ -93,6 +95,26 @@ public sealed class ElevatedOperationWindow : Window
             BorderThickness = new Thickness(0)
         };
         _close.Click += (_, _) => Close();
+
+        _stop = new Button
+        {
+            Content = "Stop",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(18, 9),
+            CornerRadius = new CornerRadius(6),
+            Background = Surface,
+            Foreground = Ink,
+            BorderBrush = BorderMedium,
+            BorderThickness = new Thickness(1)
+        };
+        _stop.Named(operation == ElevatedOperation.Backup ? "Stop this backup" : "Stop this recovery drill");
+        _stop.Click += (_, _) =>
+        {
+            _stop.IsEnabled = false;
+            _detail.Text = "Stopping. The engine is being told to stop; this can take a moment.";
+            _running.Cancel();
+        };
+
         AutomationProperties.SetName(_headline, "Operation status");
         AutomationProperties.SetLiveSetting(_headline, AutomationLiveSetting.Assertive);
 
@@ -111,17 +133,34 @@ public sealed class ElevatedOperationWindow : Window
         {
             Margin = new Thickness(28, 26),
             Spacing = 16,
-            Children = { _headline, _detail, _close }
+            Children =
+            {
+                _headline,
+                _detail,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Children = { _close, _stop }
+                }
+            }
         };
 
         Opened += async (_, _) => await RunAsync();
+
+        // The window owns the cancellation source, so it disposes of it when it closes - which for a
+        // window is the end of its life.
+        Closed += (_, _) => Dispose();
     }
+
+    /// <summary>Releases the cancellation source this window owns.</summary>
+    public void Dispose() => _running.Dispose();
 
     private async Task RunAsync()
     {
         try
         {
-            var (success, failure) = await _run(_repositoryId, CancellationToken.None);
+            var (success, failure) = await _run(_repositoryId, _running.Token);
             Succeeded = success;
             if (success)
             {
@@ -140,6 +179,17 @@ public sealed class ElevatedOperationWindow : Window
                 _detail.Foreground = Ink;
             }
         }
+        catch (OperationCanceledException) when (_running.IsCancellationRequested)
+        {
+            // Asked for, so it is reported as what happened rather than as a fault - including the
+            // one consequence the person needs to know about.
+            Succeeded = false;
+            _headline.Text = _operation == ElevatedOperation.Backup ? "The backup was stopped" : "The drill was stopped";
+            _headline.Foreground = Caution;
+            _detail.Text = "Nothing new was recorded. If the next backup says the repository is locked, "
+                + "clear the lock from this source's settings - an interrupted run leaves one behind.";
+            _detail.Foreground = Ink;
+        }
         catch (Exception error)
         {
             Succeeded = false;
@@ -151,6 +201,7 @@ public sealed class ElevatedOperationWindow : Window
         finally
         {
             _close.IsEnabled = true;
+            _stop.IsEnabled = false;
         }
     }
 }

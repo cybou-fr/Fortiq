@@ -93,6 +93,7 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
     private string? _failure;
     private bool _failureIsSticky;
     private string? _activity;
+    private CancellationTokenSource? _running;
     private bool _busy;
     private DateTimeOffset? _reportProducedAt;
     private HealthStoreState _state = HealthStoreState.NotInitialized;
@@ -119,6 +120,27 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
     public string? Failure { get => _failure; private set => Set(ref _failure, value); }
 
     public bool Busy { get => _busy; private set => Set(ref _busy, value); }
+
+    /// <summary>Whether what is running can be stopped by asking.</summary>
+    public bool CanCancel => _running is { IsCancellationRequested: false };
+
+    /// <summary>
+    /// Asks the running operation to stop.
+    /// </summary>
+    /// <remarks>
+    /// The work carries on until the engine notices, which is why the screen says the request was made
+    /// rather than reporting it as already done - and why a cancelled backup can leave its lock in the
+    /// repository, which the source's own screen offers to clear.
+    /// </remarks>
+    public void CancelRunning()
+    {
+        if (_running is { IsCancellationRequested: false } running)
+        {
+            Activity = "Stopping…";
+            running.Cancel();
+            OnPropertyChanged(nameof(CanCancel));
+        }
+    }
 
     /// <summary>What is running right now, named. Null when nothing is.</summary>
     /// <remarks>
@@ -292,14 +314,24 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
         Busy = true;
         ClearFailure();
         Activity = $"Backing up {repository.Title}…";
+        using var running = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _running = running;
+        OnPropertyChanged(nameof(CanCancel));
         string? outcome = null;
         try
         {
-            var result = await _backup.BackupAsync(repository.Health.RepositoryId, cancellationToken);
+            var result = await _backup.BackupAsync(repository.Health.RepositoryId, running.Token);
             if (!result.Success)
             {
                 outcome = result.Failure ?? "The backup did not complete, and gave no reason.";
             }
+        }
+        catch (OperationCanceledException) when (running.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            // Somebody stopped it, which is an outcome rather than a fault - but it is said out loud,
+            // because a backup that was stopped is a backup that did not happen.
+            outcome = "The backup was stopped before it finished, so nothing new was recorded. "
+                + "If the next backup says the repository is locked, clear the lock from this source's settings.";
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
@@ -307,8 +339,10 @@ public sealed class RepositoriesViewModel : INotifyPropertyChanged
         }
         finally
         {
+            _running = null;
             Busy = false;
             Activity = null;
+            OnPropertyChanged(nameof(CanCancel));
         }
 
         await RefreshAsync(cancellationToken);

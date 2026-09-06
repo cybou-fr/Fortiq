@@ -156,7 +156,14 @@ public static class Program
             provider.GetRequiredService<IScheduleStore>(),
             provider.GetRequiredService<ProvenRestore>(),
             provider.GetRequiredService<HealthPublisher>(),
-            provider.GetRequiredService<ScheduledBackupRunner>()));
+            provider.GetRequiredService<ScheduledBackupRunner>(),
+            new StaleLockRecovery(
+                engineRoot,
+                paths.Working,
+                runDirectory: paths.Runs,
+                receiptDirectory: paths.Receipts,
+                storage: provider.GetRequiredService<IObjectStorageCredentialProvider>(),
+                auditAnchor: auditAnchor)));
 
         builder.Services.AddHostedService<SchedulerWorker>();
         builder.Services.AddHostedService(provider => provider.GetRequiredService<ServiceIpcHost>());

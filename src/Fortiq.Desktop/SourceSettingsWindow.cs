@@ -101,6 +101,7 @@ public sealed class SourceSettingsWindow : Window
         _body.Children.Add(SchedulingCard());
         _body.Children.Add(DrillCard());
         _body.Children.Add(RetentionCard());
+        _body.Children.Add(LockCard());
         _body.Children.Add(StopCard());
         _body.Children.Add(Buttons());
     }
@@ -280,6 +281,39 @@ public sealed class SourceSettingsWindow : Window
         }
 
         return Card(body, Surface, Line);
+    }
+
+    /// <summary>
+    /// The way out of a repository an interrupted run left locked.
+    /// </summary>
+    /// <remarks>
+    /// Offered with what it assumes stated next to it rather than performed automatically. Fortiq
+    /// cannot tell a lock left by a killed run on this machine from one held by a second computer
+    /// backing up to the same repository right now, and clearing the second kind interrupts a backup
+    /// that is working.
+    /// </remarks>
+    private Border LockCard()
+    {
+        var clear = Secondary("Clear the lock").Named("Clear the lock left by an interrupted run");
+        clear.IsEnabled = !_model.Busy;
+        clear.Click += async (_, _) => await _model.ClearLockAsync(CancellationToken.None);
+
+        return Card(new StackPanel
+        {
+            Spacing = 12,
+            Children =
+            {
+                Text("If backups say the repository is locked", 16, FontWeight.SemiBold, Ink),
+                Text("A run that was interrupted - cancelled, or stopped by a power cut - leaves its lock behind, "
+                    + "and every later backup fails until it is cleared. Fortiq takes the repository to itself while "
+                    + "it clears, so nothing of its own is running underneath.",
+                    12, FontWeight.Normal, Muted, true),
+                Text("Do not do this while another computer is backing up to the same repository: that lock looks "
+                    + "identical from here, and clearing it interrupts a backup that is working.",
+                    12, FontWeight.SemiBold, Caution, true),
+                clear
+            }
+        }, Surface, Line);
     }
 
     private Border StopCard()

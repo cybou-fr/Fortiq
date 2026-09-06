@@ -38,6 +38,7 @@ public sealed class ServiceIpcHost : BackgroundService
     private readonly ProvenRestore _restore;
     private readonly HealthPublisher _health;
     private readonly ScheduledBackupRunner _backups;
+    private readonly StaleLockRecovery _locks;
 
     public ServiceIpcHost(
         FortiqStatePaths paths,
@@ -47,6 +48,7 @@ public sealed class ServiceIpcHost : BackgroundService
         ProvenRestore restore,
         HealthPublisher health,
         ScheduledBackupRunner backups,
+        StaleLockRecovery locks,
         string? helperPath = null)
     {
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
@@ -56,6 +58,7 @@ public sealed class ServiceIpcHost : BackgroundService
         _restore = restore ?? throw new ArgumentNullException(nameof(restore));
         _health = health ?? throw new ArgumentNullException(nameof(health));
         _backups = backups ?? throw new ArgumentNullException(nameof(backups));
+        _locks = locks ?? throw new ArgumentNullException(nameof(locks));
         _helperPath = helperPath ?? Path.Combine(AppContext.BaseDirectory, "Fortiq.PasswordHelper.exe");
     }
 
@@ -114,19 +117,97 @@ public sealed class ServiceIpcHost : BackgroundService
                 using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
                 using var writer = new StreamWriter(pipe, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
 
-                while (!stoppingToken.IsCancellationRequested && pipe.IsConnected)
+                // One request per connection, which is what the client has always done - every call it
+                // makes opens a pipe of its own. It is stated here rather than left implied, because
+                // watching for a cancellation takes over this connection's reader: a second request
+                // read from the same connection would be racing the watcher for the same bytes.
+                if (stoppingToken.IsCancellationRequested || !pipe.IsConnected)
                 {
-                    var line = await reader.ReadLineAsync(stoppingToken);
-                    if (line is null) break;
-
-                    var response = await ProcessRequestAsync(line, pipe, stoppingToken);
-                    var responseJson = JsonSerializer.Serialize(response, JsonOptions);
-                    await writer.WriteLineAsync(responseJson.AsMemory(), stoppingToken);
+                    return;
                 }
+
+                var line = await reader.ReadLineAsync(stoppingToken);
+                if (line is null)
+                {
+                    return;
+                }
+
+                var response = await ProcessCancellableAsync(line, pipe, reader, stoppingToken);
+                var responseJson = JsonSerializer.Serialize(response, JsonOptions);
+                await writer.WriteLineAsync(responseJson.AsMemory(), stoppingToken);
             }
             catch (Exception) when (!stoppingToken.IsCancellationRequested)
             {
             }
+        }
+    }
+
+    /// <summary>
+    /// Runs one request, and stops it if the caller asks or goes away while it is running.
+    /// </summary>
+    /// <remarks>
+    /// A backup of a large folder takes minutes and could not be stopped: the desktop's only recourse
+    /// was to close and let the work continue invisibly to the end. What was missing was not a button
+    /// but a way for one to mean anything - the request had already been read, and nothing was
+    /// listening to the pipe until the answer went back down it.
+    ///
+    /// Something is listening now. Anything the caller writes while the operation runs, and the pipe
+    /// breaking because they closed it, both mean the same thing: stop. Reading is safe here precisely
+    /// because the protocol has the caller silent until it is answered, and the client opens a
+    /// connection per request - so this connection has nothing else to carry, and it is closed after a
+    /// cancellable operation rather than returned to the loop with its reader half consumed.
+    ///
+    /// Cancellation stops the engine by killing its process, which leaves that run's lock behind in
+    /// the repository. That is why "clear the lock" exists and why it is offered on the same screen.
+    /// </remarks>
+    private async Task<ServiceIpcProtocol.Response> ProcessCancellableAsync(
+        string requestJson,
+        NamedPipeServerStream pipe,
+        StreamReader reader,
+        CancellationToken stoppingToken)
+    {
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+
+        // The read is not awaited here. It completes when the caller says stop, or never - and the
+        // reader is disposed with the connection either way.
+        var watching = Task.Run(async () =>
+        {
+            try
+            {
+                // Null is the pipe closing; anything else is the caller asking. Neither needs
+                // interpreting: nothing else may be sent while a request is outstanding.
+                await reader.ReadLineAsync(stoppingToken);
+            }
+            catch (Exception error) when (error is IOException or ObjectDisposedException or OperationCanceledException)
+            {
+                // The connection ending is the signal, not a fault to report.
+            }
+
+            if (!operation.IsCancellationRequested)
+            {
+                await operation.CancelAsync();
+            }
+        }, CancellationToken.None);
+
+        try
+        {
+            return await ProcessRequestAsync(requestJson, pipe, operation.Token);
+        }
+        catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+        {
+            // The caller's own request. Reported as an outcome rather than as a failure of the
+            // service, and said in the words the person will read.
+            return new ServiceIpcProtocol.Response(false,
+                "The operation was stopped before it finished. Nothing was recorded for it, and the "
+                + "repository may be holding the lock of the interrupted run - clear it from the "
+                + "source's settings if the next backup says the repository is locked.");
+        }
+        finally
+        {
+            // Whatever happened, this connection's reader has been taken over and the watcher is
+            // still holding it. Both end here.
+            await operation.CancelAsync();
+            _ = watching;
         }
     }
 
@@ -173,6 +254,9 @@ public sealed class ServiceIpcHost : BackgroundService
 
                 case "removeschedule":
                     return await HandleRemoveScheduleAsync(req.PayloadJson, cancellationToken);
+
+                case "clearlock":
+                    return await HandleClearLockAsync(req.PayloadJson, cancellationToken);
 
                 default:
                     return new ServiceIpcProtocol.Response(false, $"Unknown IPC command: '{req.Command}'");
@@ -499,6 +583,48 @@ public sealed class ServiceIpcHost : BackgroundService
             payload.DrillEveryDays is { } days and > 0 ? TimeSpan.FromDays(days) : null,
             retention,
             payload.Prune ? PruneMode.ForgetAndPrune : PruneMode.ForgetOnly);
+    }
+
+    /// <summary>Clears the lock an interrupted run left in a repository.</summary>
+    /// <remarks>
+    /// Privileged like every other operation that opens a repository, and refused outright while
+    /// another Fortiq run on this machine holds it - clearing a lock under a running backup would
+    /// remove that backup's own lock.
+    /// </remarks>
+    private async Task<ServiceIpcProtocol.Response> HandleClearLockAsync(string? payloadJson, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return new ServiceIpcProtocol.Response(false, "Missing lock payload.");
+        }
+
+        var payload = JsonSerializer.Deserialize<ServiceIpcProtocol.ClearLockPayload>(payloadJson, JsonOptions);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.RepositoryId))
+        {
+            return new ServiceIpcProtocol.Response(false, "Invalid lock payload.");
+        }
+
+        var schedule = await FindScheduleAsync(payload.RepositoryId, cancellationToken);
+        if (schedule is null)
+        {
+            return new ServiceIpcProtocol.Response(false, $"No schedule found on machine for repository '{payload.RepositoryId}'.");
+        }
+
+        try
+        {
+            await _locks.ClearAsync(schedule, cancellationToken);
+        }
+        catch (RepositoryBusyException busy)
+        {
+            // Not an error to be explained away: it is the guard working. The person is told to wait
+            // rather than shown a failure they might repeat until it happens to get through.
+            return new ServiceIpcProtocol.Response(false,
+                "Fortiq is working on this repository right now, so its locks were left alone. "
+                + $"Wait for that to finish and try again. ({busy.Message})");
+        }
+
+        await _health.PublishAsync(cancellationToken);
+        return new ServiceIpcProtocol.Response(true);
     }
 
     private Task<BackupSchedule?> FindScheduleAsync(string repositoryId, CancellationToken cancellationToken) =>

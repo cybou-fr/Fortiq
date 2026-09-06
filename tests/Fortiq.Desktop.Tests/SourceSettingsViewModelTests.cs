@@ -155,6 +155,35 @@ public sealed class SourceSettingsViewModelTests
     }
 
     [Fact]
+    public async Task ClearingALockSaysThatBackupsCanRunAgain()
+    {
+        var store = new FakeStore(Settings());
+        var model = new SourceSettingsViewModel(store, "repo-1", "Documents");
+        await model.LoadAsync(CancellationToken.None);
+
+        await model.ClearLockAsync(CancellationToken.None);
+
+        Assert.Equal("repo-1", store.ClearedLock);
+        Assert.Contains("can run again", model.Saved!, StringComparison.Ordinal);
+        Assert.Null(model.Failure);
+    }
+
+    [Fact]
+    public async Task ARefusedLockClearanceIsReportedRatherThanClaimedAsDone()
+    {
+        // The service refuses while one of its own runs holds the repository. That is the guard
+        // working, and somebody who was told it succeeded would go on to wonder why backups still fail.
+        var store = new FakeStore(Settings(), failure: new InvalidOperationException("Fortiq is working on this repository right now."));
+        var model = new SourceSettingsViewModel(store, "repo-1", "Documents");
+        await model.LoadAsync(CancellationToken.None);
+
+        await model.ClearLockAsync(CancellationToken.None);
+
+        Assert.Null(model.Saved);
+        Assert.Contains("working on this repository", model.Failure!, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NothingCanBeSavedBeforeAnythingHasBeenRead()
     {
         var store = new FakeStore(Settings());
@@ -180,6 +209,8 @@ public sealed class SourceSettingsViewModelTests
 
         internal string? RemovedId { get; private set; }
 
+        internal string? ClearedLock { get; private set; }
+
         public Task<SourceDetails?> ReadAsync(string repositoryId, CancellationToken cancellationToken) =>
             Task.FromResult(_settings is null
                 ? null
@@ -194,6 +225,17 @@ public sealed class SourceSettingsViewModelTests
 
             Saved = settings;
             _settings = keepsInstead ?? settings;
+            return Task.CompletedTask;
+        }
+
+        public Task ClearLockAsync(string repositoryId, CancellationToken cancellationToken)
+        {
+            if (failure is not null)
+            {
+                return Task.FromException(failure);
+            }
+
+            ClearedLock = repositoryId;
             return Task.CompletedTask;
         }
 

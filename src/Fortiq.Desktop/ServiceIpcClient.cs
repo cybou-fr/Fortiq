@@ -13,6 +13,7 @@ public interface IServiceIpcClient
     Task<ServiceIpcProtocol.BackupResponse> BackupAsync(string repositoryId, CancellationToken cancellationToken = default);
     Task UpdateScheduleAsync(string repositoryId, ViewModels.SourceSettings settings, CancellationToken cancellationToken = default);
     Task RemoveScheduleAsync(string repositoryId, CancellationToken cancellationToken = default);
+    Task ClearLockAsync(string repositoryId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -89,7 +90,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
 
         await writer.WriteLineAsync(JsonSerializer.Serialize(req, JsonOptions).AsMemory(), cancellationToken);
 
-        var line = await ReadOperationResponseAsync(reader, cancellationToken)
+        var line = await ReadOperationResponseAsync(reader, cancellationToken, writer)
             ?? throw new InvalidOperationException("Service closed connection unexpectedly during provisioning.");
 
         var resp = JsonSerializer.Deserialize<ServiceIpcProtocol.Response>(line, JsonOptions)
@@ -127,7 +128,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
 
         await writer.WriteLineAsync(JsonSerializer.Serialize(req, JsonOptions).AsMemory(), cancellationToken);
 
-        var line = await ReadOperationResponseAsync(reader, cancellationToken)
+        var line = await ReadOperationResponseAsync(reader, cancellationToken, writer)
             ?? throw new InvalidOperationException("Service closed connection unexpectedly during restore drill.");
 
         var resp = JsonSerializer.Deserialize<ServiceIpcProtocol.Response>(line, JsonOptions)
@@ -164,7 +165,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
 
         await writer.WriteLineAsync(JsonSerializer.Serialize(req, JsonOptions).AsMemory(), cancellationToken);
 
-        var line = await ReadOperationResponseAsync(reader, cancellationToken)
+        var line = await ReadOperationResponseAsync(reader, cancellationToken, writer)
             ?? throw new InvalidOperationException("Service closed connection unexpectedly during backup.");
 
         var resp = JsonSerializer.Deserialize<ServiceIpcProtocol.Response>(line, JsonOptions)
@@ -213,6 +214,17 @@ public sealed class ServiceIpcClient : IServiceIpcClient
             cancellationToken);
     }
 
+    public Task ClearLockAsync(string repositoryId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+
+        return SendAsync(
+            "clearLock",
+            new ServiceIpcProtocol.ClearLockPayload(repositoryId),
+            "clear the lock on that repository",
+            cancellationToken);
+    }
+
     /// <summary>
     /// One request whose answer is only whether it worked.
     /// </summary>
@@ -241,7 +253,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
         var request = new ServiceIpcProtocol.Request(command, JsonSerializer.Serialize(payload, JsonOptions));
         await writer.WriteLineAsync(JsonSerializer.Serialize(request, JsonOptions).AsMemory(), cancellationToken);
 
-        var line = await ReadOperationResponseAsync(reader, cancellationToken)
+        var line = await ReadOperationResponseAsync(reader, cancellationToken, writer)
             ?? throw new InvalidOperationException($"Service closed connection unexpectedly; it did not {description}.");
 
         var response = JsonSerializer.Deserialize<ServiceIpcProtocol.Response>(line, JsonOptions)
@@ -253,12 +265,40 @@ public sealed class ServiceIpcClient : IServiceIpcClient
         }
     }
 
-    private static async Task<string?> ReadOperationResponseAsync(StreamReader reader, CancellationToken cancellationToken)
+    /// <summary>
+    /// Waits for the answer, and tells the service to stop if the caller stops waiting.
+    /// </summary>
+    /// <remarks>
+    /// Abandoning the read on its own would leave the operation running to completion on the other
+    /// side, invisibly - a cancel button that cancelled only the waiting. The service treats anything
+    /// written while a request is outstanding as "stop", so a line goes down the pipe first; if the
+    /// pipe is already gone, the service sees that instead, which means the same thing.
+    /// </remarks>
+    private static async Task<string?> ReadOperationResponseAsync(
+        StreamReader reader,
+        CancellationToken cancellationToken,
+        StreamWriter? writer = null)
     {
         try
         {
             return await reader.ReadLineAsync(cancellationToken).AsTask()
                 .WaitAsync(TimeSpan.FromMinutes(30), cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            if (writer is not null)
+            {
+                try
+                {
+                    await writer.WriteLineAsync("cancel");
+                }
+                catch (Exception error) when (error is IOException or ObjectDisposedException)
+                {
+                    // The connection has already gone, which the service reads as the same request.
+                }
+            }
+
+            throw;
         }
         catch (TimeoutException error)
         {

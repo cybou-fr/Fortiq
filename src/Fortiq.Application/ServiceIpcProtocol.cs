@@ -49,4 +49,7 @@ public static class ServiceIpcProtocol
         bool Prune);
 
     public sealed record RemoveSchedulePayload(string RepositoryId);
+
+    /// <summary>Asks for the lock an interrupted run left in a repository to be cleared.</summary>
+    public sealed record ClearLockPayload(string RepositoryId);
 }

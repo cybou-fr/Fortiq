@@ -373,7 +373,7 @@ public sealed class MainWindow : Window
             return null;
         }
 
-        return Card(new StackPanel
+        var bar = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 10,
@@ -382,7 +382,20 @@ public sealed class MainWindow : Window
                 new ProgressBar { IsIndeterminate = true, Width = 120, VerticalAlignment = VerticalAlignment.Center }.Named(running),
                 Text(running, 13, FontWeight.SemiBold, Ink)
             }
-        }, InfoSurface, InfoLine, new Thickness(18, 12));
+        };
+
+        // Only what this window is running can be stopped from here. The elevated pass has its own
+        // window with its own button, and offering a dead one beside it would be worse than none.
+        if (_model.CanCancel)
+        {
+            var stop = Secondary("Stop").Named("Stop the operation that is running");
+            stop.Padding = new Thickness(12, 4);
+            stop.FontSize = 11;
+            stop.Click += (_, _) => { _model.CancelRunning(); RenderActive(); };
+            bar.Children.Add(stop);
+        }
+
+        return Card(bar, InfoSurface, InfoLine, new Thickness(18, 12));
     }
 
     /// <summary>Puts the running and failed banners at the top of a screen, when there are any.</summary>

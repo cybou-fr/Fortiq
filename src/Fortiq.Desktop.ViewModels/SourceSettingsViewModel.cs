@@ -51,6 +51,17 @@ public interface ISourceSettingsStore
     Task SaveAsync(string repositoryId, SourceSettings settings, CancellationToken cancellationToken);
 
     Task RemoveAsync(string repositoryId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Clears the lock an interrupted run left in the repository.
+    /// </summary>
+    /// <remarks>
+    /// Not a repair Fortiq performs on its own. Clearing a lock whose owner cannot be proven dead is
+    /// what makes this able to fix an interrupted run and what makes it unsafe while a second
+    /// computer is backing up to the same repository - and nothing on this machine can tell those
+    /// two apart. So it is offered, explained, and taken by somebody.
+    /// </remarks>
+    Task ClearLockAsync(string repositoryId, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -226,6 +237,28 @@ public sealed class SourceSettingsViewModel : INotifyPropertyChanged
         if (Failure is null)
         {
             Saved = "Saved.";
+        }
+    }
+
+    /// <summary>Clears the lock an interrupted run left in this source's repository.</summary>
+    public async Task ClearLockAsync(CancellationToken cancellationToken)
+    {
+        if (Busy || Details is null) return;
+        Busy = true;
+        Failure = null;
+        Saved = null;
+        try
+        {
+            await _store.ClearLockAsync(_repositoryId, cancellationToken);
+            Saved = "The lock was cleared. Backups to this repository can run again.";
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            Failure = PlainFailure.Describe(error);
+        }
+        finally
+        {
+            Busy = false;
         }
     }
 

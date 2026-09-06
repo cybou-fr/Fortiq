@@ -79,6 +79,25 @@ public sealed class SourceSettingsAdapter : ISourceSettingsStore
         await _schedules.RemoveAsync(schedule.Id, cancellationToken);
     }
 
+    [SupportedOSPlatform("windows")]
+    public async Task ClearLockAsync(string repositoryId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+
+        if (_serviceClient is null)
+        {
+            // Portable holds no privileged half to ask, and the operation opens the repository with a
+            // device key this process cannot use unattended. Saying so beats a button that fails with
+            // something about a named pipe.
+            throw new InvalidOperationException(
+                "Clearing a repository lock needs the Fortiq service, which portable mode does not have. "
+                + "Install Fortiq on this PC to do it from here.");
+        }
+
+        await RequireServiceAsync(cancellationToken);
+        await _serviceClient.ClearLockAsync(repositoryId, cancellationToken);
+    }
+
     /// <summary>The schedule as a screen states it: whole hours, whole days, plain counts.</summary>
     public static SourceSettings SettingsOf(BackupSchedule schedule)
     {
