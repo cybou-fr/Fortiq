@@ -20,6 +20,7 @@ WHAT IS IN THIS PACKAGE
 QUICK START
 
   1. Open the "desktop" folder and run Fortiq.Desktop.exe.
+     (If you downloaded the Setup .exe instead, it has already done this for you.)
   2. Choose "Install Fortiq" to set it up on this PC, or "Run as Portable"
      to use it without installing anything.
   3. Follow the wizard to protect your first folder.
@@ -41,6 +42,15 @@ THE 24 WORDS ARE THE BACKUP OF YOUR BACKUP
   any Windows machine - no Fortiq account, no Fortiq server, no installation.
 
   RECOVERY-GUIDE.md in this package explains exactly how.
+
+
+UPDATING
+
+  Download the newer release and run it. It installs over the version you have
+  and leaves your backups, schedules and recovery kits where they are.
+
+  Fortiq does not update itself over the network, and does not check for updates
+  on its own. Nothing here talks to a Fortiq server, because there isn't one.
 
 
 GETTING YOUR FILES BACK

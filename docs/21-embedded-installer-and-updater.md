@@ -29,6 +29,23 @@ Fortiq eliminates the dichotomy between "portable tools" and "installed enterpri
 
 ---
 
+## How the Community Edition updates
+
+By downloading the next release and running it. There is no network update path in the shipped
+product: Fortiq does not poll for versions, does not contact a Fortiq server - there is not one - and
+does not replace its own binaries while running.
+
+`Fortiq.Infrastructure.Updates` exists and is tested: TUF metadata, the staged install with its
+rollback, the absence markers. It is not reachable from the Community build, and it cannot be until
+releases are code-signed, because every component replacement is gated on Authenticode verification.
+Signing needs a certificate tied to a validated legal identity, and the Community edition is not
+going to buy one. This section used to describe the in-app updater as though it were the way Fortiq
+updates; it is machinery that is built and parked.
+
+What that leaves is the honest arrangement, and not a bad one for a backup tool: a new version
+arrives only because somebody chose to download it. State lives outside `%ProgramFiles%\Fortiq`, so
+installing over an existing installation keeps repositories, schedules, receipts and recovery kits.
+
 ## Operating Modes
 
 `Fortiq.Desktop.exe` detects its operating environment upon launch and dynamically enters one of four operational modes:

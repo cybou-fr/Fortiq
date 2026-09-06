@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Fortiq-Setup</AssemblyName>
+    <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
+
+    <!--
+      The stub carries its own runtime because the machine it lands on may have none - that is the
+      whole reason a single file exists. Trimmed and invariant, because it does nothing but unpack a
+      zip and start a process, and every megabyte here is a megabyte on top of a payload that is
+      already large.
+    -->
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!--
+    The payload is supplied by the packaging script rather than committed. A build without it still
+    compiles, and refuses at run time rather than producing an installer that installs nothing.
+  -->
+  <ItemGroup Condition="'$(FortiqPayloadZip)' != ''">
+    <EmbeddedResource Include="$(FortiqPayloadZip)" LogicalName="fortiq-payload.zip" />
+  </ItemGroup>
+
+</Project>

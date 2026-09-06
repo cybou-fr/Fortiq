@@ -61,6 +61,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fortiq.ControlPlane", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fortiq.ControlPlane.Tests", "tests\Fortiq.ControlPlane.Tests\Fortiq.ControlPlane.Tests.csproj", "{C3F9144B-0C77-4042-A55F-0C440EF3DF8A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fortiq.Setup", "src\Fortiq.Setup\Fortiq.Setup.csproj", "{CEF10B70-3641-48F5-91AC-90BB8D952100}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -395,6 +397,18 @@ Global
 		{C3F9144B-0C77-4042-A55F-0C440EF3DF8A}.Release|x64.Build.0 = Release|Any CPU
 		{C3F9144B-0C77-4042-A55F-0C440EF3DF8A}.Release|x86.ActiveCfg = Release|Any CPU
 		{C3F9144B-0C77-4042-A55F-0C440EF3DF8A}.Release|x86.Build.0 = Release|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Debug|x64.Build.0 = Debug|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Debug|x86.Build.0 = Debug|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Release|x64.ActiveCfg = Release|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Release|x64.Build.0 = Release|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Release|x86.ActiveCfg = Release|Any CPU
+		{CEF10B70-3641-48F5-91AC-90BB8D952100}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -427,5 +441,6 @@ Global
 		{FE5D95B1-6C1C-49E4-B975-9767BB072CA0} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{E7B5665C-7B95-4AF4-A6E3-9F0EC576E396} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{C3F9144B-0C77-4042-A55F-0C440EF3DF8A} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{CEF10B70-3641-48F5-91AC-90BB8D952100} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

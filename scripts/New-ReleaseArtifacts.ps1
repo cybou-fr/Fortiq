@@ -108,6 +108,23 @@ finally {
     $written.Dispose()
 }
 
+Write-Host 'Building the single-file installer'
+# The installer carries the archive that was just built and verified, so the exe and the zip are the
+# same package by construction rather than by two builds that happened to agree.
+$setupProject = Join-Path $repositoryRoot 'src/Fortiq.Setup/Fortiq.Setup.csproj'
+$setupOutput = Join-Path $OutputDirectory 'setup'
+dotnet publish $setupProject `
+    --configuration $Configuration `
+    --runtime $Runtime `
+    -p:FortiqPayloadZip=$communityZip `
+    --output $setupOutput
+if ($LASTEXITCODE -ne 0) { throw 'Building the installer failed.' }
+
+$setupName = "Fortiq-Community-$($version.Archive)-$Runtime-Setup.exe"
+Move-Item (Join-Path $setupOutput 'Fortiq-Setup.exe') (Join-Path $OutputDirectory $setupName)
+Remove-Item -Recurse -Force $setupOutput
+Write-Host ("Installer: {0} ({1:N1} MB)" -f $setupName, ((Get-Item (Join-Path $OutputDirectory $setupName)).Length / 1MB))
+
 Move-Item (Join-Path $sbomDirectory 'sbom.json') (Join-Path $OutputDirectory 'sbom.json')
 Remove-Item -Recurse -Force $sbomDirectory, $tools
 

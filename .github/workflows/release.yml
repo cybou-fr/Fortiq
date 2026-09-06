@@ -93,6 +93,7 @@ jobs:
             artifacts/release/recover/Fortiq.Recover.exe
             artifacts/release/recover/Fortiq.PasswordHelper.exe
             artifacts/release/Fortiq-Community-*.zip
+            artifacts/release/Fortiq-Community-*-Setup.exe
             artifacts/release/sbom.json
             artifacts/release/SHA256SUMS
 
@@ -105,6 +106,7 @@ jobs:
         # this run rather than from somebody's laptop, which is the whole reason to publish from CI.
         run: |
           $archive = Get-ChildItem artifacts/release/Fortiq-Community-*.zip | Select-Object -First 1
+          $setup = Get-ChildItem artifacts/release/Fortiq-Community-*-Setup.exe | Select-Object -First 1
           $notes = @"
           Fortiq Community Edition, built by this workflow from ``$env:GITHUB_SHA``.
 
@@ -112,14 +114,22 @@ jobs:
           certificate this repository does not hold, and an unsigned build must say so rather than
           look signed.
 
-          Unpack the archive and run ``desktop\Fortiq.Desktop.exe``. It can install itself or run
-          portable. ``RECOVERY-GUIDE.md`` inside explains how to get files back on a machine that has
-          never had Fortiq - read it before you need it.
+          **Download the Setup .exe.** It carries everything, unpacks itself and starts Fortiq, which
+          then offers to install or to run portable. The .zip is the same package for anyone who
+          would rather unpack it themselves.
+
+          To update, download the next release and run it. Fortiq does not update itself over the
+          network and never contacts a Fortiq server. Installing over an existing version keeps your
+          repositories, schedules and recovery kits.
+
+          ``RECOVERY-GUIDE.md`` inside explains how to get files back on a machine that has never had
+          Fortiq - read it before you need it.
 
           Verify what you downloaded against ``SHA256SUMS``, and against the build provenance attested
           by this run.
           "@
           gh release create $env:GITHUB_REF_NAME `
+            $setup.FullName `
             $archive.FullName `
             artifacts/release/SHA256SUMS `
             artifacts/release/sbom.json `
