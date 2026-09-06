@@ -199,7 +199,6 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
 
         if (preferences.UpdateDrill)
         {
-<<<<<<< HEAD
             if (preferences.DrillEvery is { } drill)
             {
                 document["drillRecurrence"] = new JsonObject
@@ -209,30 +208,6 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
                 };
             }
             else
-=======
-        if (preferences.DrillEvery is { } drill)
-        {
-            document["drillRecurrence"] = new JsonObject
-            {
-                ["kind"] = "interval",
-                ["period"] = drill.ToString("c", System.Globalization.CultureInfo.InvariantCulture)
-            };
-        }
-        else
-        {
-            document.AsObject().Remove("drillRecurrence");
-        }
-
-        }
-
-        if (preferences.UpdateRetention)
-        {
-        if (preferences.Retention is { } retention)
-        {
-            // Retention needs both halves. The recurrence is put beside the policy here so a screen
-            // cannot produce the one shape the reader treats as unconfigured.
-            document["retentionRecurrence"] = new JsonObject
->>>>>>> c812cf8226017486fb7d620438d2af3f88a06041
             {
                 document.AsObject().Remove("drillRecurrence");
             }
@@ -272,7 +247,6 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
                 document.AsObject().Remove("retention");
                 document.AsObject().Remove("prune");
             }
-        }
         }
 
         // Read back before it is committed. The reader is the authority on what a schedule file means,

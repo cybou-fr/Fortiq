@@ -20,27 +20,17 @@ public sealed class SourceSettingsAdapter : ISourceSettingsStore
 {
     private readonly FileSystemScheduleStore _schedules;
     private readonly IServiceIpcClient? _serviceClient;
-<<<<<<< HEAD
     private readonly Func<string, string, SourceSettings?, CancellationToken, Task<bool>>? _elevate;
     private readonly Func<BackupSchedule, CancellationToken, Task>? _clearLocalLock;
 
     public SourceSettingsAdapter(FileSystemScheduleStore schedules, IServiceIpcClient? serviceClient = null,
         Func<BackupSchedule, CancellationToken, Task>? clearLocalLock = null,
         Func<string, string, SourceSettings?, CancellationToken, Task<bool>>? elevate = null)
-=======
-    private readonly Func<BackupSchedule, CancellationToken, Task>? _clearLocalLock;
-
-    public SourceSettingsAdapter(FileSystemScheduleStore schedules, IServiceIpcClient? serviceClient = null,
-        Func<BackupSchedule, CancellationToken, Task>? clearLocalLock = null)
->>>>>>> c812cf8226017486fb7d620438d2af3f88a06041
     {
         _schedules = schedules ?? throw new ArgumentNullException(nameof(schedules));
         _serviceClient = serviceClient;
         _clearLocalLock = clearLocalLock;
-<<<<<<< HEAD
         _elevate = elevate;
-=======
->>>>>>> c812cf8226017486fb7d620438d2af3f88a06041
     }
 
     public async Task<SourceDetails?> ReadAsync(string repositoryId, CancellationToken cancellationToken)
