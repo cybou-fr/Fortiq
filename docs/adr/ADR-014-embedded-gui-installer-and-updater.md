@@ -35,7 +35,10 @@ Adopt an **Embedded GUI Installer & Component Lifecycle Architecture** directly 
 
 3. **UAC Elevation Boundary & Least-Privilege Service Setup**:
    - Installation and system-level updates request elevation via standard Windows UAC (`runas` verb on an internal worker command).
-   - The installer creates the Windows Service with a dedicated, least-privilege **Service SID** (`NT SERVICE\Fortiq`) rather than running under full `NT AUTHORITY\SYSTEM`.
+   - The installer creates the Windows Service under `LocalSystem` and adds an unrestricted **Service
+     SID** (`NT SERVICE\Fortiq`) to its token. The SID is an identity for ACLs, not a reduction in
+     privilege: the service holds what `LocalSystem` holds. This decision recorded the opposite until
+     it was checked against a running installation.
    - Restrictive NTFS DACLs are configured:
      - Program files (`%ProgramFiles%\Fortiq`): Read/Execute for Users, Write for Administrators/SYSTEM only.
      - State root (`%ProgramData%\Fortiq`): Restricted strictly to `SYSTEM` and `NT SERVICE\Fortiq`.

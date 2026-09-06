@@ -32,7 +32,7 @@ public sealed class EngineCredentialTests
     }
 
     [Fact]
-    public async Task AHandoverThatNeverHappensIsReportedAsUnlockFailed()
+    public async Task AHandoverThatNeverHappensSaysThatRatherThanUnlockFailed()
     {
         var helper = Path.Combine(AppContext.BaseDirectory, "Fortiq.Security.Tests.dll");
         using var lease = new TestOnlyKeyLease(new byte[EnginePasswordV1Encoder.EngineUnlockSecretSize]);
@@ -40,6 +40,13 @@ public sealed class EngineCredentialTests
 
         await using var session = await provider.BeginAsync(Guid.NewGuid(), CancellationToken.None);
 
-        await Assert.ThrowsAsync<UnlockFailedException>(() => session.CompleteAsync(CancellationToken.None));
+        // Still an unlock failure - every existing handler catches it - but it no longer arrives as
+        // the single word that a wrong recovery phrase produces. Nothing about a secret is disclosed
+        // by saying so: the handover timed out before any secret was tested.
+        var failure = await Assert.ThrowsAsync<CredentialHandoverException>(
+            () => session.CompleteAsync(CancellationToken.None));
+
+        Assert.IsAssignableFrom<UnlockFailedException>(failure);
+        Assert.NotEqual("UnlockFailed", failure.Message);
     }
 }

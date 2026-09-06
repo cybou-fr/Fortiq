@@ -1126,7 +1126,12 @@ public sealed class MainWindow : Window
 
     private string ServiceStatusDetail() => _settings.ServiceStatus switch
     {
-        "Running" => @"Running as NT SERVICE\Fortiq, an account with only the permissions Fortiq needs.",
+        // It does not run as NT SERVICE\Fortiq. The installer registers it under the local system
+        // account and adds that service identity to its token, which is what the directory
+        // permissions are written against - the identity restricts who may read Fortiq's files, not
+        // what the service itself may do. Saying it ran with "only the permissions Fortiq needs" was
+        // a least-privilege claim this build does not earn.
+        "Running" => "Running in the background under the local system account, so scheduled backups happen with Fortiq closed.",
         "Stopped" => "Start it to let scheduled backups run again. Until then, backups happen only while Fortiq is open.",
         "Not installed" => "No background service is installed on this PC. Fortiq can still back up and restore while it is open; scheduled backups need the service, which the installer sets up.",
         _ => string.Empty
@@ -1216,28 +1221,11 @@ public sealed class MainWindow : Window
 
     private async Task ProtectAsync()
     {
-        if (_installed && OperatingSystem.IsWindows() && !Fortiq.Infrastructure.Keys.WindowsTpmEnvelope.IsAvailable)
-        {
-            var explanation = Text(
-                "Automatic backups aren't available on this PC.\n\n" +
-                "Automatic Community Protection requires Windows with a TPM 2.0 security chip for device-bound unlock. " +
-                "You can still use Fortiq for manual file recovery from existing recovery kits.",
-                14, FontWeight.Normal, Ink, true);
-            var okBtn = Primary("OK");
-            var dlg = new Window
-            {
-                Title = "Automatic protection unavailable", Width = 480, Height = 240,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Content = new StackPanel
-                {
-                    Margin = new Thickness(24), Spacing = 16,
-                    Children = { explanation, okBtn }
-                }
-            };
-            okBtn.Click += (_, _) => dlg.Close();
-            await dlg.ShowDialog(this);
-            return;
-        }
+        // No device key used to stop the wizard from opening at all, behind a dialog explaining
+        // that automatic backups were unavailable. But a device key is what lets Fortiq unlock the
+        // repository unattended - it is not what lets somebody protect a folder. Refusing to protect
+        // anything, on a machine where protecting things works, is a far larger loss than the
+        // scheduling it was guarding. The wizard is told what is unavailable and says so in place.
 
         if (_wizard is null) return;
 

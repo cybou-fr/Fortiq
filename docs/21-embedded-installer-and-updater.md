@@ -23,7 +23,7 @@
 
 Fortiq eliminates the dichotomy between "portable tools" and "installed enterprise services". A single desktop application (`Fortiq.Desktop`) manages the entire application lifecycle:
 1. **Self-Introspection**: Detects whether Fortiq is installed on the host system, inspects current version numbers, and evaluates the operational status of all platform services and third-party dependencies.
-2. **Embedded Installation**: Automatically launches an interactive setup wizard when run on an unconfigured machine, installing binaries, registering the Windows Service with least-privilege service SIDs, and setting secure directory ACLs.
+2. **Embedded Installation**: Automatically launches an interactive setup wizard when run on an unconfigured machine, installing binaries, registering the Windows Service with its own service SID, and setting secure directory ACLs.
 3. **Continuous Component Lifecycle & Self-Update**: Inspects, validates, and updates individual sub-components (core binaries, Windows background service, and third-party storage engines like restic) in an atomic, rollback-safe transaction under The Update Framework (TUF).
 4. **Sovereign Portability Invariant**: Even when installed as a system-wide background service, the core emergency recovery CLI (`Fortiq.Recover`) remains 100% self-sufficient and portable.
 
@@ -124,7 +124,7 @@ public sealed record InstallationFinding(
 | :--- | :--- | :--- | :--- |
 | **.NET Runtime** | Operating System Host API | .NET 10.0 LTS Desktop Runtime present (or self-contained bundle) | Prompts user or deploys self-contained runtime binaries |
 | **Windows Service** | Windows Service Control Manager (`sc.exe` / Win32 API) | Service `Fortiq` registered with auto-start and Service SID | Self-installs via UAC elevation |
-| **Service Account** | Windows LSA & Service SID | Service configured to run as `NT SERVICE\Fortiq` (least privilege) | Configures service SID during installation |
+| **Service Account** | Windows LSA & Service SID | Service runs as `LocalSystem` with the `NT SERVICE\Fortiq` SID added to its token | Configures service SID during installation |
 | **Storage Engine** | `manifest.json` & `EngineBinaryVerifier` | `restic.exe` present, length and SHA-256 match pinned manifest | Automatically runs verified acquisition pipeline (`Get-Engine.ps1`) |
 | **Password Helper** | `PinnedFile` & `AuthenticodeSignature` | `Fortiq.PasswordHelper.exe` present with valid digital signature | Deploys pinned helper executable with restrictive DACL |
 | **Hardware TPM** | Microsoft Platform Crypto Provider (`NCrypt`) | TPM 2.0 silicon present with non-exportable key storage support | Warns operator; falls back to BIP-39 mnemonic recovery only |
@@ -140,7 +140,7 @@ public sealed record InstallationFinding(
 `%ProgramData%\Fortiq` is not one thing with one ACL. Three principals need it, and giving the whole
 tree to two of them is what an earlier draft of this specification did:
 
-- **`SYSTEM`** and the service account **`NT SERVICE\Fortiq`** — the unattended half. Backups,
+- **`SYSTEM`** and the service identity **`NT SERVICE\Fortiq`** — the unattended half. Backups,
   drills, retention, health publication.
 - **Interactive operators** — the desktop runs as a signed-in person, not as the service. It reads
   the health report, writes a schedule file when somebody protects a folder, reads receipts when
@@ -231,7 +231,7 @@ The installation wizard follows a deterministic 4-step workflow:
    - Places the verified `restic.exe` binary in `%ProgramFiles%\Fortiq\engines\`;
    - Configures restrictive NTFS ACLs on `%ProgramFiles%\Fortiq` (Users: Read/Execute; Administrators: Full);
    - Creates `%ProgramData%\Fortiq\` and applies the per-directory ACLs from *State Directory Layout & Access* — not one ACL over the whole tree, which would lock the desktop out of its own state;
-   - Registers and starts the Windows Service `Fortiq` under `NT SERVICE\Fortiq`;
+   - Registers and starts the Windows Service `Fortiq` under `LocalSystem`, with the `NT SERVICE\Fortiq` SID added to its token;
    - Establishes that the service account can open a machine-scoped device key, so that unattended backups are possible before anybody is told the machine is ready;
    - Adds `%ProgramFiles%\Fortiq\` to system PATH.
 4. **Step 4 — Onboarding Transition**: The wizard seamlessly closes and launches the standard `MainWindow` with the Protection Setup Wizard open.
@@ -397,10 +397,18 @@ An operator removing an application does not expect to be removing their complia
 
 ---
 
-## Security & Least-Privilege Architecture
+## Security & Privilege Boundaries
 
 1. **UAC Boundary**: Elevation is requested exclusively when modifying `%ProgramFiles%`, registering Windows services, or configuring system ACLs. Daily usage and recovery drills run entirely under standard interactive user tokens.
-2. **Service SID Isolation**: The Windows service runs under `NT SERVICE\Fortiq`. It does not require or receive broad `LocalSystem` administrative privileges.
+2. **Service SID Isolation**: The service is registered under `LocalSystem` with an unrestricted
+   service SID, so `NT SERVICE\Fortiq` is present in its token as an additional identity. That SID is
+   what the state directory ACLs are written against: it controls who else may read Fortiq's files.
+
+   > **Not least privilege, and this section used to claim it was.** An unrestricted service SID adds
+   > an identity; it removes no privilege. The process holds everything `LocalSystem` holds. Running
+   > the service *as* `NT SERVICE\Fortiq` is a separate change and is not made here - among other
+   > things, creating a machine-scoped TPM key requires administrative rights, which that account does
+   > not have. Verified against a running installation: `Win32_Service.StartName` is `LocalSystem`.
 3. **No Credential Custody During Updates**: The update subsystem has zero access to encryption keys, recovery secrets, or cloud bucket passwords.
 4. **Authenticode Enforcement**: Only binaries signed with the trusted Fortiq code-signing certificate are accepted during self-update or component replacement.
 

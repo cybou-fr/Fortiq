@@ -40,35 +40,47 @@ public static class WindowsTpmEnvelope
     private const string UserScope = "user";
     private const string MachineScope = "machine";
 
-    /// <summary>True when this machine exposes the platform provider at all.</summary>
-    public static bool IsAvailable
+    /// <summary>
+    /// True when this machine exposes the platform provider, asked in the key store that will
+    /// actually be used.
+    /// </summary>
+    /// <remarks>
+    /// The probe always created a user-scoped key, whatever the caller went on to create. That is a
+    /// different question, and under the Windows service it is the wrong one: a service account has
+    /// no loaded user profile, so the user key store is unavailable to it even on a machine whose TPM
+    /// is present and working. The service concluded the hardware was missing and told the person
+    /// "automatic scheduled backups require a TPM 2.0 security chip on this machine" - about a
+    /// machine that has one. Probing the store that will be written to gives the answer to the
+    /// question being asked.
+    /// </remarks>
+    public static bool IsAvailableFor(bool machineKey)
     {
-        get
+        if (!OperatingSystem.IsWindows())
         {
-            if (!OperatingSystem.IsWindows())
-            {
-                return false;
-            }
+            return false;
+        }
 
-            // There is no direct "is this provider present" query, so availability is decided by
-            // creating and immediately deleting a throwaway key.
-            var probeName = "fortiq-availability-" + Guid.NewGuid().ToString("N");
-            try
-            {
-                using var key = CreateKey(probeName, machineKey: false);
-                key.Delete();
-                return true;
-            }
-            catch (CryptographicException)
-            {
-                return false;
-            }
-            catch (PlatformNotSupportedException)
-            {
-                return false;
-            }
+        // There is no direct "is this provider present" query, so availability is decided by
+        // creating and immediately deleting a throwaway key.
+        var probeName = "fortiq-availability-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            using var key = CreateKey(probeName, machineKey);
+            key.Delete();
+            return true;
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
         }
     }
+
+    /// <summary>True when a user-scoped device key can be created here.</summary>
+    public static bool IsAvailable => IsAvailableFor(machineKey: false);
 
     [SupportedOSPlatform("windows")]
     public static KeyEnvelopeV1 Wrap(
@@ -239,13 +251,21 @@ public static class WindowsTpmEnvelope
             // one account's profile, and this is the account asking. That is the difference between
             // a fixable configuration and an apparently broken machine - it is also why the message
             // names both possibilities rather than the more dramatic one.
-            throw scope == UserScope
-                ? new DeviceKeyIdentityException(
-                    $"This device key could not be opened. It is user-scoped, so it exists only in the "
-                    + $"profile of the account that created it, and this process is running as "
-                    + $"'{Identity()}'. Either the key has been removed, or it belongs to another "
-                    + "account - a key a Windows service must open has to be created in the machine store.")
-                : new UnlockFailedException();
+            // Both branches now say which store the key is in and who is asking. Neither fact is a
+            // secret - the envelope is on the caller's disk and the account is their own - and
+            // without them the machine-scoped case arrived as the bare word "UnlockFailed" on a
+            // machine whose TPM was working perfectly, which is the least actionable thing this code
+            // could have said.
+            throw new DeviceKeyIdentityException(scope == UserScope
+                ? $"This device key could not be opened. It is user-scoped, so it exists only in the "
+                  + $"profile of the account that created it, and this process is running as "
+                  + $"'{Identity()}'. Either the key has been removed, or it belongs to another "
+                  + "account - a key a Windows service must open has to be created in the machine store."
+                : $"This device key could not be opened. It is machine-scoped, and this process is "
+                  + $"running as '{Identity()}', which the machine key store did not admit. Either the "
+                  + "key has been removed, or this account is not the one that may use it - work "
+                  + "needing a machine key belongs to the Fortiq service rather than to a desktop "
+                  + "session.");
         }
     }
 

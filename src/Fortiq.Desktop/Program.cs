@@ -292,7 +292,7 @@ public sealed class FortiqApplication : Avalonia.Application
         var unavailableReason = !installed
             ? "Portable mode: background scheduled backups require an installed service."
             : !tpmAvailable
-                ? "No security chip found. Automatic backups aren't available on this PC. You can still use Fortiq for manual recovery."
+                ? "This PC did not provide a device key, so Fortiq cannot unlock the repository on its own. Backups and recovery still work while Fortiq is open."
                 : null;
 
         return new MainWindow(

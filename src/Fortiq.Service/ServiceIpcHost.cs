@@ -270,7 +270,13 @@ public sealed class ServiceIpcHost : BackgroundService
         if (!provisioned.DeviceUnlockAvailable)
         {
             backupScheduled = false;
-            schedulingFailure = "Automatic scheduled backups require a TPM 2.0 security chip on this machine. Schedule was not created.";
+            // Not "this machine has no TPM": the service cannot see one from here either way. What
+            // it knows is that the machine key store would not give it a key, and that a schedule
+            // without one would be a promise of unattended backups it could never keep.
+            schedulingFailure =
+                "A device key could not be created in the machine key store, so unattended backups have "
+                + "nothing to unlock the repository with and no schedule was created. Your backups are "
+                + "not affected: the recovery phrase still opens this repository.";
         }
         else
         {

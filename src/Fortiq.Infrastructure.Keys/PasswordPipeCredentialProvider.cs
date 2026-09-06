@@ -68,6 +68,7 @@ public sealed class PasswordPipeCredentialProvider : IEngineCredentialProvider, 
         private readonly Task _served;
         private readonly CancellationTokenSource _lifetime;
         private readonly TimeSpan _handoverTimeout;
+        private readonly string _helperPath;
 
         internal Session(
             string helperPath,
@@ -79,6 +80,7 @@ public sealed class PasswordPipeCredentialProvider : IEngineCredentialProvider, 
             _served = served;
             _lifetime = lifetime;
             _handoverTimeout = handoverTimeout;
+            _helperPath = helperPath;
             EngineArguments = ["--password-command", $"\"{helperPath}\" {operationId:D}"];
         }
 
@@ -91,7 +93,10 @@ public sealed class PasswordPipeCredentialProvider : IEngineCredentialProvider, 
             var completed = await Task.WhenAny(_served, Task.Delay(_handoverTimeout, cancellationToken));
             if (!ReferenceEquals(completed, _served))
             {
-                throw new UnlockFailedException();
+                throw new CredentialHandoverException(
+                    $"The password helper did not collect the secret within {_handoverTimeout.TotalSeconds:0} seconds. "
+                    + $"The engine ran '{_helperPath}' as this process's own account; if that account cannot start it, "
+                    + "or the run was blocked, the repository is never asked for.");
             }
 
             try
@@ -100,7 +105,9 @@ public sealed class PasswordPipeCredentialProvider : IEngineCredentialProvider, 
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
-                throw new UnlockFailedException(error);
+                // Named rather than unified: this is the handover failing, not a secret being wrong.
+                throw new CredentialHandoverException(
+                    $"The secret could not be handed to the engine: {error.Message}", error);
             }
         }
 

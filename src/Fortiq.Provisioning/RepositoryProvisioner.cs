@@ -143,7 +143,10 @@ public sealed class RepositoryProvisioner
 
         using var engine = await VerifyEngineAsync(cancellationToken);
         var intent = await ProvisioningIntent.BeginAsync(workingDirectory, repositoryPath, kitPath, cancellationToken);
-        var deviceUnlock = addDeviceUnlock && WindowsTpmEnvelope.IsAvailable;
+        // Asked about the store this run will write to. Asking about the user store from inside the
+        // service answered a question nobody had, and answered it wrongly.
+        var deviceUnlock = addDeviceUnlock
+            && WindowsTpmEnvelope.IsAvailableFor(machineKey: deviceKeyScope == DeviceKeyScope.Machine);
         KeyEnvelopeV1? deviceEnvelope = null;
 
         try

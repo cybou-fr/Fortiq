@@ -124,8 +124,14 @@ public sealed class AuthenticodeSignatureTests
         await using var session = await provider.BeginAsync(Guid.NewGuid(), CancellationToken.None);
 
         // The refusal happens before a pipe exists, so the helper never gets as far as connecting.
-        var failure = await Assert.ThrowsAsync<UnlockFailedException>(() => session.CompleteAsync(CancellationToken.None));
-        Assert.Equal("UnlockFailed", failure.Message);
+        // It is reported as what it is - the helper on this machine is not signed - rather than as the
+        // bare word a wrong recovery phrase produces. The state of the caller's own binary is not a
+        // secret, and no secret was reached, let alone tested.
+        var failure = await Assert.ThrowsAsync<CredentialHandoverException>(
+            () => session.CompleteAsync(CancellationToken.None));
+
+        Assert.IsAssignableFrom<UnlockFailedException>(failure);
+        Assert.Contains("not signed", failure.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [SkippableFact]

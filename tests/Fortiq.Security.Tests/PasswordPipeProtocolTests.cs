@@ -1,3 +1,4 @@
+using Fortiq.Application;
 using System.Text;
 using Fortiq.Infrastructure.Keys;
 using Fortiq.PasswordHelper;
@@ -52,5 +53,50 @@ public sealed class PasswordPipeProtocolTests
         var id = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
         Assert.Equal("fortiq-password-v1-11111111222233334444555555555555", PasswordPipeProtocol.PipeName(id));
+    }
+}
+
+/// <summary>
+/// What the caller is told when the secret never reaches the engine.
+/// </summary>
+/// <remarks>
+/// Every plumbing failure used to arrive as the bare word "UnlockFailed" - the same thing a wrong
+/// recovery phrase says. The constant message exists so nobody can tell a wrong secret from a
+/// missing key; a handover that never happened tested no secret and so reveals none, and collapsing
+/// the two made the fixable fault indistinguishable from the unfixable one.
+/// </remarks>
+public sealed class CredentialHandoverFailureTests : IDisposable
+{
+    private readonly string _root = Path.Combine(
+        Path.GetTempPath(), "fortiq-handover-tests", Guid.NewGuid().ToString("N"));
+
+    public CredentialHandoverFailureTests() => Directory.CreateDirectory(_root);
+
+    [Fact]
+    public async Task AHelperThatNeverCollectsTheSecretSaysSo()
+    {
+        var helper = Path.Combine(_root, "Fortiq.PasswordHelper.exe");
+        await File.WriteAllTextAsync(helper, "a helper that is never run");
+
+        using var lease = new BufferKeyLease(new byte[32]);
+        using var provider = new PasswordPipeCredentialProvider(helper, lease, TimeSpan.FromMilliseconds(200));
+        await using var session = await provider.BeginAsync(Guid.NewGuid(), CancellationToken.None);
+
+        var error = await Assert.ThrowsAsync<CredentialHandoverException>(
+            () => session.CompleteAsync(CancellationToken.None));
+
+        Assert.NotEqual("UnlockFailed", error.Message);
+        Assert.Contains("password helper", error.Message, StringComparison.OrdinalIgnoreCase);
+
+        // Still an unlock failure to every handler that already catches one.
+        Assert.IsAssignableFrom<UnlockFailedException>(error);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_root))
+        {
+            try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
+        }
     }
 }

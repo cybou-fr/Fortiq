@@ -24,6 +24,12 @@ public class UnlockFailedException : Exception
         : base(message)
     {
     }
+
+    /// <summary>For subtypes that report a configuration problem, keeping what caused it.</summary>
+    protected UnlockFailedException(string message, Exception? innerException)
+        : base(message, innerException)
+    {
+    }
 }
 
 /// <summary>
@@ -45,6 +51,29 @@ public sealed class DeviceKeyIdentityException : UnlockFailedException
 {
     public DeviceKeyIdentityException(string message)
         : base(message)
+    {
+    }
+}
+
+/// <summary>
+/// Raised when the secret never reached the engine, for a reason that is not the secret.
+/// </summary>
+/// <remarks>
+/// The helper failing to start, the pipe never being connected, the handover timing out: these all
+/// used to arrive as the bare word "UnlockFailed", which is what a wrong recovery phrase looks like
+/// too. The constant message exists so nobody can tell a wrong secret from a missing key; none of
+/// that applies here, because these failures happen before any secret is tested and so cannot report
+/// anything about one. Collapsing them into the same word made a plumbing fault - the one kind that
+/// is actually fixable - indistinguishable from the one kind that is not, and left the only route to
+/// diagnosis being to guess.
+/// <para>
+/// A derived type, so every existing handler for a failed unlock still catches it.
+/// </para>
+/// </remarks>
+public sealed class CredentialHandoverException : UnlockFailedException
+{
+    public CredentialHandoverException(string message, Exception? innerException = null)
+        : base(message, innerException)
     {
     }
 }

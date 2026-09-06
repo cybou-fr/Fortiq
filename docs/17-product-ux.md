@@ -128,7 +128,7 @@ Cancellation keeps the window open until the executor stops. Failure remains vis
 When launched outside the installed directory without a registered service, `Fortiq.Desktop` presents the **Installation & Prerequisite Wizard** ([Spec 21](21-embedded-installer-and-updater.md), [ADR-014](adr/ADR-014-embedded-gui-installer-and-updater.md)):
 1. **Prerequisite Discovery Card**: Live evaluation of .NET 10 runtime, Windows hardware TPM 2.0 availability, VSS snapshot rights, and pinned restic engine binary integrity.
 2. **Setup Scope & Target**: Destination directory (`%ProgramFiles%\Fortiq`), background service creation, and PATH environment configuration.
-3. **One-Click Elevated Installation**: Prompts for UAC elevation, sets restrictive DACLs, creates `NT SERVICE\Fortiq`, and immediately transitions the operator into the Protection Setup Wizard.
+3. **One-Click Elevated Installation**: Prompts for UAC elevation, sets restrictive DACLs, registers the service and its `NT SERVICE\Fortiq` SID, and immediately transitions the operator into the Protection Setup Wizard.
 4. **Portable Alternative**: Operators can skip installation entirely with a single click to run Fortiq as a zero-touch portable tool.
 
 ---
