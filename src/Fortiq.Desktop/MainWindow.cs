@@ -634,7 +634,11 @@ public sealed class MainWindow : Window
         var list = new StackPanel { Spacing = 10 };
         foreach (var repository in _model.Repositories)
         {
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("1.5*,2*,Auto"), ColumnSpacing = 12 };
+            // A fixed action column, not Auto. Each row is its own Grid, so an Auto column is sized by
+            // that row alone: the moment a healthy source stopped showing a second button, its first
+            // one slid right and no longer lined up with the rows beneath it. A reserved width keeps
+            // every "Back up now" in the same place whether or not anything follows it.
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("1.5*,2*,300"), ColumnSpacing = 12 };
             row.Children.Add(new StackPanel
             {
                 Spacing = 2,
@@ -646,9 +650,26 @@ public sealed class MainWindow : Window
                     Text(repository.SourcePath ?? repository.Health.RepositoryId, 11, FontWeight.Normal, Muted)
                 }
             });
-            row.Children.Add(At(Text(repository.Summary, 12, FontWeight.Normal, Muted, true), 1));
+            // Painted only where it means something. The dashboard used the same grey for the row that
+            // reports a repository nobody could recover from today as for the ones that are fine, so
+            // the hero and the tiles carried the colour and the line naming the actual problem did
+            // not. A list where every row is painted is a list where the colour has stopped meaning
+            // anything, which is why the healthy ones stay quiet.
+            var tone = repository.Health.Verdict switch
+            {
+                HealthVerdict.AtRisk => Failure,
+                HealthVerdict.Unproven => Caution,
+                _ => Muted
+            };
+            var weight = repository.Health.Verdict == HealthVerdict.Recoverable ? FontWeight.Normal : FontWeight.SemiBold;
+            row.Children.Add(At(Text(repository.Summary, 12, weight, tone, true), 1));
 
-            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
 
             if (_model.CanBackupNow)
             {
@@ -658,14 +679,17 @@ public sealed class MainWindow : Window
                 actions.Children.Add(backup);
             }
 
-            var proven = repository.Health.Verdict == HealthVerdict.Recoverable;
-            var prove = Secondary(proven ? "Proven" : "Prove recovery")
-                .Named(proven
-                    ? $"{repository.Title}: recovery already proven"
-                    : $"Prove recovery for {repository.Title}");
-            prove.IsEnabled = repository.CanProveRecovery && !_model.Busy && !_elevating;
-            prove.Click += async (_, _) => await ProveAsync(repository);
-            actions.Children.Add(prove);
+            // A button reading "Proven" was a status wearing a button's clothes - and an enabled one,
+            // so pressing what looked like a badge started a restore drill. The state is already in
+            // the line to the left; what belongs here is an action, and only where there is one to
+            // take. This is also what the Backups list has always done.
+            if (repository.Health.Verdict != HealthVerdict.Recoverable)
+            {
+                var prove = Secondary("Prove recovery").Named($"Prove recovery for {repository.Title}");
+                prove.IsEnabled = repository.CanProveRecovery && !_model.Busy && !_elevating;
+                prove.Click += async (_, _) => await ProveAsync(repository);
+                actions.Children.Add(prove);
+            }
 
             row.Children.Add(At(actions, 2));
 
@@ -1096,6 +1120,7 @@ public sealed class MainWindow : Window
                 MinWidth = 260,
                 HorizontalAlignment = HorizontalAlignment.Left
             };
+            selector.Named("Protected source to prove recovery for");
             selector.SelectionChanged += (_, _) =>
             {
                 if (selector.SelectedIndex >= 0)
@@ -1184,6 +1209,30 @@ public sealed class MainWindow : Window
             }, Surface, Line, new Thickness(24)));
             _page.Child = new ScrollViewer { Content = body };
             return;
+        }
+
+        // Recovery has offered this since it was written; this screen never did, so a machine
+        // protecting three folders showed the kit of whichever came first and gave no way to reach
+        // the other two - on the screen whose subject is what opens a repository elsewhere.
+        if (_model.Repositories.Count > 1)
+        {
+            var selector = new ComboBox
+            {
+                ItemsSource = _model.Repositories.Select(item => item.Title).ToArray(),
+                SelectedIndex = Math.Max(0, _model.Repositories.IndexOf(_kitSource)),
+                MinWidth = 260,
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            selector.Named("Protected source to show the recovery kit for");
+            selector.SelectionChanged += (_, _) =>
+            {
+                if (selector.SelectedIndex >= 0)
+                {
+                    _kitSource = _model.Repositories[selector.SelectedIndex];
+                    RenderRecoveryKit();
+                }
+            };
+            body.Children.Add(new StackPanel { Spacing = 6, Children = { Text("Protected source", 12, FontWeight.SemiBold, Ink), selector } });
         }
 
         var present = _kitSource.Health.Facts.KitPresent;
