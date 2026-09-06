@@ -107,7 +107,8 @@ public sealed class HealthPublisher
                     await InspectAsync(schedule.RepositoryLocation, cancellationToken),
                     AuditLedgerFailure: auditLedgerFailure,
                     LegacyReceiptCount: auditLedgerFailure is null ? (seen?.LegacyReceiptCount ?? 0) : 0,
-                    RecoveryPhrase: await PhraseStateAsync(schedule.Id, cancellationToken)),
+                    RecoveryPhrase: await PhraseStateAsync(schedule.Id, cancellationToken),
+                    SourcePath: schedule.SourcePath),
                 now,
                 thresholds: null,
                 // Compared against this repository's own history, which is why it is read from the

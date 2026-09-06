@@ -58,7 +58,48 @@ public sealed class RepositoryRowViewModel
 
     public RepositoryHealth Health { get; }
 
-    public string Title => Health.ScheduleId ?? Health.RepositoryId;
+    /// <summary>
+    /// What to call this source on screen: the folder, in the words the person chose it by.
+    /// </summary>
+    /// <remarks>
+    /// It was the schedule id, which provisioning sets to the repository id - a UUID. Every screen
+    /// showed it: the dashboard, the list, the recovery selector, the settings title, and the row's
+    /// own second line, so a person saw the same UUID twice and their folder nowhere. The path is what
+    /// they recognise; the identifier belongs in details, where somebody looking for it can find it.
+    ///
+    /// A repository whose report predates the source path, or whose schedule has none, keeps the old
+    /// answer rather than showing nothing.
+    /// </remarks>
+    public string Title => DisplayName ?? Health.ScheduleId ?? Health.RepositoryId;
+
+    /// <summary>The full path, for the line under the name. Null when the report did not carry one.</summary>
+    public string? SourcePath => Health.Facts.SourcePath is { Length: > 0 } path ? path : null;
+
+    /// <summary>Whether the second line says something the first does not.</summary>
+    public bool HasSourcePath => SourcePath is not null;
+
+    private string? DisplayName => SourcePath is { } path ? FolderName(path) : null;
+
+    /// <summary>
+    /// The folder's own name, with enough of its parent to tell two of them apart.
+    /// </summary>
+    /// <remarks>
+    /// Two protected folders both called "Documents" - one under a user profile, one on a second disk
+    /// - would otherwise be one word twice, in a list whose whole job is to say which is which. The
+    /// parent is only added when it exists; a drive root keeps its own name.
+    /// </remarks>
+    internal static string FolderName(string path)
+    {
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(trimmed);
+        if (string.IsNullOrEmpty(name))
+        {
+            return trimmed.Length > 0 ? trimmed : path;
+        }
+
+        var parent = Path.GetFileName(Path.GetDirectoryName(trimmed) ?? string.Empty);
+        return string.IsNullOrEmpty(parent) ? name : Path.Combine(parent, name);
+    }
 
     /// <summary>
     /// What Fortiq is willing to say, in the words a person needs. "Backed up" is never offered on

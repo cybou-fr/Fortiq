@@ -49,7 +49,17 @@ public sealed record RepositoryFacts(
     /// silence is what every repository older than this record has, and most of their owners did write
     /// their words down.
     /// </remarks>
-    RecoveryPhraseState RecoveryPhrase = RecoveryPhraseState.Unknown);
+    RecoveryPhraseState RecoveryPhrase = RecoveryPhraseState.Unknown,
+    /// <summary>
+    /// The folder this repository protects, as the person chose it.
+    /// </summary>
+    /// <remarks>
+    /// Reports had no room for it, so every screen fell back to the schedule id - which provisioning
+    /// sets to the repository id, a UUID. People were shown "90669b27-2f4d-..." where they expected
+    /// "Documents", twice on the same row, and the Recovery details called that same UUID the source
+    /// path. Null where a report predates this or a schedule genuinely has no source.
+    /// </remarks>
+    string? SourcePath = null);
 
 /// <summary>Whether the recovery phrase for a repository is known to have been written down.</summary>
 /// <remarks>

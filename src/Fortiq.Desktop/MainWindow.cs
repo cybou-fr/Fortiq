@@ -459,7 +459,7 @@ public sealed class MainWindow : Window
         AddBanners(body);
 
         var (mode, headline, desc, actionText) = ResolveHeroState();
-        body.Children.Add(new HeroHealthBanner(mode, headline, desc, actionText, RefreshAsync));
+        body.Children.Add(new HeroHealthBanner(mode, headline, desc, actionText, HeroAction(mode)));
 
         body.Children.Add(MetricsGrid());
         body.Children.Add(RepositoriesSummaryCard());
@@ -467,6 +467,36 @@ public sealed class MainWindow : Window
 
         _page.Child = new ScrollViewer { Content = body };
     }
+
+    /// <summary>
+    /// What the banner's button does, chosen with the words written on it.
+    /// </summary>
+    /// <remarks>
+    /// Every state used to hand the banner the same callback, so a button reading "Prove recovery" or
+    /// "Review" refreshed the screen and nothing else. On a product whose subject is whether it can be
+    /// believed, a control that does not do what it says is worse than one that is missing: somebody
+    /// clicks "Prove recovery", sees the page redraw, and concludes the drill ran.
+    /// </remarks>
+    private Func<Task> HeroAction(HeroStatusMode mode) => mode switch
+    {
+        HeroStatusMode.ZeroState => ProtectAsync,
+
+        // To the list, where the source with the problem is named and its own buttons are beside it.
+        HeroStatusMode.AtRisk when _model.State is not (HealthStoreState.Corrupt or HealthStoreState.Stale)
+            => () => { RenderBackups(); return Task.CompletedTask; },
+
+        // To the drill, on the source that needs one - not to the first source in the list.
+        HeroStatusMode.Unproven => () =>
+        {
+            _recoverySource = _model.Repositories.FirstOrDefault(row => row.Health.Verdict == HealthVerdict.Unproven)
+                ?? _model.Repositories.FirstOrDefault();
+            RenderRecovery();
+            return Task.CompletedTask;
+        },
+
+        // Corrupt and stale both say the report itself is the problem, and refreshing is the answer.
+        _ => RefreshAsync
+    };
 
     private (HeroStatusMode Mode, string Headline, string Desc, string Action) ResolveHeroState()
     {
@@ -483,7 +513,7 @@ public sealed class MainWindow : Window
             return (HeroStatusMode.AtRisk,
                 "Protection status temporarily unavailable",
                 _model.Failure ?? "Could not read health evidence. Check local service.",
-                "Refresh");
+                "Refresh status");
         }
 
         if (_model.State == HealthStoreState.Stale)
@@ -491,15 +521,15 @@ public sealed class MainWindow : Window
             return (HeroStatusMode.Unproven,
                 "Protection status is out of date",
                 "The health report has not been refreshed recently. Verify that the Fortiq service is running.",
-                "Refresh");
+                "Refresh status");
         }
 
         if (_model.Repositories.Any(r => r.Health.Verdict == HealthVerdict.AtRisk))
         {
             return (HeroStatusMode.AtRisk,
                 "Something may not be recoverable today",
-                "One or more protected sources report integrity or verification issues. Review findings below.",
-                "Review");
+                "One or more protected sources report integrity or verification issues.",
+                "Review the sources");
         }
 
         if (_model.Repositories.Any(r => r.Health.Verdict == HealthVerdict.Unproven))
@@ -513,7 +543,7 @@ public sealed class MainWindow : Window
         return (HeroStatusMode.Recoverable,
             "Your data is recoverable",
             "All critical checks are healthy. Fortiq has recently restored and verified your protected sources.",
-            "Refresh");
+            "Refresh status");
     }
 
     private Grid MetricsGrid()
@@ -611,7 +641,9 @@ public sealed class MainWindow : Window
                 Children =
                 {
                     Text(repository.Title, 14, FontWeight.SemiBold, Ink),
-                    Text(repository.Health.RepositoryId, 11, FontWeight.Normal, Muted)
+                    // The path, not the identifier. A row whose two lines say the same UUID tells
+                    // somebody nothing twice.
+                    Text(repository.SourcePath ?? repository.Health.RepositoryId, 11, FontWeight.Normal, Muted)
                 }
             });
             row.Children.Add(At(Text(repository.Summary, 12, FontWeight.Normal, Muted, true), 1));
@@ -835,7 +867,7 @@ public sealed class MainWindow : Window
                 Children =
                 {
                     Text(repository.Title, 13, FontWeight.SemiBold, Ink),
-                    Text(repository.Health.RepositoryId, 10, FontWeight.Normal, Muted)
+                    Text(repository.SourcePath ?? repository.Health.RepositoryId, 10, FontWeight.Normal, Muted)
                 }
             });
             row.Children.Add(At(Text(Relative(repository.Health.Facts.LastBackupAt), 12, FontWeight.Normal, Muted), 1));
@@ -1115,7 +1147,9 @@ public sealed class MainWindow : Window
         var details = new StackPanel { Spacing = 12 };
         details.Children.Add(Text("Latest proof evidence", 16, FontWeight.SemiBold, Ink));
         details.Children.Add(DetailRow("Repository ID", repository.Health.RepositoryId));
-        details.Children.Add(DetailRow("Source Path", repository.Title));
+        // It showed repository.Title, which was the schedule id - so a field labelled Source Path
+        // displayed a UUID and called it a path.
+        details.Children.Add(DetailRow("Source Path", repository.SourcePath ?? "Not recorded in this report"));
         details.Children.Add(DetailRow("Last Backup", Absolute(facts.LastBackupAt)));
         details.Children.Add(DetailRow("Integrity Check", Absolute(facts.LastHealthyCheckAt)));
         details.Children.Add(DetailRow("Proven Restore", Absolute(facts.LastProvenRestoreAt)));
