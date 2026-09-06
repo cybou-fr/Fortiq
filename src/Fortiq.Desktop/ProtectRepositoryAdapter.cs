@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using Fortiq.Application;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Provisioning;
@@ -98,9 +98,16 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
             request.RepositoryLocation,
             request.KitDirectory,
             working,
-            cancellationToken);
+            cancellationToken,
+            requireDeviceUnlock: true);
 
         var id = provisioned.Repository.Id.ToString();
+
+        // The same record the service writes on its side of this, and for the same reason: from here
+        // until somebody confirms, this repository is one whose phrase may exist only on a screen.
+        await new RecoveryPhraseRecord(_paths.Schedules)
+            .IssuedAsync(id, DateTimeOffset.UtcNow, cancellationToken);
+
         try
         {
             await WriteScheduleAsync(Path.Combine(_paths.Schedules, "schedules"), id, request, _nightly, cancellationToken);
@@ -118,6 +125,25 @@ public sealed class ProtectRepositoryAdapter : IProtectRepository
         return new ProtectedRepositoryResult(id, provisioned.RecoveryMnemonic, provisioned.DeviceUnlockAvailable,
             BackupScheduled: false,
             SchedulingFailure: "Portable mode does not run automatic backups. The repository and recovery kit exist, but your files are not backed up. Install Fortiq and configure protection in installed mode to enable automatic backups.");
+    }
+
+    /// <summary>Records that the recovery phrase was written down.</summary>
+    /// <remarks>
+    /// Installed mode asks the service, which owns the state directory. Portable writes it itself,
+    /// beside its own schedules, for the same reason it writes everything else itself.
+    /// </remarks>
+    public async Task ConfirmRecoveryPhraseAsync(string repositoryId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+
+        if (_serviceClient is not null)
+        {
+            await _serviceClient.ConfirmPhraseAsync(repositoryId, cancellationToken);
+            return;
+        }
+
+        await new RecoveryPhraseRecord(_paths.Schedules)
+            .ConfirmedAsync(repositoryId, DateTimeOffset.UtcNow, cancellationToken);
     }
 
     /// <summary>

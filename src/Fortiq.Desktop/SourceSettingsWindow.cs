@@ -137,6 +137,8 @@ public sealed class SourceSettingsWindow : Window
         var hour = Number("Hour", _model.BackupHour, 0, 23, value => { _model.BackupHour = value; Describe(); });
         var minute = Number("Minute", _model.BackupMinute, 0, 59, value => { _model.BackupMinute = value; Describe(); });
         Describe();
+        hour.IsEnabled = minute.IsEnabled = _model.Details?.Settings.UpdateBackupTime == true;
+        if (!hour.IsEnabled) summary.Text = "Custom schedule — preserved when saving other settings.";
 
         return Card(new StackPanel
         {
@@ -161,6 +163,9 @@ public sealed class SourceSettingsWindow : Window
 
     private Border DrillCard()
     {
+        if (_model.Details?.Settings.UpdateDrill == false)
+            return Card(Text("Custom recovery drill schedule — preserved when saving other settings.",
+                12, FontWeight.Normal, Muted, true), Surface, Line);
         var on = new CheckBox
         {
             Content = "Prove recovery automatically",

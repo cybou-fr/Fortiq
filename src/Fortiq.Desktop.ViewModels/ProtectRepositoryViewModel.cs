@@ -43,6 +43,16 @@ public sealed record ProtectedRepositoryResult(
 public interface IProtectRepository
 {
     Task<ProtectedRepositoryResult> CreateAsync(ProtectRepositoryRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reports that somebody typed the recovery words back, so the phrase exists off this machine.
+    /// </summary>
+    /// <remarks>
+    /// The wizard is the only thing that ever knows this. Provisioning records that a phrase was
+    /// issued; if nothing ever records that it was written down, the repository is one whose owner
+    /// cannot open it, and health reporting says so rather than showing it as healthy.
+    /// </remarks>
+    Task ConfirmRecoveryPhraseAsync(string repositoryId, CancellationToken cancellationToken);
 }
 
 /// <summary>Where the wizard is.</summary>
@@ -304,6 +314,34 @@ public sealed class ProtectRepositoryViewModel : INotifyPropertyChanged
         Step = ProtectStep.Done;
         OnPropertyChanged(nameof(RecoveryMnemonic));
         return true;
+    }
+
+    /// <summary>
+    /// Records the confirmation somewhere it will outlive this window.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Confirm"/>, and never able to undo it. The person has demonstrably
+    /// written the words down; if this machine cannot write that down in turn, the honest outcome is a
+    /// repository that reports its phrase unconfirmed - a false alarm somebody can clear - rather than
+    /// a confirmation refused because a file could not be written.
+    /// </remarks>
+    public async Task RecordConfirmationAsync(CancellationToken cancellationToken)
+    {
+        if (Step != ProtectStep.Done || RepositoryId is not { Length: > 0 } repositoryId)
+        {
+            return;
+        }
+
+        try
+        {
+            await _protect.ConfirmRecoveryPhraseAsync(repositoryId, cancellationToken);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            Failure = "Your recovery phrase is confirmed, but Fortiq could not record that on this PC: "
+                + PlainFailure.Describe(error)
+                + " This source may report its phrase as unconfirmed until you protect the folder again.";
+        }
     }
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? property = null)

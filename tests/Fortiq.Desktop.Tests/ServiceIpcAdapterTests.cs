@@ -119,6 +119,7 @@ public sealed class ServiceIpcAdapterTests
         public SourceSettings? UpdatedSchedule { get; private set; }
         public string? RemovedSchedule { get; private set; }
         public string? ClearedLock { get; private set; }
+        public string? ConfirmedPhrase { get; private set; }
 
         public Task<bool> IsServiceAvailableAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(IsAvailable);
@@ -166,6 +167,13 @@ public sealed class ServiceIpcAdapterTests
         {
             LastRepositoryId = repositoryId;
             ClearedLock = repositoryId;
+            return Task.CompletedTask;
+        }
+
+        public Task ConfirmPhraseAsync(string repositoryId, CancellationToken cancellationToken = default)
+        {
+            LastRepositoryId = repositoryId;
+            ConfirmedPhrase = repositoryId;
             return Task.CompletedTask;
         }
     }

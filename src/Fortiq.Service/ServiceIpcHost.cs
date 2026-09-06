@@ -269,6 +269,9 @@ public sealed class ServiceIpcHost : BackgroundService
                 case "clearlock":
                     return await HandleClearLockAsync(req.PayloadJson, cancellationToken);
 
+                case "confirmphrase":
+                    return await HandleConfirmPhraseAsync(req.PayloadJson, cancellationToken);
+
                 default:
                     return new ServiceIpcProtocol.Response(false, $"Unknown IPC command: '{req.Command}'");
             }
@@ -389,7 +392,8 @@ public sealed class ServiceIpcHost : BackgroundService
             working,
             cancellationToken,
             addDeviceUnlock: true,
-            deviceKeyScope: DeviceKeyScope.Machine);
+            deviceKeyScope: DeviceKeyScope.Machine,
+            requireDeviceUnlock: true);
 
         var repositoryId = provisioned.Repository.Id.ToString();
         bool backupScheduled = false;
@@ -419,6 +423,11 @@ public sealed class ServiceIpcHost : BackgroundService
                     new TimeOnly(2, 30),
                     cancellationToken);
                 backupScheduled = true;
+
+                // Recorded before the phrase is handed back, because the window where it can be lost
+                // opens the moment it leaves this method. If the desktop dies while the words are on
+                // screen, this is what stops the repository reporting itself healthy for ever after.
+                await Phrases().IssuedAsync(repositoryId, DateTimeOffset.UtcNow, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -614,7 +623,8 @@ public sealed class ServiceIpcHost : BackgroundService
             new TimeOnly(minutes / 60, minutes % 60),
             payload.DrillEveryDays is { } days and > 0 ? TimeSpan.FromDays(days) : null,
             retention,
-            payload.Prune ? PruneMode.ForgetAndPrune : PruneMode.ForgetOnly);
+            payload.Prune ? PruneMode.ForgetAndPrune : PruneMode.ForgetOnly,
+            payload.UpdateBackupTime, payload.UpdateDrill, payload.UpdateRetention);
     }
 
     /// <summary>Clears the lock an interrupted run left in a repository.</summary>
@@ -658,6 +668,31 @@ public sealed class ServiceIpcHost : BackgroundService
         await _health.PublishAsync(cancellationToken);
         return new ServiceIpcProtocol.Response(true);
     }
+
+    /// <summary>Records that somebody wrote the recovery phrase down.</summary>
+    private async Task<ServiceIpcProtocol.Response> HandleConfirmPhraseAsync(string? payloadJson, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return new ServiceIpcProtocol.Response(false, "Missing confirmation payload.");
+        }
+
+        var payload = JsonSerializer.Deserialize<ServiceIpcProtocol.ConfirmPhrasePayload>(payloadJson, JsonOptions);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.RepositoryId))
+        {
+            return new ServiceIpcProtocol.Response(false, "Invalid confirmation payload.");
+        }
+
+        // By schedule id where one exists, and by the repository id otherwise: provisioning writes both
+        // as the same string, and a machine whose schedule was never written still has a phrase whose
+        // confirmation is worth keeping.
+        var schedule = await FindScheduleAsync(payload.RepositoryId, cancellationToken);
+        await Phrases().ConfirmedAsync(schedule?.Id ?? payload.RepositoryId, DateTimeOffset.UtcNow, cancellationToken);
+        await _health.PublishAsync(cancellationToken);
+        return new ServiceIpcProtocol.Response(true);
+    }
+
+    private RecoveryPhraseRecord Phrases() => new(_paths.Schedules);
 
     private Task<BackupSchedule?> FindScheduleAsync(string repositoryId, CancellationToken cancellationToken) =>
         ScheduleLookup.FindForRepositoryAsync(_schedules, repositoryId, cancellationToken);

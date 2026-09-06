@@ -23,6 +23,28 @@ public sealed class HealthPublisher
     private readonly string _metricsPath;
     private readonly TimeProvider _clock;
     private readonly IStorageProtectionInspector? _protection;
+    private readonly RecoveryPhraseRecord? _phrases;
+
+    /// <summary>
+    /// The receipts as they were last read, and what the directory looked like when they were.
+    /// </summary>
+    /// <remarks>
+    /// Receipts are append-only and are never edited in place, so a directory holding the same number
+    /// of files with the same newest write time holds the same evidence. That makes re-parsing it a
+    /// waste, and it was not a small one: the scheduler publishes health at the end of every pass -
+    /// once a minute - and nothing ever removes a receipt, so a machine backing up daily with a weekly
+    /// drill accumulates roughly five hundred a year per repository and pays for all of them, every
+    /// minute, for as long as it is installed. Measured on an ordinary desktop, a thousand receipts
+    /// cost about seven tenths of a second per pass and several thousand cost seconds.
+    ///
+    /// The report itself is still written every pass. Its timestamp is what tells a reader the machine
+    /// is alive, and the desktop treats a report older than five minutes as unknown protection, so the
+    /// publishing is the point and only the parsing is skipped.
+    /// </remarks>
+    private volatile ReceiptCache? _cache;
+
+    /// <summary>One read of the receipts, and the directory fingerprint it was read at.</summary>
+    private sealed record ReceiptCache(int Files, DateTime Newest, IReadOnlyList<RepositoryEvidence> Evidence);
 
     public HealthPublisher(
         IScheduleStore schedules,
@@ -30,7 +52,8 @@ public sealed class HealthPublisher
         string reportPath,
         string metricsPath,
         TimeProvider? clock = null,
-        IStorageProtectionInspector? protection = null)
+        IStorageProtectionInspector? protection = null,
+        RecoveryPhraseRecord? phrases = null)
     {
         _schedules = schedules ?? throw new ArgumentNullException(nameof(schedules));
         _receiptDirectory = receiptDirectory ?? throw new ArgumentNullException(nameof(receiptDirectory));
@@ -38,6 +61,7 @@ public sealed class HealthPublisher
         _metricsPath = metricsPath ?? throw new ArgumentNullException(nameof(metricsPath));
         _clock = clock ?? TimeProvider.System;
         _protection = protection;
+        _phrases = phrases;
     }
 
     public async Task<HealthReport> PublishAsync(CancellationToken cancellationToken)
@@ -46,7 +70,7 @@ public sealed class HealthPublisher
         var audit = await Fortiq.Infrastructure.Receipts.AuditLedgerVerifier.VerifyLedgerAsync(_receiptDirectory, null, cancellationToken);
         var auditByRepo = audit.Repositories.ToDictionary(r => r.RepositoryId, StringComparer.OrdinalIgnoreCase);
 
-        var evidence = (await ReceiptHistory.ReadAsync(_receiptDirectory, cancellationToken))
+        var evidence = (await EvidenceAsync(cancellationToken))
             .ToDictionary(entry => entry.RepositoryId, StringComparer.OrdinalIgnoreCase);
 
         var repositories = new List<RepositoryHealth>();
@@ -82,7 +106,8 @@ public sealed class HealthPublisher
                     drillFailure ?? state.LastFailure ?? seen?.LastFailure,
                     await InspectAsync(schedule.RepositoryLocation, cancellationToken),
                     AuditLedgerFailure: auditLedgerFailure,
-                    LegacyReceiptCount: auditLedgerFailure is null ? (seen?.LegacyReceiptCount ?? 0) : 0),
+                    LegacyReceiptCount: auditLedgerFailure is null ? (seen?.LegacyReceiptCount ?? 0) : 0,
+                    RecoveryPhrase: await PhraseStateAsync(schedule.Id, cancellationToken)),
                 now,
                 thresholds: null,
                 // Compared against this repository's own history, which is why it is read from the
@@ -94,6 +119,91 @@ public sealed class HealthPublisher
         await HealthPublication.WriteJsonAsync(report, _reportPath, cancellationToken);
         await HealthPublication.WritePrometheusAsync(report, _metricsPath, cancellationToken);
         return report;
+    }
+
+    /// <summary>
+    /// The receipts, read again only when the directory has changed since the last read.
+    /// </summary>
+    /// <remarks>
+    /// The fingerprint is the file count and the newest write time. A receipt is written once and
+    /// never modified, so an addition moves both and a removal moves the count; a change that moved
+    /// neither would be a file rewritten in place, which is what the audit ledger exists to catch and
+    /// is not something this cache is entitled to hide - <c>AuditLedgerVerifier</c> runs on every pass
+    /// regardless of what this returns.
+    /// </remarks>
+    private async Task<IReadOnlyList<RepositoryEvidence>> EvidenceAsync(CancellationToken cancellationToken)
+    {
+        var (files, newest) = Fingerprint(_receiptDirectory);
+        if (_cache is { } cached && cached.Files == files && cached.Newest == newest)
+        {
+            return cached.Evidence;
+        }
+
+        var evidence = await ReceiptHistory.ReadAsync(_receiptDirectory, cancellationToken);
+
+        // Fingerprinted again after the read rather than before it. A receipt written while the read
+        // was in progress must leave a fingerprint that does not match what was just cached, so the
+        // next pass reads again instead of remembering a history that was already out of date.
+        var after = Fingerprint(_receiptDirectory);
+
+        // No lock: two passes arriving together at worst parse the receipts twice and each publish a
+        // correct report, which costs a little work and cannot produce a wrong one. A lock would buy
+        // nothing except a field this class would then have to be disposable for.
+        _cache = new ReceiptCache(after.Files, after.Newest, evidence);
+        return evidence;
+    }
+
+    private static (int Files, DateTime Newest) Fingerprint(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return (0, DateTime.MinValue);
+        }
+
+        var files = 0;
+        var newest = DateTime.MinValue;
+        foreach (var path in Directory.EnumerateFiles(directory, "*.json", SearchOption.AllDirectories))
+        {
+            files++;
+            try
+            {
+                var written = File.GetLastWriteTimeUtc(path);
+                if (written > newest)
+                {
+                    newest = written;
+                }
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                // A file that cannot be stat-ed makes this fingerprint unusable rather than wrong: the
+                // sentinel never equals a real reading, so the next pass reads the receipts again.
+                return (-1, DateTime.MinValue);
+            }
+        }
+
+        return (files, newest);
+    }
+
+    /// <summary>
+    /// What this machine recorded about whether the recovery phrase was written down.
+    /// </summary>
+    /// <remarks>
+    /// Without a record store the answer is unknown, which says nothing - so a caller that has not
+    /// been given one, including every test that predates this, reports exactly what it did before.
+    /// </remarks>
+    private async Task<RecoveryPhraseState> PhraseStateAsync(string scheduleId, CancellationToken cancellationToken)
+    {
+        if (_phrases is null)
+        {
+            return RecoveryPhraseState.Unknown;
+        }
+
+        return await _phrases.ReadAsync(scheduleId, cancellationToken) switch
+        {
+            RecoveryPhraseStatus.Confirmed => RecoveryPhraseState.Confirmed,
+            RecoveryPhraseStatus.Issued => RecoveryPhraseState.Issued,
+            _ => RecoveryPhraseState.Unknown
+        };
     }
 
     private async Task<string?> ReadDrillFailureAsync(

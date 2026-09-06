@@ -147,7 +147,8 @@ public static class Program
             paths.HealthReport,
             paths.HealthMetrics,
             protection: new S3StorageProtectionInspector(
-                provider.GetRequiredService<IObjectStorageCredentialProvider>())));
+                provider.GetRequiredService<IObjectStorageCredentialProvider>()),
+            phrases: new RecoveryPhraseRecord(paths.Schedules)));
 
         builder.Services.AddSingleton(provider => new ServiceIpcHost(
             paths,

@@ -14,6 +14,7 @@ public interface IServiceIpcClient
     Task UpdateScheduleAsync(string repositoryId, ViewModels.SourceSettings settings, CancellationToken cancellationToken = default);
     Task RemoveScheduleAsync(string repositoryId, CancellationToken cancellationToken = default);
     Task ClearLockAsync(string repositoryId, CancellationToken cancellationToken = default);
+    Task ConfirmPhraseAsync(string repositoryId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -198,7 +199,7 @@ public sealed class ServiceIpcClient : IServiceIpcClient
             settings.KeepDaily,
             settings.KeepWeekly,
             settings.KeepMonthly,
-            settings.Prune);
+            settings.Prune, settings.UpdateBackupTime, settings.UpdateDrill, settings.UpdateRetention);
 
         return SendAsync("updateSchedule", payload, "change the schedule", cancellationToken);
     }
@@ -274,6 +275,17 @@ public sealed class ServiceIpcClient : IServiceIpcClient
     /// written while a request is outstanding as "stop", so a line goes down the pipe first; if the
     /// pipe is already gone, the service sees that instead, which means the same thing.
     /// </remarks>
+    public Task ConfirmPhraseAsync(string repositoryId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryId);
+
+        return SendAsync(
+            "confirmPhrase",
+            new ServiceIpcProtocol.ConfirmPhrasePayload(repositoryId),
+            "record that the recovery phrase was written down",
+            cancellationToken);
+    }
+
     /// <summary>
     /// Turns a refusal into an exception carrying something a person can act on.
     /// </summary>

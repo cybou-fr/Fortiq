@@ -26,6 +26,15 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Require tag to match the product version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $expectedTag = 'v' + (& ./scripts/Get-FortiqVersion.ps1)
+          if ($env:GITHUB_REF_NAME -cne $expectedTag) {
+            throw "Release tag '$env:GITHUB_REF_NAME' must be '$expectedTag'."
+          }
+
       - name: Acquire pinned repository engine
         shell: pwsh
         run: ./scripts/Get-Engine.ps1

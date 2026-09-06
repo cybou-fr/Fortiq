@@ -20,11 +20,14 @@ public sealed class SourceSettingsAdapter : ISourceSettingsStore
 {
     private readonly FileSystemScheduleStore _schedules;
     private readonly IServiceIpcClient? _serviceClient;
+    private readonly Func<BackupSchedule, CancellationToken, Task>? _clearLocalLock;
 
-    public SourceSettingsAdapter(FileSystemScheduleStore schedules, IServiceIpcClient? serviceClient = null)
+    public SourceSettingsAdapter(FileSystemScheduleStore schedules, IServiceIpcClient? serviceClient = null,
+        Func<BackupSchedule, CancellationToken, Task>? clearLocalLock = null)
     {
         _schedules = schedules ?? throw new ArgumentNullException(nameof(schedules));
         _serviceClient = serviceClient;
+        _clearLocalLock = clearLocalLock;
     }
 
     public async Task<SourceDetails?> ReadAsync(string repositoryId, CancellationToken cancellationToken)
@@ -86,12 +89,10 @@ public sealed class SourceSettingsAdapter : ISourceSettingsStore
 
         if (_serviceClient is null)
         {
-            // Portable holds no privileged half to ask, and the operation opens the repository with a
-            // device key this process cannot use unattended. Saying so beats a button that fails with
-            // something about a named pipe.
-            throw new InvalidOperationException(
-                "Clearing a repository lock needs the Fortiq service, which portable mode does not have. "
-                + "Install Fortiq on this PC to do it from here.");
+            if (_clearLocalLock is null)
+                throw new InvalidOperationException("Local lock recovery is unavailable in this session.");
+            await _clearLocalLock(await Required(repositoryId, cancellationToken), cancellationToken);
+            return;
         }
 
         await RequireServiceAsync(cancellationToken);
@@ -117,7 +118,11 @@ public sealed class SourceSettingsAdapter : ISourceSettingsStore
             schedule.RetentionConfigured ? schedule.Retention?.KeepDaily : null,
             schedule.RetentionConfigured ? schedule.Retention?.KeepWeekly : null,
             schedule.RetentionConfigured ? schedule.Retention?.KeepMonthly : null,
-            schedule.Prune == PruneMode.ForgetAndPrune);
+            schedule.Prune == PruneMode.ForgetAndPrune,
+            UpdateBackupTime: schedule.Recurrence is DailyAt,
+            UpdateDrill: schedule.DrillRecurrence is null || schedule.DrillRecurrence is EveryInterval exact
+                && exact.Period.TotalDays >= 1 && exact.Period.TotalDays <= int.MaxValue
+                && exact.Period.TotalDays == Math.Truncate(exact.Period.TotalDays));
     }
 
     /// <summary>The screen's numbers, back in the scheduling domain's own vocabulary.</summary>
@@ -137,7 +142,8 @@ public sealed class SourceSettingsAdapter : ISourceSettingsStore
             new TimeOnly(Math.Clamp(settings.BackupHour, 0, 23), Math.Clamp(settings.BackupMinute, 0, 59)),
             settings.DrillEveryDays is { } days and > 0 ? TimeSpan.FromDays(days) : null,
             retention,
-            settings.Prune ? PruneMode.ForgetAndPrune : PruneMode.ForgetOnly);
+            settings.Prune ? PruneMode.ForgetAndPrune : PruneMode.ForgetOnly,
+            settings.UpdateBackupTime, settings.UpdateDrill, settings.UpdateRetention);
     }
 
     private async Task RequireServiceAsync(CancellationToken cancellationToken)

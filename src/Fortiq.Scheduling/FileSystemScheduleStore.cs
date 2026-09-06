@@ -34,7 +34,10 @@ public sealed record SchedulePreferences(
     TimeOnly BackupTime,
     TimeSpan? DrillEvery,
     RetentionPolicy? Retention,
-    PruneMode Prune);
+    PruneMode Prune,
+    bool UpdateBackupTime = true,
+    bool UpdateDrill = true,
+    bool UpdateRetention = true);
 
 /// <summary>A schedule file that could not safely participate in the latest read.</summary>
 public sealed record ScheduleLoadIssue(string FileName, string Failure);
@@ -173,7 +176,7 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
         ArgumentException.ThrowIfNullOrWhiteSpace(scheduleId);
         ArgumentNullException.ThrowIfNull(preferences);
 
-        if (preferences.Retention is { } requested && !requested.KeepsSomething)
+        if (preferences.UpdateRetention && preferences.Retention is { } requested && !requested.KeepsSomething)
         {
             // The same refusal the reader makes, made before anything is written. A policy that keeps
             // nothing is an instruction to delete every backup, and it must never be arrived at by a
@@ -188,26 +191,14 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
 
         document["enabled"] = preferences.Enabled;
 
-        // The recurrence is replaced rather than edited in place: switching a schedule from an
-        // interval to a daily time would otherwise leave the interval's period beside the new fields,
-        // and the reader takes the kind at its word.
-        var recurrence = new JsonObject
+        // Edit only a daily time the caller deliberately changed. Custom recurrence is not a
+        // default daily time; preserve its fields, zone and weekday restrictions.
+        if (preferences.UpdateBackupTime && document["recurrence"] is JsonObject recurrence
+            && recurrence["kind"]?.GetValue<string>() == "dailyAt")
+            recurrence["timeOfDay"] = preferences.BackupTime.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+        if (preferences.UpdateDrill)
         {
-            ["kind"] = "dailyAt",
-            ["timeOfDay"] = preferences.BackupTime.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture),
-            ["timeZone"] = TimeZoneInfo.Local.Id
-        };
-
-        // A weekday restriction somebody wrote by hand is theirs, and the screen has no field for it.
-        if (document["recurrence"] is JsonNode existing
-            && existing["kind"]?.GetValue<string>() == "dailyAt"
-            && existing["days"] is JsonArray days)
-        {
-            recurrence["days"] = days.DeepClone();
-        }
-
-        document["recurrence"] = recurrence;
-
         if (preferences.DrillEvery is { } drill)
         {
             document["drillRecurrence"] = new JsonObject
@@ -221,6 +212,10 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
             document.AsObject().Remove("drillRecurrence");
         }
 
+        }
+
+        if (preferences.UpdateRetention)
+        {
         if (preferences.Retention is { } retention)
         {
             // Retention needs both halves. The recurrence is put beside the policy here so a screen
@@ -251,6 +246,7 @@ public sealed class FileSystemScheduleStore : IScheduleStore, IScheduleIssueSour
             document.AsObject().Remove("retentionRecurrence");
             document.AsObject().Remove("retention");
             document.AsObject().Remove("prune");
+        }
         }
 
         // Read back before it is committed. The reader is the authority on what a schedule file means,

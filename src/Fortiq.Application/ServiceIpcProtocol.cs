@@ -46,12 +46,24 @@ public static class ServiceIpcProtocol
         int? KeepDaily,
         int? KeepWeekly,
         int? KeepMonthly,
-        bool Prune);
+        bool Prune,
+    bool UpdateBackupTime = true,
+    bool UpdateDrill = true,
+    bool UpdateRetention = true);
 
     public sealed record RemoveSchedulePayload(string RepositoryId);
 
     /// <summary>Asks for the lock an interrupted run left in a repository to be cleared.</summary>
     public sealed record ClearLockPayload(string RepositoryId);
+
+    /// <summary>
+    /// Reports that somebody typed the recovery words back, so the phrase is on paper.
+    /// </summary>
+    /// <remarks>
+    /// The desktop shows the words and runs the challenge; only the service may write to the state
+    /// directory on an installed machine, so the fact has to travel here to be recorded.
+    /// </remarks>
+    public sealed record ConfirmPhrasePayload(string RepositoryId);
 
     /// <summary>What the service says about itself when asked.</summary>
     /// <remarks>
