@@ -8,7 +8,10 @@ on:
 # Only what attestation needs: read the repository, write an attestation, and mint the token that
 # signs it. Nothing here writes to the repository itself.
 permissions:
-  contents: read
+  # contents: write, because a tagged run now creates the GitHub Release and attaches what it built.
+  # It was read, and the workflow published nothing: the archive went out as a 30-day workflow
+  # artifact that only somebody signed in could find under Actions, which is not a release.
+  contents: write
   id-token: write
   attestations: write
 
@@ -92,6 +95,38 @@ jobs:
             artifacts/release/Fortiq-Community-*.zip
             artifacts/release/sbom.json
             artifacts/release/SHA256SUMS
+
+      - name: Publish the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Marked as a prerelease and said to be unsigned, because it is both. The artifacts come from
+        # this run rather than from somebody's laptop, which is the whole reason to publish from CI.
+        run: |
+          $archive = Get-ChildItem artifacts/release/Fortiq-Community-*.zip | Select-Object -First 1
+          $notes = @"
+          Fortiq Community Edition, built by this workflow from ``$env:GITHUB_SHA``.
+
+          **This build is not code-signed.** Windows will warn when you run it. Signing needs a
+          certificate this repository does not hold, and an unsigned build must say so rather than
+          look signed.
+
+          Unpack the archive and run ``desktop\Fortiq.Desktop.exe``. It can install itself or run
+          portable. ``RECOVERY-GUIDE.md`` inside explains how to get files back on a machine that has
+          never had Fortiq - read it before you need it.
+
+          Verify what you downloaded against ``SHA256SUMS``, and against the build provenance attested
+          by this run.
+          "@
+          gh release create $env:GITHUB_REF_NAME `
+            $archive.FullName `
+            artifacts/release/SHA256SUMS `
+            artifacts/release/sbom.json `
+            --title "Fortiq Community $env:GITHUB_REF_NAME" `
+            --notes $notes `
+            --prerelease
+          if ($LASTEXITCODE -ne 0) { throw 'Creating the GitHub Release failed.' }
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
