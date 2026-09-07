@@ -21,7 +21,7 @@ Enforce strict process boundaries across five decoupled runtime components:
 | **`Fortiq.Desktop`** | Interactive user token | None (local IPC only) | None | Presentation, MVVM, user confirmation |
 | **`Fortiq.Service`** | Dedicated service SID | Storage endpoints only | Ephemeral leases | Scheduling, orchestration, policy |
 | **`Fortiq.Platform.Windows`** | Elevated platform token | None | None | VSS snapshot creation, USN journal hints |
-| **AI Copilot (Phi Silica)** | Sandboxed user token | None | None | Read-only advisory explanations |
+| **AI assistant (local GGUF model)** | Sandboxed user token | None | None | Read-only advisory explanations |
 | **`Fortiq.Recover`** | Interactive operator | Storage endpoint only | Ephemeral lease | Autonomous offline disaster recovery |
 
 External restic processes are spawned as sandboxed child processes using stripped environment blocks and ephemeral named pipe credentials (`--password-command`).

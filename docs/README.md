@@ -28,7 +28,7 @@ A specification written in the present indicative is describing a design, not re
 3. [03. Threat Model & Trust Boundaries](03-threat-model.md)
 4. [04. Key Management & Sovereign Access Recovery](04-key-management.md)
 5. [05. Recovery Assurance](05-recovery-assurance.md)
-6. [06. Fortiq Intelligence & Phi Silica (On-Device AI)](06-on-device-ai.md)
+6. [06. Fortiq Intelligence & On-Device AI Boundaries](06-on-device-ai.md)
 7. [07. Product Roadmap](07-roadmap.md)
 8. [08. Open Decisions & Trade-offs](08-open-decisions.md)
 

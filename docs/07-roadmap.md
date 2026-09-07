@@ -75,11 +75,13 @@ The Fortiq roadmap is organized around risk reduction and verification milestone
 
 ## Phase 2.5 — Fortiq Intelligence (On-Device AI)
 
-> Gated on hardware, not on effort: Phi Silica needs a Copilot+ PC with an NPU, and the project has
-> none. Capability discovery and the absent-provider path are testable anywhere and can proceed; the
-> inference items below stay unscheduled until such a machine exists. See [Spec 06](06-on-device-ai.md).
+> No longer gated on hardware. The assistant is a GGUF model on a llama.cpp-compatible runtime,
+> pinned and shipped with the installation, so it runs on ordinary machines rather than on a
+> Copilot+ PC with an NPU that the project does not have. Acquisition, verification and the startup
+> requirement are done; the inference runtime is not. See [Spec 06](06-on-device-ai.md).
 
-- [ ] Microsoft Phi Silica capability discovery and graceful absent-provider behaviour (buildable and testable without NPU hardware);
+- [x] Pinned local model: manifest, acquisition with hash verification, installer integration, refusal to start without it;
+- [ ] llama.cpp-compatible inference runtime behind a cross-platform abstraction;
 - [ ] Natural-language local log explanation and restore assistance;
 - [ ] Natural-language recovery plan generation (strictly advisory; human-in-the-loop confirmation required);
 - [ ] Strict metadata-only privacy boundaries (payloads never processed by AI);

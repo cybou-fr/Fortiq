@@ -133,7 +133,7 @@ code unopposed; keeping them here means the same check that guards the README gu
 | **03. Threat Model** | Compromised endpoints, ransomware scenarios, untrusted storage, and cryptographic threat vectors |
 | **04. Key Management** | Key envelopes, BIP-39 mnemonic derivation, TPM Platform Crypto Provider, and memory zeroization |
 | **05. Recovery Assurance** | Verifiable restore model, evidence-based SLAs, recovery readiness metrics, and continuous proof |
-| **06. On-Device AI** | Local copilot capabilities, non-critical advisory boundaries, and Microsoft Phi Silica integration |
+| **06. On-Device AI** | The pinned local model, what the assistant may advise on, and what it may never touch |
 | **07. Product Roadmap** | Phased milestone delivery from foundation to enterprise fleet control |
 | **08. Open Decisions** | Trade-off analyses for open architectural dilemmas and protocol selections |
 | **09. Engine Contract** | `IRepositoryEngine` contract definition, execution lifecycle, and stream parser specifications |

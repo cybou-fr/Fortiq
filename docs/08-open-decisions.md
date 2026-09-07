@@ -18,7 +18,7 @@ Each major architectural direction is formally evaluated and documented via an A
 | **DEC-005** | S3 Providers & Object Lock WORM | **Accepted & Implemented**: S3 Object Lock verification and delete marker unmasking. | [ADR-006](adr/ADR-006-immutable-storage.md) |
 | **DEC-006** | Local IPC Transport & Security | **Accepted & Implemented**: Named Pipes with client PID matching and token checks. | [ADR-004](adr/ADR-004-windows-ipc.md) |
 | **DEC-007** | Recovery Confidence Calculation | **Accepted & Implemented**: `Fortiq.Monitoring` evaluating actual restore proof. | [ADR-011](adr/ADR-011-reliability-model.md) |
-| **DEC-008** | Windows App SDK / Phi Silica | Pending Windows Copilot+ PC runtime ecosystem maturity. | Spec 06 |
+| **DEC-008** | Local inference runtime | Resolved: a llama.cpp-compatible GGUF runtime, not Phi Silica. Copilot+ hardware cannot be a requirement for backing up files. | Spec 06 |
 | **DEC-009** | Telemetry & Data Residency | **Accepted**: Zero cloud data telemetry; local file-based telemetry (`health.json`). | Spec 18, 19 |
 | **DEC-010** | Supported OS Targets for V1 | **Accepted**: Windows 10/11 x64 and Windows Server 2022+ (.NET 10 LTS). | Spec 02, 13 |
 | **DEC-011** | Windows Capture Coordination | **Partially implemented**: VSS snapshots (`--use-fs-snapshot`); USN hints remain design intent. | [ADR-005](adr/ADR-005-vss-usn.md) |

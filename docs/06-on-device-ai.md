@@ -1,22 +1,43 @@
-# Fortiq Intelligence & On-Device AI Boundaries (Microsoft Phi Silica)
+# Fortiq Intelligence & On-Device AI Boundaries
 
-> **Implementation status: Design intent.** No implementation. Nothing in `src/` references Phi Silica or
-> any local model.
->
-> This specification has a hardware precondition the project does not currently meet: Phi Silica runs on
-> Copilot+ PCs with a dedicated NPU, and no such machine is available to develop or test against. What
-> *is* buildable without one is the capability-discovery path and the absent-provider behaviour — the
-> guarantee that every backup, encryption and recovery function is feature-complete with no model
-> present. That half can be written and tested on any machine, and it is the half that protects the
-> product; the inference path stays unscheduled until hardware exists to run it on. Nothing here is a
-> commitment to ship a copilot on a timetable.
-
+> **Implementation status: partially implemented.** The model is pinned, acquired, verified and
+> required at startup (`models/manifest.json`, `scripts/Get-Model.ps1`, `src/Fortiq.Assistant`,
+> and the check in `Fortiq.Desktop/Program.cs`). No inference runtime is wired up yet, so nothing
+> in `src/` yet asks the model a question. The boundaries below are the ones that path must be
+> built inside, and they are the reason to write them down before it exists.
 
 ## Purpose & Scope
 
-Fortiq Intelligence is an optional, strictly local advisory copilot. On compatible Windows 11 hardware (e.g. Copilot+ PCs with dedicated NPUs), the preferred local inference provider is Microsoft Phi Silica via the Windows AI APIs.
+Fortiq's assistant is a strictly local advisory model. It runs on the machine, on the CPU, from a
+file that ships in the installation package or is fetched during installation. It is never a
+service, it is never consulted over the network, and no part of it is remote.
 
-The existence of AI is completely dynamic: the core backup, encryption, and disaster recovery functionality operates with 100% feature completeness when AI capabilities are absent or disabled.
+This replaces an earlier design that named Microsoft Phi Silica and the Windows AI APIs as the
+inference provider. That design was gated on a Copilot+ PC with an NPU — hardware the project does
+not have and cannot require of anybody who wants to back up their files — and it made the assistant
+conditional on the machine. A GGUF model on a llama.cpp-compatible runtime runs on ordinary
+hardware, on Windows, Linux and macOS, which is what the Community edition needs. The pinned
+profile is in [Spec 28](28-local-conversational-assistant.md) and
+[ADR-018](adr/ADR-018-local-llm-draft-task-authoring.md); what ships today is recorded in
+[models/NOTICE.md](../models/NOTICE.md).
+
+## The model is required, and it decides nothing
+
+These are two separate statements and both matter.
+
+**Required.** Fortiq is not offered in a reduced form without its model. An installation that lacks
+one is an installation that did not finish, and the application says so on launch rather than
+letting somebody meet the absence later, inside a screen, as an error about a manifest. There is no
+degraded mode to test, document or support.
+
+**Decides nothing.** Backup, encryption, scheduling, verification and recovery are complete without
+ever consulting the model, and they do not consult it. The assistant drafts and explains; the
+deterministic paths do the work. Nothing below the confirmation dialog knows a model exists.
+
+The clearest expression of both: **`Fortiq.Recover` carries no model and needs none.** The tool
+somebody copies onto whatever they had to hand, to get their files back on a machine that has never
+seen Fortiq, does not contain a gigabyte of model and never asks one anything. If the assistant were
+load-bearing, it would be load-bearing there, and it is not.
 
 ---
 
@@ -26,18 +47,24 @@ The existence of AI is completely dynamic: the core backup, encryption, and disa
 - Semantic summarization of file and directory delta changes between snapshots;
 - Explanations of anomaly signals (e.g., sudden entropy shifts or spike in encrypted extensions);
 - Translating user natural language requests into structured, previewable restore proposals;
-- Draft generation of retention schedules for human review.
+- Draft generation of backup tasks and retention schedules for human review.
 
 ---
 
 ## Strict Security Prohibitions (Forbidden Capabilities)
 
 Under NO circumstances may AI models or components:
+
 1. Access, request, or handle encryption keys, Engine Unlock Secrets (EUS), mnemonics, or KMS tokens;
 2. Directly execute destructive operations, snapshot deletions, or unconfirmed restores;
 3. Mutate retention policies, storage immutability profiles, or cryptographic audit logs;
 4. Execute instructions or shell scripts embedded within backed-up document contents (defeating prompt injection);
 5. Directly interface with the repository engine or privileged Windows platform brokers.
+
+Prohibition 4 is not hypothetical. The assistant's inputs include filenames, paths and log text that
+came from somebody's disk, and anything read from a backed-up file is data. Text arriving that way
+cannot authorize an action, and an action is authorized by the person in front of the confirmation
+dialog or by nobody.
 
 ---
 
@@ -46,7 +73,7 @@ Under NO circumstances may AI models or components:
 ```text
 User Natural-Language Query
   → Input Sanitization & Data Minimization
-  → On-Device AI Model (Phi Silica / Local NPU)
+  → Local model (GGUF, llama.cpp-compatible runtime, on-device)
   → Strictly Typed JSON Schema Parser
   → Deterministic Validator (Path Bounds & Repository Existence)
   → Policy Engine Authorization
@@ -54,4 +81,26 @@ User Natural-Language Query
   → Execution via Fortiq Service / Engine Adapter
 ```
 
-Free-form natural language generated by an LLM is NEVER directly executed. Action proposals must conform to typed schema structures and pass deterministic validation rules before triggering an interactive confirmation prompt.
+Free-form natural language generated by an LLM is NEVER directly executed. Action proposals must
+conform to typed schema structures and pass deterministic validation rules before triggering an
+interactive confirmation prompt.
+
+---
+
+## Supply chain
+
+The model is a large binary this product redistributes and then runs on somebody else's machine,
+which is exactly what the backup engine is, so it is treated the same way:
+
+- pinned in `models/manifest.json` by exact length and SHA-256, from a fixed source revision rather
+  than a branch that can move;
+- acquired by `scripts/Get-Model.ps1`, which downloads to a `.partial`, verifies length and hash,
+  and only then renames into place, so an interrupted install never leaves something that looks
+  installed;
+- verified again by `scripts/New-DeploymentBundle.ps1` before publishing and after copying;
+- redistributed with its licence: `models/LICENSE-Apache-2.0.txt` and `models/NOTICE.md` are
+  required for a bundle to build.
+
+At startup the length is checked and the hash is not. Re-hashing the whole file would add seconds to
+every launch to re-answer a question installation already answered, and the failure that actually
+happens afterwards — an interrupted copy — is caught by the length.
