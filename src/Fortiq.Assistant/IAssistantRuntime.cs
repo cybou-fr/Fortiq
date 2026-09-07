@@ -1,9 +1,18 @@
-namespace Fortiq.Assistant;
+﻿namespace Fortiq.Assistant;
 
 /// <summary>What the assistant said, and nothing that has happened because of it.</summary>
 /// <param name="Text">The model's answer. Shown to a person; never parsed into an action.</param>
 /// <param name="Truncated">True when the model hit its limit rather than finishing its sentence.</param>
-public sealed record AssistantReply(string Text, bool Truncated);
+/// <param name="Response">
+/// The same answer as separate statements, when the model was held to the response schema.
+/// </param>
+/// <remarks>
+/// Both, rather than one or the other. The structured form is what a screen can treat differently -
+/// showing a Fact as something Fortiq recorded and a Recommendation as an opinion - and the text is
+/// what remains when a model, a schema or a parse did not cooperate. A caller that only ever reads
+/// <paramref name="Text"/> keeps working.
+/// </remarks>
+public sealed record AssistantReply(string Text, bool Truncated, Fortiq.CommunityModel.AssistantResponse? Response = null);
 
 /// <summary>
 /// Somewhere a local model can be asked a question.

@@ -1,4 +1,5 @@
 ﻿using Fortiq.Assistant;
+using Fortiq.CommunityModel;
 using Fortiq.Desktop.ViewModels;
 
 namespace Fortiq.Desktop.Tests;
@@ -213,13 +214,13 @@ public sealed class AssistantViewModelTests
         var runtime = new Fake();
         var model = new AssistantViewModel(
             _ => Task.FromResult<IAssistantRuntime>(runtime),
-            prepareContext: _ => Task.FromResult("FORTIQ CONTEXT v1\ntask Documents: daily at 02:00"));
+            prepareContext: _ => Task.FromResult(new AssistantContextBuilder().Build(ResourceCatalog.Empty, [new OperationalFact("verdict", "Documents", "At risk.")])));
         model.Question = "Is anything at risk?";
 
         await model.AskAsync(CancellationToken.None);
 
         var context = Assert.Single(runtime.LastAsk!.Evidence);
-        Assert.Contains("task Documents", context.Text, StringComparison.Ordinal);
+        Assert.Contains("verdict:Documents", context.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -228,7 +229,7 @@ public sealed class AssistantViewModelTests
         var runtime = new Fake();
         var model = new AssistantViewModel(
             _ => Task.FromResult<IAssistantRuntime>(runtime),
-            prepareContext: _ => Task.FromResult("FORTIQ CONTEXT v1"));
+            prepareContext: _ => Task.FromResult(new AssistantContextBuilder().Build(ResourceCatalog.Empty, [new OperationalFact("verdict", "Documents", "At risk.")])));
 
         await model.AskAsync(
             new AssistantSuggestion("Why?", [new AssistantEvidence("engine error", "locked")]),
@@ -246,7 +247,7 @@ public sealed class AssistantViewModelTests
         var built = 0;
         var model = new AssistantViewModel(
             _ => Task.FromResult<IAssistantRuntime>(new Fake()),
-            prepareContext: _ => { built++; return Task.FromResult("context"); });
+            prepareContext: _ => { built++; return Task.FromResult(new AssistantContextBuilder().Build(ResourceCatalog.Empty, [new OperationalFact("verdict", "Documents", "At risk.")])); });
 
         model.Question = "First?";
         await model.AskAsync(CancellationToken.None);
@@ -273,7 +274,74 @@ public sealed class AssistantViewModelTests
         Assert.Empty(runtime.LastAsk!.Evidence);
     }
 
-    private sealed class Fake(string answer = "An answer.", bool truncated = false, bool throws = false) : IAssistantRuntime
+    [Fact]
+    public async Task AFactTheAssistantInventedIsDemotedRatherThanShownAsARecord()
+    {
+        // A model asked about backups will produce "the last recovery proof succeeded" whether or
+        // not it was given that, in the same confident register as the true statements. The sentence
+        // is kept - the person asked a question - but it loses the right to look like a record.
+        var invented = new AssistantResponse(
+        [
+            new SemanticItem(SemanticItemKind.Fact, "The last recovery drill passed.", "proof:Documents"),
+            new SemanticItem(SemanticItemKind.Fact, "Documents is at risk.", "verdict:Documents")
+        ]);
+
+        var model = new AssistantViewModel(
+            _ => Task.FromResult<IAssistantRuntime>(new Fake(response: invented)),
+            prepareContext: _ => Task.FromResult(Context()));
+        model.Question = "How am I doing?";
+
+        await model.AskAsync(CancellationToken.None);
+
+        Assert.Equal(SemanticItemKind.Explanation, model.Statements!.Items[0].Kind);
+        Assert.Equal(SemanticItemKind.Fact, model.Statements.Items[1].Kind);
+        Assert.Single(model.Ungrounded);
+        // And the sentence itself survives, because deleting it would hide that the model said it.
+        Assert.Contains("The last recovery drill passed.", model.Answer!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnOpinionIsNotGroundedBecauseItIsNotAClaimAboutRecords()
+    {
+        var response = new AssistantResponse(
+            [new SemanticItem(SemanticItemKind.Recommendation, "Run a recovery drill this week.")]);
+
+        var model = new AssistantViewModel(
+            _ => Task.FromResult<IAssistantRuntime>(new Fake(response: response)),
+            prepareContext: _ => Task.FromResult(Context()));
+        model.Question = "What should I do?";
+
+        await model.AskAsync(CancellationToken.None);
+
+        Assert.Empty(model.Ungrounded);
+        Assert.Equal(SemanticItemKind.Recommendation, Assert.Single(model.Statements!.Items).Kind);
+    }
+
+    [Fact]
+    public async Task AProseAnswerStillArrivesWhenTheModelGaveNoStatements()
+    {
+        var model = new AssistantViewModel(
+            _ => Task.FromResult<IAssistantRuntime>(new Fake("Just a paragraph.")),
+            prepareContext: _ => Task.FromResult(Context()));
+        model.Question = "Why?";
+
+        await model.AskAsync(CancellationToken.None);
+
+        Assert.Equal("Just a paragraph.", model.Answer);
+        Assert.Null(model.Statements);
+        Assert.Empty(model.Ungrounded);
+    }
+
+    private static AssistantContext Context() =>
+        new AssistantContextBuilder().Build(
+            ResourceCatalog.Empty,
+            [new OperationalFact("verdict", "Documents", "At risk: this may not be recoverable today.")]);
+
+    private sealed class Fake(
+        string answer = "An answer.",
+        bool truncated = false,
+        bool throws = false,
+        AssistantResponse? response = null) : IAssistantRuntime
     {
         public bool IsReady => true;
 
@@ -286,7 +354,7 @@ public sealed class AssistantViewModelTests
             LastAsk = ask;
             return throws
                 ? Task.FromException<AssistantReply>(new InvalidDataException("The runtime stopped."))
-                : Task.FromResult(new AssistantReply(answer, truncated));
+                : Task.FromResult(new AssistantReply(response?.Text ?? answer, truncated, response));
         }
 
         public ValueTask DisposeAsync()

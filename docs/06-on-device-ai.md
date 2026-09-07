@@ -9,6 +9,7 @@
 > | Prompt / evidence boundary | implemented |
 > | Assistant screen | implemented |
 > | Prepared context | implemented, not yet sent to the model |
+> | Typed responses | implemented, schema-constrained, grounded |
 > | Typed proposals | implemented (`TaskProposal`, not yet produced by the model) |
 > | Deterministic validator | implemented |
 > | Draft store and review | draft lifecycle implemented; no store, no review screen |

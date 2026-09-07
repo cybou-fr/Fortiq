@@ -1,4 +1,4 @@
-using Fortiq.Assistant;
+﻿using Fortiq.Assistant;
 
 namespace Fortiq.Assistant.Tests;
 
@@ -93,6 +93,42 @@ public sealed class LlamaServerRuntimeTests
 
         Assert.False(runtime.IsReady);
         Assert.True(IsGone(processId), "The runtime process outlived the object that owned it.");
+    }
+
+    [Fact]
+    public async Task TheRealModelHeldToTheSchemaAnswersInStatements()
+    {
+        // The end-to-end fact that matters for the structured path: llama.cpp compiles the schema
+        // into a grammar, so the shape is not something the model may decline. If this ever fails,
+        // the schema is too large for a two-billion-parameter model rather than merely unlucky.
+        if (Server() is not { } server || Model() is not { } model)
+        {
+            return;
+        }
+
+        var runtime = await LlamaServerRuntime.StartAsync(
+            new AssistantRuntimeOptions(server, model, ContextTokens: 4096, Threads: 4, MaxReplyTokens: 300),
+            CancellationToken.None);
+
+        try
+        {
+            var reply = await runtime.AskAsync(
+                AssistantAsk.About(
+                    "What should the person do, and what did Fortiq record?",
+                    new AssistantEvidence(
+                        "what Fortiq knows about this PC",
+                        "WHAT FORTIQ RECORDED\nCite one of these by its [reference] when you state a fact.\n"
+                        + "[verdict:Documents] Documents: At risk: this may not be recoverable today.")),
+                CancellationToken.None);
+
+            Assert.NotNull(reply.Response);
+            Assert.NotEmpty(reply.Response.Items);
+            Assert.NotEmpty(reply.Text);
+        }
+        finally
+        {
+            await runtime.DisposeAsync();
+        }
     }
 
     [Fact]

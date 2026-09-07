@@ -26,7 +26,7 @@ public sealed class AssistantContextAdapter(IScheduleStore schedules, IHealthSou
 {
     private readonly AssistantContextBuilder _builder = new();
 
-    public async Task<string> PrepareAsync(CancellationToken cancellationToken)
+    public async Task<AssistantContext> PrepareAsync(CancellationToken cancellationToken)
     {
         var catalog = ResourceCatalog.Empty;
         var facts = new List<OperationalFact>();
@@ -64,7 +64,7 @@ public sealed class AssistantContextAdapter(IScheduleStore schedules, IHealthSou
 
         facts.AddRange(repositories.SelectMany(Describe));
 
-        return _builder.Build(catalog, facts).Render();
+        return _builder.Build(catalog, facts);
     }
 
     /// <summary>

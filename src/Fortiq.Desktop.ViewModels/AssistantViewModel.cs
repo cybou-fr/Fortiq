@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Fortiq.Assistant;
+using Fortiq.CommunityModel;
 
 namespace Fortiq.Desktop.ViewModels;
 
@@ -35,14 +36,14 @@ public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposabl
 {
     private readonly Func<CancellationToken, Task<IAssistantRuntime>> _start;
     private readonly Func<CancellationToken, Task<string?>>? _describeUnavailable;
-    private readonly Func<CancellationToken, Task<string>>? _prepareContext;
+    private readonly Func<CancellationToken, Task<AssistantContext>>? _prepareContext;
     private IAssistantRuntime? _runtime;
     private CancellationTokenSource? _operation;
 
     public AssistantViewModel(
         Func<CancellationToken, Task<IAssistantRuntime>> start,
         Func<CancellationToken, Task<string?>>? describeUnavailable = null,
-        Func<CancellationToken, Task<string>>? prepareContext = null)
+        Func<CancellationToken, Task<AssistantContext>>? prepareContext = null)
     {
         _start = start ?? throw new ArgumentNullException(nameof(start));
         _describeUnavailable = describeUnavailable;
@@ -104,6 +105,25 @@ public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposabl
     /// <summary>True when the model stopped at its limit rather than finishing.</summary>
     public bool AnswerTruncated { get; private set; }
 
+    /// <summary>
+    /// The answer as separate statements, when the model gave one.
+    /// </summary>
+    /// <remarks>
+    /// A screen can show a Fact as something Fortiq recorded and a Recommendation as an opinion;
+    /// with only a paragraph it has to show both in the same voice, which is how the model's guesses
+    /// come to look like Fortiq's records.
+    /// </remarks>
+    public AssistantResponse? Statements { get; private set; }
+
+    /// <summary>
+    /// Where the assistant claimed to be quoting Fortiq and was not.
+    /// </summary>
+    /// <remarks>
+    /// Kept and shown rather than silently corrected. Somebody reading an answer is entitled to know
+    /// that part of it was the model's invention presented as a record.
+    /// </remarks>
+    public IReadOnlyList<ValidationFinding> Ungrounded { get; private set; } = [];
+
     public string? Failure { get; private set; }
 
     public bool Busy { get; private set; }
@@ -136,10 +156,14 @@ public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposabl
         Answer = null;
         AnsweredQuestion = null;
         AnswerTruncated = false;
+        Statements = null;
+        Ungrounded = [];
         RaiseAll();
 
         using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _operation = operation;
+
+        AssistantContext? context = null;
 
         try
         {
@@ -155,8 +179,25 @@ public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposabl
             Status = "Thinking.";
             RaiseAll();
 
-            var reply = await _runtime.AskAsync(await WithContextAsync(ask, operation.Token), operation.Token);
-            Answer = reply.Text;
+            context = await PrepareContextAsync(operation.Token);
+            var reply = await _runtime.AskAsync(WithContext(ask, context), operation.Token);
+
+            // Grounded before it is shown, not after. An answer that has already been read as
+            // Fortiq's record cannot be un-read by a correction underneath it.
+            if (reply.Response is { } response && context is not null)
+            {
+                var grounded = ResponseGrounding.Ground(response, context);
+                Statements = grounded.Response;
+                Ungrounded = grounded.Findings;
+                Answer = grounded.Response.Text;
+            }
+            else
+            {
+                Statements = reply.Response;
+                Ungrounded = [];
+                Answer = reply.Text;
+            }
+
             AnswerTruncated = reply.Truncated;
             AnsweredQuestion = ask.Question;
         }
@@ -196,25 +237,27 @@ public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposabl
     /// A context that cannot be built is left out rather than reported. The question is still a
     /// question, and "what is a recovery phrase?" does not need this machine's configuration.
     /// </remarks>
-    private async Task<AssistantAsk> WithContextAsync(AssistantAsk ask, CancellationToken cancellationToken)
+    private async Task<AssistantContext?> PrepareContextAsync(CancellationToken cancellationToken)
     {
         if (_prepareContext is null)
         {
-            return ask;
+            return null;
         }
 
         try
         {
-            var context = await _prepareContext(cancellationToken);
-            return string.IsNullOrWhiteSpace(context)
-                ? ask
-                : ask with { Evidence = [new AssistantEvidence("what Fortiq knows about this PC", context), .. ask.Evidence] };
+            return await _prepareContext(cancellationToken);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            return ask;
+            return null;
         }
     }
+
+    private static AssistantAsk WithContext(AssistantAsk ask, AssistantContext? context) =>
+        context is null
+            ? ask
+            : ask with { Evidence = [new AssistantEvidence("what Fortiq knows about this PC", context.Render()), .. ask.Evidence] };
 
     public void Cancel() => _operation?.Cancel();
 
@@ -250,6 +293,8 @@ public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposabl
         Raise(nameof(Answer));
         Raise(nameof(AnsweredQuestion));
         Raise(nameof(AnswerTruncated));
+        Raise(nameof(Statements));
+        Raise(nameof(Ungrounded));
         Raise(nameof(Failure));
         Raise(nameof(CanAsk));
         Raise(nameof(Checked));

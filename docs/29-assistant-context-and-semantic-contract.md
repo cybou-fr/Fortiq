@@ -1,6 +1,7 @@
 # Specification 29: Prepared Assistant Context & Semantic Response Contract
 
-> **Implementation status: context implemented, semantic response contract not.**
+> **Implementation status: context and semantic response contract implemented; drafts not yet
+> generated.**
 > `AssistantContext`, `AssistantContextBuilder`, `ProductRules` and `CommunityCapabilities` live in
 > `src/Fortiq.CommunityModel`. Nothing yet sends the context to the model, and the typed response
 > schema of §6 onwards does not exist - today the assistant returns prose.

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Fortiq.Assistant;
@@ -23,16 +23,20 @@ internal static class LlamaChatProtocol
     /// The temperature is low for the same reason the output is structured elsewhere: this assistant
     /// explains what a machine did, and invention is the failure mode that matters.
     /// </remarks>
-    public static string BuildRequest(AssistantAsk ask, int maxTokens)
+    public static string BuildRequest(AssistantAsk ask, int maxTokens, bool structured = false)
     {
         ArgumentNullException.ThrowIfNull(ask);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxTokens);
+
+        var system = structured
+            ? AssistantPrompt.SystemInstruction + " " + AssistantResponseSchema.Instruction
+            : AssistantPrompt.SystemInstruction;
 
         var body = new JsonObject
         {
             ["messages"] = new JsonArray
             {
-                new JsonObject { ["role"] = "system", ["content"] = AssistantPrompt.SystemInstruction },
+                new JsonObject { ["role"] = "system", ["content"] = system },
                 new JsonObject { ["role"] = "user", ["content"] = AssistantPrompt.Build(ask) }
             },
             ["max_tokens"] = maxTokens,
@@ -40,6 +44,24 @@ internal static class LlamaChatProtocol
             ["stream"] = false,
             ["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false }
         };
+
+        if (structured)
+        {
+            // llama.cpp compiles this into a grammar and constrains sampling to it, so the shape is
+            // not a request the model may decline. A free-form answer would have to be parsed by
+            // guessing, and every guess is a place where a sentence the model wrote decides how
+            // Fortiq behaves.
+            body["response_format"] = new JsonObject
+            {
+                ["type"] = "json_schema",
+                ["json_schema"] = new JsonObject
+                {
+                    ["name"] = "fortiq_assistant_response",
+                    ["strict"] = true,
+                    ["schema"] = AssistantResponseSchema.Schema.DeepClone()
+                }
+            };
+        }
 
         return body.ToJsonString();
     }
@@ -84,6 +106,11 @@ internal static class LlamaChatProtocol
         }
 
         var truncated = string.Equals(choice?["finish_reason"]?.GetValue<string>(), "length", StringComparison.Ordinal);
-        return new AssistantReply(text.Trim(), truncated);
+
+        // Prose when it is prose, statements when the schema held. Falling back rather than failing:
+        // an assistant that shows a person nothing because its own output missed a schema is worse
+        // than one that shows them a paragraph.
+        var structured = AssistantResponseSchema.Read(text);
+        return new AssistantReply(structured?.Text ?? text.Trim(), truncated, structured);
     }
 }

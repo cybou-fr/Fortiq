@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace Fortiq.CommunityModel;
 
@@ -60,7 +60,18 @@ public static class ProductRules
 /// of that would become a second opinion on recoverability - which is the one thing RULE-RECOVERY-001
 /// exists to prevent.
 /// </remarks>
-public sealed record OperationalFact(string Code, string Subject, string Detail);
+public sealed record OperationalFact(string Code, string Subject, string Detail)
+{
+    /// <summary>
+    /// How the assistant cites this one fact.
+    /// </summary>
+    /// <remarks>
+    /// Code and subject together, because a code alone names a kind of fact rather than a fact: half
+    /// a dozen repositories each have a verdict. Grounding compares against this, so a citation
+    /// either identifies something Fortiq recorded or it identifies nothing.
+    /// </remarks>
+    public string Reference => $"{Code}:{Subject}";
+}
 
 /// <summary>
 /// Everything the assistant is told before it is asked anything.
@@ -148,9 +159,11 @@ public sealed record AssistantContext(
         if (OperationalFacts.Count > 0)
         {
             text.Append("\nWHAT FORTIQ RECORDED\n");
+            text.Append("Cite one of these by its [reference] when you state a fact.\n");
             foreach (var fact in OperationalFacts)
             {
-                text.Append(fact.Subject).Append(": ").Append(fact.Detail).Append('\n');
+                text.Append('[').Append(fact.Reference).Append("] ")
+                    .Append(fact.Subject).Append(": ").Append(fact.Detail).Append('\n');
             }
         }
 

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -16,6 +16,10 @@ namespace Fortiq.Assistant;
 /// <param name="StartupTimeout">How long loading a gigabyte of weights may take before giving up.</param>
 /// <param name="ReplyTimeout">How long one answer may take.</param>
 /// <param name="MaxReplyTokens">The ceiling on one answer.</param>
+/// <param name="Structured">
+/// Whether the model is held to the response schema. On by default, because a screen can only treat
+/// a recorded fact differently from an opinion if the answer says which is which.
+/// </param>
 public sealed record AssistantRuntimeOptions(
     string ServerPath,
     string ModelPath,
@@ -23,7 +27,8 @@ public sealed record AssistantRuntimeOptions(
     int? Threads = null,
     TimeSpan? StartupTimeout = null,
     TimeSpan? ReplyTimeout = null,
-    int MaxReplyTokens = 512)
+    int MaxReplyTokens = 512,
+    bool Structured = true)
 {
     public TimeSpan ResolvedStartupTimeout => StartupTimeout ?? TimeSpan.FromMinutes(2);
 
@@ -137,7 +142,7 @@ public sealed class LlamaServerRuntime : IAssistantRuntime
         deadline.CancelAfter(_options.ResolvedReplyTimeout);
 
         using var content = new StringContent(
-            LlamaChatProtocol.BuildRequest(ask, _options.MaxReplyTokens),
+            LlamaChatProtocol.BuildRequest(ask, _options.MaxReplyTokens, _options.Structured),
             Encoding.UTF8,
             "application/json");
 

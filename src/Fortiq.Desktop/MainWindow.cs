@@ -1482,6 +1482,18 @@ public sealed class MainWindow : Window
                 TextWrapping = TextWrapping.Wrap
             });
 
+            if (model.Ungrounded.Count > 0)
+            {
+                // Said above the disclaimer and in its own colour, because it is a different and
+                // sharper claim: not "this could be wrong" but "this part said it was a record and
+                // was not". Somebody who has already read a sentence as Fortiq's cannot un-read it.
+                card.Children.Add(Text(
+                    model.Ungrounded.Count == 1
+                        ? "One statement above claimed to be something Fortiq recorded and was not."
+                        : $"{model.Ungrounded.Count} statements above claimed to be things Fortiq recorded and were not.",
+                    11, FontWeight.SemiBold, Unproven, wrap: true));
+            }
+
             if (model.AnswerTruncated)
             {
                 card.Children.Add(Text("The answer stopped at its length limit.", 11, FontWeight.Normal, Unproven, wrap: true));
