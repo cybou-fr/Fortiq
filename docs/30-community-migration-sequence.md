@@ -12,14 +12,21 @@ Goal: establish canonical vocabulary without pretending the code has changed.
 
 ## P1 — Community read model
 
-Introduce code models for:
+> **Implemented.** `src/Fortiq.CommunityModel` holds the model; `LegacyScheduleProjector` in
+> `Fortiq.Scheduling` populates it from the current schedule files. Nothing writes it yet.
+
+Code models for:
 
 ```text
 Source
 Storage
+StorageCredentialRef
+RepositoryEngineRef
 Identity
+IdentityKey
 EncryptionProfile
 Task
+Trigger
 Route
 ```
 
@@ -28,6 +35,16 @@ Initially populate them by projecting current schedule files.
 No repository recreation.  
 No cryptographic migration.  
 No scheduler replacement yet.
+
+Two constraints the implementation added, both learned from what the projection has to survive:
+
+- `Fortiq.CommunityModel` has **no project references**. It is the model the product moves onto, so
+  it must not depend on the layers it outlives, and the projector therefore lives in the scheduling
+  assembly - the dependency runs legacy to new and only that way, leaving no cycle to unpick at P3.
+- A `Route` carries the **drill and retention triggers** although §4 of Spec 25 lists only a
+  retention policy. They exist per schedule today; dropping them would make the projection lossy,
+  and a read model that lost the drill schedule would let a screen show a source as covered while
+  nothing proved it could be restored.
 
 ## P2 — GUI projection
 

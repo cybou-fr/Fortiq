@@ -1,7 +1,14 @@
 # Specification 24: Community Resource Model
 
-> **Implementation status: Design intent.**  
-> This specification defines the target Community configuration/domain model. Existing Community builds remain repository/schedule-centric until the migration in Spec 27 is implemented.
+> **Implementation status: read model implemented, not yet written.**  
+> The types in this specification exist in `src/Fortiq.CommunityModel`, and `LegacyScheduleProjector`
+> populates them from today's schedule files. Configuration is still stored and executed as
+> `fortiq.backup-schedule` v1; nothing writes the decomposed documents yet (Spec 30, P3).
+>
+> Storage capabilities are asserted only where they were established. Nothing probes yet, so a
+> projected S3 storage is `Remote` and - over HTTPS - `EncryptedTransport`, and is never marked
+> `Versioned`, `Immutable` or `ObjectLock`, because those are the properties a ransomware claim
+> would rest on and no code has asked the bucket.
 
 ## 1. Purpose
 

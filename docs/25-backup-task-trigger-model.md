@@ -1,7 +1,13 @@
 # Specification 25: Backup Task, Trigger, Route & Run Model
 
-> **Implementation status: Design intent.**  
-> Existing `BackupSchedule` and scheduled runners remain the current implementation. This specification defines their target decomposition.
+> **Implementation status: read model implemented, execution unchanged.**  
+> `BackupTask`, `Trigger` and `BackupRoute` exist in `src/Fortiq.CommunityModel` and are projected
+> from existing schedules. `BackupSchedule` and the scheduled runners remain what actually runs, and
+> the triggers here deliberately carry no occurrence arithmetic - that lives, tested, in the
+> scheduler, and two implementations of daylight-saving handling would be one too many.
+>
+> One departure from §4 below: a `Route` also carries a drill trigger and a retention trigger.
+> Schedules have both today, and a read model that dropped them would be quietly lossy.
 
 ## 1. Purpose
 
