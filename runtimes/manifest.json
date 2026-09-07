@@ -1,0 +1,16 @@
+{
+  "schema": "fortiq.runtime-manifest",
+  "version": 1,
+  "runtimes": [
+    {
+      "name": "llama-server",
+      "version": "b10830",
+      "rid": "win-x64",
+      "relativePath": "llama/b10830/win-x64/llama-server.exe",
+      "archiveSha256": "2bdf856e95d4070ccb9052322f8598b9deb08fe2b4a6870740231fb375388039",
+      "archiveLength": 18416266,
+      "sourceUrl": "https://github.com/ggml-org/llama.cpp/releases/download/b10830/llama-b10830-bin-win-cpu-x64.zip",
+      "license": "MIT"
+    }
+  ]
+}
