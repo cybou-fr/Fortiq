@@ -1,10 +1,10 @@
 # Fortiq Intelligence & On-Device AI Boundaries
 
-> **Implementation status: partially implemented.** The model is pinned, acquired, verified and
-> required at startup (`models/manifest.json`, `scripts/Get-Model.ps1`, `src/Fortiq.Assistant`,
-> and the check in `Fortiq.Desktop/Program.cs`). No inference runtime is wired up yet, so nothing
-> in `src/` yet asks the model a question. The boundaries below are the ones that path must be
-> built inside, and they are the reason to write them down before it exists.
+> **Implementation status: implemented, not yet surfaced.** The model and the llama.cpp runtime are
+> both pinned, acquired, verified and required at startup, and `LlamaServerRuntime` starts the model
+> in a process of its own and answers questions against it. What does not exist yet is anywhere in
+> the interface to ask one: no screen calls this. The boundaries below are the ones that path must
+> be built inside.
 
 ## Purpose & Scope
 
@@ -73,7 +73,7 @@ dialog or by nobody.
 ```text
 User Natural-Language Query
   → Input Sanitization & Data Minimization
-  → Local model (GGUF, llama.cpp-compatible runtime, on-device)
+  → Local model (GGUF, llama-server child process on 127.0.0.1)
   → Strictly Typed JSON Schema Parser
   → Deterministic Validator (Path Bounds & Repository Existence)
   → Policy Engine Authorization
@@ -89,18 +89,43 @@ interactive confirmation prompt.
 
 ## Supply chain
 
-The model is a large binary this product redistributes and then runs on somebody else's machine,
-which is exactly what the backup engine is, so it is treated the same way:
+The model and the runtime that runs it are large binaries this product redistributes and then runs
+on somebody else's machine, which is exactly what the backup engine is, so both are treated the same
+way:
 
 - pinned in `models/manifest.json` by exact length and SHA-256, from a fixed source revision rather
   than a branch that can move;
 - acquired by `scripts/Get-Model.ps1`, which downloads to a `.partial`, verifies length and hash,
   and only then renames into place, so an interrupted install never leaves something that looks
   installed;
+- the runtime pinned by its *archive* hash in `runtimes/manifest.json` and acquired by
+  `scripts/Get-Runtime.ps1`, which verifies the archive before extracting anything - see
+  [runtimes/NOTICE.md](../runtimes/NOTICE.md) for why the executable's own hash would verify nothing;
 - verified again by `scripts/New-DeploymentBundle.ps1` before publishing and after copying;
-- redistributed with its licence: `models/LICENSE-Apache-2.0.txt` and `models/NOTICE.md` are
-  required for a bundle to build.
+- redistributed with their licences: `models/LICENSE-Apache-2.0.txt`, `models/NOTICE.md`,
+  `runtimes/LICENSE-llama.cpp.txt` and `runtimes/NOTICE.md` are each required for a bundle to build.
 
 At startup the length is checked and the hash is not. Re-hashing the whole file would add seconds to
 every launch to re-answer a question installation already answered, and the failure that actually
 happens afterwards — an interrupted copy — is caught by the length.
+
+---
+
+## Where the assistant runs
+
+Not in the desktop's process. `llama-server` is started as a child, bound to `127.0.0.1`, with an
+API key generated for that one run, and is killed with the application - process tree included.
+
+The boundary is the point. This is the component that reads text somebody else wrote: file names,
+paths, log lines, engine output. It is the one most likely to be fed something hostile, and the one
+whose failure should cost the least. A model that exhausts memory, loops, or is talked into
+misbehaving takes down a child process that can be restarted, not the window somebody has open
+because they are trying to get their data back.
+
+Loopback is not by itself a boundary - every process on the machine shares it - which is why the API
+key exists. Without it, anything running as the user could use somebody's Fortiq installation as a
+free inference server.
+
+Reasoning is disabled. Measured on the pinned model: with it on, the model spent its entire token
+budget thinking and returned an empty answer. Spec 28 asks for non-thinking concise output as the
+default mode; `LlamaChatProtocol` is where that is set.

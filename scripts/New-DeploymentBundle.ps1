@@ -50,6 +50,25 @@ if ($model.Length -ne $modelEntry.fileLength -or (Get-FileHash -LiteralPath $mod
     throw 'Pinned model verification failed. Acquire it with scripts/Get-Model.ps1.'
 }
 
+# And the runtime that runs the model. Presence rather than a hash: this is a folder of an
+# executable and its libraries, not one file, and the archive hash that anchors it was checked by
+# Get-Runtime.ps1 before extraction. Per-file integrity is the bundle manifest below.
+$runtimeRoot = Join-Path $repositoryRoot 'runtimes'
+$runtimeManifestPath = Join-Path $runtimeRoot 'manifest.json'
+$runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json
+$runtimeEntries = @($runtimeManifest.runtimes | Where-Object { $_.rid -ceq 'win-x64' })
+if ($runtimeEntries.Count -ne 1) { throw 'Exactly one pinned win-x64 assistant runtime is required.' }
+$runtimeEntry = $runtimeEntries[0]
+$runtimeRelative = $runtimeEntry.relativePath -replace '/', [IO.Path]::DirectorySeparatorChar
+$runtimeServerPath = [IO.Path]::GetFullPath((Join-Path $runtimeRoot $runtimeRelative))
+if (-not $runtimeServerPath.StartsWith($runtimeRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'The runtime path escapes the runtime directory.'
+}
+if (-not (Test-Path -LiteralPath $runtimeServerPath)) {
+    throw 'The pinned assistant runtime is not present. Acquire it with scripts/Get-Runtime.ps1.'
+}
+$runtimeSourceDir = Split-Path $runtimeServerPath -Parent
+
 New-Item -ItemType Directory -Path $destination | Out-Null
 foreach ($component in @(@{Folder='desktop'; Project='Fortiq.Desktop'}, @{Folder='service'; Project='Fortiq.Service'}, @{Folder='recover'; Project='Fortiq.Recover'})) {
     $componentOutput = Join-Path $destination $component.Folder
@@ -100,6 +119,24 @@ foreach ($component in @(@{Folder='desktop'; Project='Fortiq.Desktop'}, @{Folder
 
         if ((Get-FileHash -LiteralPath $modelBinaryOutput -Algorithm SHA256).Hash -ine $modelEntry.fileSha256) {
             throw 'The copied model failed verification; this bundle is incomplete.'
+        }
+
+        $runtimeOutput = Join-Path $componentOutput 'runtimes'
+        $runtimeTargetDir = Join-Path $runtimeOutput (Split-Path $runtimeRelative -Parent)
+        New-Item -ItemType Directory -Path $runtimeTargetDir -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $runtimeSourceDir '*') -Destination $runtimeTargetDir -Recurse -Force
+        Copy-Item -LiteralPath $runtimeManifestPath -Destination (Join-Path $runtimeOutput 'manifest.json')
+        foreach ($runtimeDocument in @('NOTICE.md', 'LICENSE-llama.cpp.txt')) {
+            $runtimeDocumentPath = Join-Path $runtimeRoot $runtimeDocument
+            if (-not (Test-Path -LiteralPath $runtimeDocumentPath)) {
+                throw "'runtimes/$runtimeDocument' is missing; the bundle would redistribute llama.cpp without its terms."
+            }
+
+            Copy-Item -LiteralPath $runtimeDocumentPath -Destination (Join-Path $runtimeOutput $runtimeDocument)
+        }
+
+        if (-not (Test-Path -LiteralPath (Join-Path $runtimeOutput $runtimeRelative))) {
+            throw 'The copied assistant runtime is incomplete; this bundle is incomplete.'
         }
     }
 }

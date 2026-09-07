@@ -628,7 +628,7 @@ public sealed class InstallationManager : IInstallationOperations
         // bundle was made. The application refuses to start without either of them, so neither is
         // optional here in anything but the code: a bundle missing one produces an installation that
         // says so on its first launch.
-        foreach (var pinned in new[] { "engines", ModelAvailability.DirectoryName })
+        foreach (var pinned in new[] { "engines", ModelAvailability.DirectoryName, RuntimeAvailability.DirectoryName })
         {
             var candidates = new[]
             {
@@ -797,6 +797,7 @@ public sealed class InstallationManager : IInstallationOperations
 
         CopyPinned(sourceDir, targetDir, "engines");
         CopyPinned(sourceDir, targetDir, ModelAvailability.DirectoryName);
+        CopyPinned(sourceDir, targetDir, RuntimeAvailability.DirectoryName);
     }
 
     /// <summary>

@@ -81,7 +81,8 @@ The Fortiq roadmap is organized around risk reduction and verification milestone
 > requirement are done; the inference runtime is not. See [Spec 06](06-on-device-ai.md).
 
 - [x] Pinned local model: manifest, acquisition with hash verification, installer integration, refusal to start without it;
-- [ ] llama.cpp-compatible inference runtime behind a cross-platform abstraction;
+- [x] llama.cpp inference runtime in a child process, pinned and acquired like the engine;
+- [ ] Anywhere in the interface to ask the assistant a question;
 - [ ] Natural-language local log explanation and restore assistance;
 - [ ] Natural-language recovery plan generation (strictly advisory; human-in-the-loop confirmation required);
 - [ ] Strict metadata-only privacy boundaries (payloads never processed by AI);

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -167,6 +167,21 @@ public sealed class FortiqApplication : Avalonia.Application
                         if (closed) return;
                         Reveal();
                         message.Text = model.Detail;
+                        retry.IsVisible = true;
+                        return;
+                    }
+
+                    // And the thing that runs it. Two separate absences with two separate fixes:
+                    // one message covering both would send somebody to reinstall what they have.
+                    var runtime = await RuntimeAvailability.InspectAsync(
+                        ResolveRuntimeRoot(),
+                        System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier,
+                        CancellationToken.None);
+                    if (!runtime.Usable)
+                    {
+                        if (closed) return;
+                        Reveal();
+                        message.Text = runtime.Detail;
                         retry.IsVisible = true;
                         return;
                     }
@@ -540,6 +555,8 @@ public sealed class FortiqApplication : Avalonia.Application
     private static string ResolveEngineRoot() => ResolvePinnedRoot("FORTIQ_ENGINE_ROOT", "engines");
 
     private static string ResolveModelRoot() => ResolvePinnedRoot("FORTIQ_MODEL_ROOT", ModelAvailability.DirectoryName);
+
+    private static string ResolveRuntimeRoot() => ResolvePinnedRoot("FORTIQ_RUNTIME_ROOT", RuntimeAvailability.DirectoryName);
 
     /// <summary>
     /// Finds a folder of pinned binaries beside the application, or above it in a working tree.
