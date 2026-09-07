@@ -8,7 +8,7 @@
 > | Inference runtime | implemented |
 > | Prompt / evidence boundary | implemented |
 > | Assistant screen | implemented |
-> | Prepared context | design intent |
+> | Prepared context | implemented, not yet sent to the model |
 > | Typed proposals | implemented (`TaskProposal`, not yet produced by the model) |
 > | Deterministic validator | implemented |
 > | Draft store and review | draft lifecycle implemented; no store, no review screen |

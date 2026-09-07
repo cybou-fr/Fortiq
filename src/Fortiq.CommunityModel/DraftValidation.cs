@@ -1,4 +1,4 @@
-namespace Fortiq.CommunityModel;
+﻿namespace Fortiq.CommunityModel;
 
 /// <summary>
 /// One deterministic check over a proposal.
@@ -222,27 +222,34 @@ public sealed class ReferenceValidator : IProposalValidator
 /// configured, and never run. Saying so here is the difference between a feature that is missing and
 /// a backup that silently is not happening.
 /// </remarks>
-public sealed class CapabilityValidator : IProposalValidator
+public sealed class CapabilityValidator(CommunityCapabilities? capabilities = null) : IProposalValidator
 {
+    private readonly CommunityCapabilities _capabilities = capabilities ?? CommunityCapabilities.Current;
+
     public IEnumerable<ValidationFinding> Validate(TaskProposal proposal, ResourceCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(proposal);
         ArgumentNullException.ThrowIfNull(catalog);
 
-        if (proposal.Task.Trigger is FileChangeTrigger)
+        // Read from the same place the assistant is told about, so the two can never disagree. An
+        // assistant that offers a trigger the validator then rejects reads as a broken product
+        // rather than an absent feature.
+        if (!_capabilities.Supports(proposal.Task.Trigger))
         {
             yield return new ValidationFinding(
                 "trigger-not-supported",
-                "Fortiq cannot yet run a task when files change. Choose a time instead.");
+                proposal.Task.Trigger is FileChangeTrigger
+                    ? "Fortiq cannot yet run a task when files change. Choose a time instead."
+                    : "Fortiq cannot yet run a task on that kind of trigger.");
         }
 
         foreach (var storage in AllStorages(proposal, catalog))
         {
-            if (storage.Backend == StorageBackend.Sftp)
+            if (!_capabilities.Supports(storage.Backend))
             {
                 yield return new ValidationFinding(
                     "storage-backend-not-supported",
-                    $"Fortiq cannot yet write to '{storage.Name}' over SFTP.");
+                    $"Fortiq cannot yet write to '{storage.Name}' over {storage.Backend}.");
             }
 
             if (storage.Backend == StorageBackend.S3 && storage.CredentialRef is null)

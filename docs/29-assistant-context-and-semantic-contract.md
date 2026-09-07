@@ -1,6 +1,21 @@
 # Specification 29: Prepared Assistant Context & Semantic Response Contract
 
-> **Implementation status: Design intent.**
+> **Implementation status: context implemented, semantic response contract not.**
+> `AssistantContext`, `AssistantContextBuilder`, `ProductRules` and `CommunityCapabilities` live in
+> `src/Fortiq.CommunityModel`. Nothing yet sends the context to the model, and the typed response
+> schema of §6 onwards does not exist - today the assistant returns prose.
+>
+> Two things the implementation settled that this document did not say:
+>
+> - **Capability facts and capability enforcement read the same object.** `CommunityCapabilities`
+>   is what `CapabilityValidator` refuses proposals against and what the context reports. Two lists
+>   would drift within a release, and the symptom is an assistant offering a trigger that is then
+>   rejected the moment somebody accepts it - which reads as a broken product, not an absent feature.
+> - **The context is evidence, not instruction.** Folder, storage and task names in it came off
+>   somebody's disk, and a folder called "ignore previous instructions" is one anybody can create.
+>   The rendered context therefore goes inside the same fence as any other machine data, and the
+>   product rules are phrased as statements about the assistant rather than as instructions a
+>   resource name could imitate.
 
 ## 1. Purpose
 
