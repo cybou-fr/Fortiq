@@ -111,7 +111,7 @@ To spin up a local 4-node S3 cluster with Object Lock support for integration te
 1. **Recoverable First**: A backup job completing without errors is insufficient; recovery capability must be continuously and verifiably demonstrated.
 2. **Sovereign Control**: The customer retains exclusive control over encryption keys, data placement, access policies, and network dependencies.
 3. **Resilient Under Compromise**: An endpoint compromise must not allow an attacker to destroy immutable backup history.
-4. **Deterministic Core**: Cryptography, policy enforcement, and restore sequences never depend on cloud services or generative AI.
+4. **Deterministic Core**: Cryptography, policy enforcement, and restore sequences never depend on cloud services or generative AI. Specification 28 proposes a local assistant that drafts configuration for a person to review and activate; that boundary is the point of it. Nothing it produces is applied without an explicit activation, and it is never the source of a `Recoverable`, `Unproven` or `AtRisk` verdict — those come from receipts.
 5. **Portable Survival**: The recovery envelope format and emergency CLI (`Fortiq.Recover`) are designed to outlive the primary product.
 
 ---

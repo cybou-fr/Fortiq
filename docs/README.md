@@ -51,7 +51,25 @@ A specification written in the present indicative is describing a design, not re
 22. [22. Desktop UI Architecture & Visual Design System](22-desktop-ui-and-visual-system.md)
 23. [23. GUI Development Guidelines & Component Blueprint](23-gui-development-guidelines.md)
 
-### 4. Architectural Decision Records (ADRs)
+### 4. Community Architecture (proposed)
+
+These describe where the Community Edition's configuration model is going, and none of it is built.
+Specifications 01-23 above describe the product as it stands; every document in this section carries
+an implementation status saying otherwise, and the vocabulary below is the one they use.
+
+24. [24. Community Resource Model](24-community-resource-model.md)
+25. [25. Backup Task, Trigger, Route & Run Model](25-backup-task-trigger-model.md)
+26. [26. Identity, Recipient & Writer Encryption Policy](26-identity-encryption-policy.md)
+27. [27. Community Configuration Store & Migration](27-community-configuration-and-migration.md)
+28. [28. Local Conversational Assistant & Draft Entity Authoring](28-local-conversational-assistant.md)
+29. [29. Prepared Assistant Context & Semantic Response Contract](29-assistant-context-and-semantic-contract.md)
+30. [30. Community Migration Sequence](30-community-migration-sequence.md)
+
+The word `Repository` keeps its present meaning throughout: one encrypted archive, the boundary that
+recovery and locking are scoped to. It is not a synonym for a destination, a protected folder, a task
+or a schedule, and the shipped code still uses one repository per protected folder.
+
+### 5. Architectural Decision Records (ADRs)
 - [ADR-001: restic as Primary Engine for V1](adr/ADR-001-primary-repository-engine.md)
 - [ADR-002: Recovery Envelope & Key Derivation](adr/ADR-002-recovery-envelope.md)
 - [ADR-003: Process Boundaries for V1](adr/ADR-003-process-boundaries.md)
@@ -67,6 +85,10 @@ A specification written in the present indicative is describing a design, not re
 - [ADR-013: Argon2id Dependency & Cryptographic Supply-Chain Policy](adr/ADR-013-argon2-dependency-policy.md)
 - [ADR-014: Embedded GUI Installer & Autonomous Component Updater](adr/ADR-014-embedded-gui-installer-and-updater.md)
 - [ADR-015: Desktop UI Architecture, Visual Design System & Zero-State Lifecycle](adr/ADR-015-desktop-ui-architecture-and-design-system.md)
+- [ADR-016: Resource Catalog, Backup Tasks and Routes for Community](adr/ADR-016-community-resource-task-domain-model.md) *(proposed)*
+- [ADR-017: Separate Recovery Recipients, Unattended Writers and Storage Credentials](adr/ADR-017-recipient-writer-identity-model.md) *(proposed)*
+- [ADR-018: Cross-Platform Local LLM as Fortiq Semantic Configuration Layer](adr/ADR-018-local-llm-draft-task-authoring.md) *(proposed)*
+- [ADR-019: Prepared Fortiq Context and Typed Assistant Responses](adr/ADR-019-prepared-assistant-context.md) *(proposed)*
 
 ---
 

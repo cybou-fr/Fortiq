@@ -1,0 +1,91 @@
+{
+  "schema": "fortiq.assistant-context",
+  "version": 1,
+  "locale": "ru-RU",
+  "productRules": [
+    {
+      "id": "RULE-TASK-001",
+      "text": "LLM-generated tasks are created as drafts and cannot be activated by the assistant."
+    },
+    {
+      "id": "RULE-KEY-001",
+      "text": "Storage credentials and recovery identities are separate authorities."
+    },
+    {
+      "id": "RULE-RESTIC-001",
+      "text": "Recurring restic repositories require an unattended writer unlock."
+    },
+    {
+      "id": "RULE-RECOVERY-001",
+      "text": "Recovery truth is determined from deterministic evidence, not by the assistant."
+    }
+  ],
+  "capabilities": {
+    "platform": "<current-platform>",
+    "engines": {
+      "restic": {
+        "enabled": true,
+        "version": "0.19.1"
+      }
+    },
+    "storageBackends": {
+      "filesystem": true,
+      "s3": true,
+      "sftp": false
+    },
+    "triggers": {
+      "manual": true,
+      "dailyAt": true,
+      "weeklyAt": false,
+      "fileChange": false
+    }
+  },
+  "resources": {
+    "sources": [
+      {
+        "id": "source-documents",
+        "name": "Documents",
+        "kind": "folder"
+      },
+      {
+        "id": "source-projects",
+        "name": "Projects",
+        "kind": "folder"
+      }
+    ],
+    "storages": [
+      {
+        "id": "storage-home-minio",
+        "name": "Home MinIO",
+        "backend": "s3",
+        "credentialConfigured": true,
+        "available": true
+      }
+    ],
+    "identities": [
+      {
+        "id": "identity-user",
+        "name": "Stanislav",
+        "recipientConfigured": true
+      },
+      {
+        "id": "identity-paper",
+        "name": "Paper Recovery",
+        "recipientConfigured": true
+      },
+      {
+        "id": "identity-device",
+        "name": "This Device",
+        "writerAvailable": true
+      }
+    ],
+    "tasks": []
+  },
+  "operationalFacts": [
+    {
+      "id": "fact-last-proof",
+      "type": "lastRecoveryProofAgeDays",
+      "value": 45
+    }
+  ]
+}

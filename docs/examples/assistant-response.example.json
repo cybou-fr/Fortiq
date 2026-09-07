@@ -1,0 +1,34 @@
+{
+  "schema": "fortiq.assistant-response",
+  "version": 1,
+  "items": [
+    {
+      "type": "Fact",
+      "factRef": "fact-last-proof",
+      "text": "Последняя успешная проверка восстановления была 45 дней назад."
+    },
+    {
+      "type": "Recommendation",
+      "text": "Стоит рассмотреть более частую проверку восстановления."
+    },
+    {
+      "type": "DraftProposal",
+      "proposal": {
+        "entityType": "BackupTask",
+        "state": "Draft",
+        "name": "Daily Cloud Backup",
+        "sources": [
+          "source-documents",
+          "source-projects"
+        ],
+        "trigger": {
+          "type": "dailyAt",
+          "time": "02:30",
+          "timeZone": "Europe/Paris"
+        },
+        "storage": "storage-home-minio"
+      },
+      "text": "Я подготовил черновик ежедневной задачи. Она не активна."
+    }
+  ]
+}

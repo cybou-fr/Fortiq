@@ -1,0 +1,219 @@
+{
+  "schema": "fortiq.community-config-example",
+  "version": 1,
+  "note": "Illustrative design-intent schema. Not a currently supported Fortiq configuration file.",
+  "sources": [
+    {
+      "id": "source-documents",
+      "name": "Documents",
+      "kind": "folder",
+      "path": "C:\\Users\\Alice\\Documents"
+    },
+    {
+      "id": "source-projects",
+      "name": "Active Projects",
+      "kind": "folder",
+      "path": "D:\\Projects"
+    },
+    {
+      "id": "source-archive-volume",
+      "name": "Archive Volume",
+      "kind": "volume-filesystem",
+      "path": "D:\\"
+    }
+  ],
+  "storages": [
+    {
+      "id": "storage-external-ssd",
+      "name": "External SSD",
+      "backend": "filesystem",
+      "path": "E:\\Fortiq",
+      "capabilities": [
+        "removable",
+        "offline-capable"
+      ]
+    },
+    {
+      "id": "storage-home-minio",
+      "name": "Home MinIO",
+      "backend": "s3",
+      "provider": "MinIO",
+      "endpoint": "https://minio.home.example",
+      "bucket": "fortiq",
+      "credentialRef": "cred-home-minio",
+      "capabilities": [
+        "remote",
+        "versioned",
+        "object-lock"
+      ]
+    },
+    {
+      "id": "storage-company-sftp",
+      "name": "Company SFTP",
+      "backend": "sftp",
+      "host": "backup.example.com",
+      "path": "/fortiq",
+      "credentialRef": "cred-company-sftp",
+      "capabilities": [
+        "remote",
+        "encrypted-transport"
+      ]
+    }
+  ],
+  "identities": [
+    {
+      "id": "identity-alice",
+      "name": "Alice",
+      "keys": [
+        "key-alice-main"
+      ]
+    },
+    {
+      "id": "identity-paper-recovery",
+      "name": "Paper Recovery",
+      "keys": [
+        "key-paper-recovery"
+      ]
+    },
+    {
+      "id": "identity-this-pc",
+      "name": "This PC",
+      "keys": [
+        "key-this-pc-tpm"
+      ]
+    }
+  ],
+  "identityKeys": [
+    {
+      "id": "key-alice-main",
+      "identity": "identity-alice",
+      "role": "recipient",
+      "algorithm": "proposed-asymmetric-recipient-profile",
+      "publicKey": "<public-key-only>",
+      "status": "active"
+    },
+    {
+      "id": "key-paper-recovery",
+      "identity": "identity-paper-recovery",
+      "role": "recipient",
+      "algorithm": "proposed-mnemonic-derived-recipient-profile",
+      "publicKey": "<derived-public-key>",
+      "status": "active"
+    },
+    {
+      "id": "key-this-pc-tpm",
+      "identity": "identity-this-pc",
+      "role": "writer",
+      "algorithm": "windows-tpm-envelope-v1",
+      "status": "active"
+    }
+  ],
+  "encryptionProfiles": [
+    {
+      "id": "enc-personal",
+      "name": "Personal Recovery",
+      "recipients": [
+        "key-alice-main",
+        "key-paper-recovery"
+      ],
+      "writers": [
+        "key-this-pc-tpm"
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "id": "route-docs-usb",
+      "storage": "storage-external-ssd",
+      "engine": "restic",
+      "encryptionProfile": "enc-personal",
+      "retention": {
+        "keepDaily": 30
+      }
+    },
+    {
+      "id": "route-docs-minio",
+      "storage": "storage-home-minio",
+      "engine": "restic",
+      "encryptionProfile": "enc-personal",
+      "retention": {
+        "keepDaily": 30,
+        "keepMonthly": 12
+      }
+    },
+    {
+      "id": "route-weekly-sftp",
+      "storage": "storage-company-sftp",
+      "engine": "restic",
+      "encryptionProfile": "enc-personal"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-one-shot-usb",
+      "name": "One-time External Backup",
+      "sources": [
+        "source-documents"
+      ],
+      "trigger": {
+        "type": "manual"
+      },
+      "routes": [
+        "route-docs-usb"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "task-daily-cloud",
+      "name": "Daily Cloud Backup",
+      "sources": [
+        "source-documents",
+        "source-projects"
+      ],
+      "trigger": {
+        "type": "dailyAt",
+        "time": "02:30",
+        "timeZone": "Europe/Paris"
+      },
+      "routes": [
+        "route-docs-minio"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "task-weekly-sftp",
+      "name": "Weekly Offsite Backup",
+      "sources": [
+        "source-documents"
+      ],
+      "trigger": {
+        "type": "weeklyAt",
+        "days": [
+          "Sunday"
+        ],
+        "time": "04:00",
+        "timeZone": "Europe/Paris"
+      },
+      "routes": [
+        "route-weekly-sftp"
+      ],
+      "enabled": true
+    },
+    {
+      "id": "task-project-watcher",
+      "name": "Active Projects Watcher",
+      "sources": [
+        "source-projects"
+      ],
+      "trigger": {
+        "type": "fileChange",
+        "settle": "00:05:00",
+        "minimumInterval": "00:30:00"
+      },
+      "routes": [
+        "route-docs-minio"
+      ],
+      "enabled": true
+    }
+  ]
+}
