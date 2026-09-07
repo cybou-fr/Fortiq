@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 
 namespace Fortiq.CommunityModel;
 
@@ -82,9 +82,17 @@ public sealed record ResourceCatalog(
     public bool HasConfirmedRecipient(EncryptionProfile profile) =>
         RecipientsOf(profile).Any(key => key.Confirmed);
 
-    private static T? Find<T>(IReadOnlyList<T> items, string id, Func<T, string> identify) where T : class
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        return items.FirstOrDefault(item => string.Equals(identify(item), id, StringComparison.Ordinal));
-    }
+    /// <summary>
+    /// Finds one resource by identifier, or nothing.
+    /// </summary>
+    /// <remarks>
+    /// A blank identifier resolves to nothing rather than throwing. It used to throw, which was the
+    /// wrong judgement: "this proposal names no encryption profile" is a question validation has to
+    /// be able to ask, and the answer is that no such profile exists - not that the caller made a
+    /// programming mistake. A proposal with a field left empty is an ordinary thing to be holding.
+    /// </remarks>
+    private static T? Find<T>(IReadOnlyList<T> items, string id, Func<T, string> identify) where T : class =>
+        string.IsNullOrWhiteSpace(id)
+            ? null
+            : items.FirstOrDefault(item => string.Equals(identify(item), id, StringComparison.Ordinal));
 }

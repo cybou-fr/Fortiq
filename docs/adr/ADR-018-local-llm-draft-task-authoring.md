@@ -87,3 +87,33 @@ This avoids relying on a large unstructured system prompt or model memory for pr
 - Task activation is outside inference;
 - facts/findings/recommendations must be semantically distinguished;
 - model updates follow Fortiq supply-chain verification rules.
+
+---
+
+## Measured reliability of draft authoring
+
+Draft authoring is implemented and **not yet reliable enough to offer**. Measured against the pinned
+Qwen3.5-2B Q4_K_M, given "back up C:\Projects every 6 hours to the external disk, keeping 30 daily
+snapshots" with an unrelated protected folder in the surrounding context:
+
+| Field | First attempt | With request first and field descriptions |
+|---|---|---|
+| `sourcePath` | the folder from the context, not the request | correct |
+| `name` | a path | still wrong, but harmless |
+| `storage` | correct | correct |
+| `keepDaily` | correct | correct |
+| `schedule` | daily 02:00 | **still daily 02:00, not every 6 hours** |
+
+Two changes were kept because they measurably helped: the request is placed before the background
+for authoring, and every schema field carries a description. The remaining failure is the schedule,
+which is the field deciding how often somebody's data is protected - so assistant-authored drafts
+are not surfaced in the interface, and this stays a mechanism rather than a feature.
+
+The result also argues for the design rather than against it. Every one of those errors would have
+become configuration under a design that let a model write tasks directly; here they become a draft
+that a person reads, and the wrong ones are visible in it. The deterministic validators caught what
+they could - an unknown storage, a missing encryption profile, an interval of zero - and a wrong but
+well-formed schedule is exactly the class of error only a human reviewer can catch.
+
+What would change this: a larger model, or narrowing authoring to one field at a time rather than a
+whole task at once.
