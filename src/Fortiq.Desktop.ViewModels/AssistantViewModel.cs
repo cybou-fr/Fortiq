@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Fortiq.Assistant;
 
@@ -34,11 +34,56 @@ public sealed record AssistantSuggestion(string Question, IReadOnlyList<Assistan
 public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposable
 {
     private readonly Func<CancellationToken, Task<IAssistantRuntime>> _start;
+    private readonly Func<CancellationToken, Task<string?>>? _describeUnavailable;
     private IAssistantRuntime? _runtime;
     private CancellationTokenSource? _operation;
 
-    public AssistantViewModel(Func<CancellationToken, Task<IAssistantRuntime>> start) =>
+    public AssistantViewModel(
+        Func<CancellationToken, Task<IAssistantRuntime>> start,
+        Func<CancellationToken, Task<string?>>? describeUnavailable = null)
+    {
         _start = start ?? throw new ArgumentNullException(nameof(start));
+        _describeUnavailable = describeUnavailable;
+    }
+
+    /// <summary>True once availability has been established, either way.</summary>
+    public bool Checked { get; private set; }
+
+    /// <summary>Why the assistant cannot run on this machine, when it cannot.</summary>
+    /// <remarks>
+    /// Established before a question box is offered rather than discovered by asking one. A screen
+    /// that takes a question, thinks, and then says the model is missing has wasted somebody's time
+    /// to tell them something it knew before they typed.
+    /// </remarks>
+    public string? Unavailable { get; private set; }
+
+    public bool Available => Checked && Unavailable is null;
+
+    /// <summary>Looks for the model and the runtime. Safe to call again after a repair.</summary>
+    public async Task CheckAsync(CancellationToken cancellationToken)
+    {
+        if (_describeUnavailable is null)
+        {
+            Checked = true;
+            Unavailable = null;
+            RaiseAll();
+            return;
+        }
+
+        try
+        {
+            Unavailable = await _describeUnavailable(cancellationToken);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            Unavailable = PlainFailure.Describe(error);
+        }
+        finally
+        {
+            Checked = true;
+            RaiseAll();
+        }
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -168,6 +213,9 @@ public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposabl
         Raise(nameof(AnswerTruncated));
         Raise(nameof(Failure));
         Raise(nameof(CanAsk));
+        Raise(nameof(Checked));
+        Raise(nameof(Unavailable));
+        Raise(nameof(Available));
     }
 
     private void Raise([CallerMemberName] string? property = null) =>

@@ -625,9 +625,9 @@ public sealed class InstallationManager : IInstallationOperations
 
         // The engine and the model both sit in a folder of their own rather than among the binaries,
         // and both can have been placed under a component or at the bundle root depending on how the
-        // bundle was made. The application refuses to start without either of them, so neither is
-        // optional here in anything but the code: a bundle missing one produces an installation that
-        // says so on its first launch.
+        // bundle was made. None is optional here in anything but the code: an installation missing
+        // the engine cannot back anything up, and one missing the model or the runtime opens with an
+        // Assistant screen that reports its own absence.
         foreach (var pinned in new[] { "engines", ModelAvailability.DirectoryName, RuntimeAvailability.DirectoryName })
         {
             var candidates = new[]

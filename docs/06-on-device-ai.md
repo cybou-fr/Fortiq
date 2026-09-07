@@ -1,10 +1,20 @@
 # Fortiq Intelligence & On-Device AI Boundaries
 
-> **Implementation status: implemented.** The model and the llama.cpp runtime are pinned, acquired,
-> verified and required at startup; `LlamaServerRuntime` runs the model in a process of its own; and
-> the desktop has an Assistant screen that asks it questions about this machine's own backup state.
-> What is not built is the structured-proposal path in the diagram below - today the assistant
-> explains, and every action is still reached by hand.
+> **Implementation status, layer by layer**, because "implemented" was hiding most of the work:
+>
+> | Layer | State |
+> |---|---|
+> | Model supply chain | implemented |
+> | Inference runtime | implemented |
+> | Prompt / evidence boundary | implemented |
+> | Assistant screen | implemented |
+> | Prepared context | design intent |
+> | Typed proposals | design intent |
+> | Deterministic validator | design intent |
+> | Draft store and review | design intent |
+>
+> Today the assistant reads state and explains it, and every action is still reached by hand. The
+> flow further down this document describes where the typed path will go, not what runs now.
 
 ## Purpose & Scope
 
@@ -25,10 +35,17 @@ profile is in [Spec 28](28-local-conversational-assistant.md) and
 
 These are two separate statements and both matter.
 
-**Required.** Fortiq is not offered in a reduced form without its model. An installation that lacks
-one is an installation that did not finish, and the application says so on launch rather than
-letting somebody meet the absence later, inside a screen, as an error about a manifest. There is no
-degraded mode to test, document or support.
+**Required - of an installation, not of a launch.** A release ships the model and the runtime, and
+`New-DeploymentBundle.ps1` refuses to build without them: an installation lacking one did not
+finish. But Fortiq opens anyway, and the Assistant screen is what reports the absence and offers to
+repair it.
+
+This was the other way round, and it was wrong. Startup checked for the model, so a missing
+`model.gguf` stopped the application before its window - which made a component that touches no
+backup, no key and no restore into the thing standing between somebody and their data. The
+assistant is not a security dependency and it must not become an availability one; for a recovery
+product, that trade is indefensible. The backup engine keeps its startup check, because without it
+no backup can run at all.
 
 **Decides nothing.** Backup, encryption, scheduling, verification and recovery are complete without
 ever consulting the model, and they do not consult it. The assistant drafts and explains; the

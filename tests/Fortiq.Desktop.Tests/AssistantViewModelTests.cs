@@ -1,4 +1,4 @@
-using Fortiq.Assistant;
+﻿using Fortiq.Assistant;
 using Fortiq.Desktop.ViewModels;
 
 namespace Fortiq.Desktop.Tests;
@@ -144,6 +144,67 @@ public sealed class AssistantViewModelTests
         await model.AskAsync(CancellationToken.None);
 
         Assert.True(model.AnswerTruncated);
+    }
+
+    [Fact]
+    public async Task AMachineWithoutAModelSaysSoBeforeTakingAQuestion()
+    {
+        // Not after taking one. A screen that accepts a question, thinks, and then reports a missing
+        // file has spent somebody's time telling them something it knew before they typed.
+        var model = new AssistantViewModel(
+            _ => throw new InvalidOperationException("Should never start."),
+            _ => Task.FromResult<string?>("Fortiq's assistant model is missing."));
+
+        await model.CheckAsync(CancellationToken.None);
+
+        Assert.True(model.Checked);
+        Assert.False(model.Available);
+        Assert.Contains("missing", model.Unavailable!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AMachineWithAModelIsAvailable()
+    {
+        var model = new AssistantViewModel(
+            _ => Task.FromResult<IAssistantRuntime>(new Fake()),
+            _ => Task.FromResult<string?>(null));
+
+        await model.CheckAsync(CancellationToken.None);
+
+        Assert.True(model.Available);
+        Assert.Null(model.Unavailable);
+    }
+
+    [Fact]
+    public async Task CheckingAgainAfterARepairFindsTheAssistant()
+    {
+        // The Check again button. Somebody who has just run the acquisition script should not have
+        // to restart Fortiq to be told it worked.
+        var repaired = false;
+        var model = new AssistantViewModel(
+            _ => Task.FromResult<IAssistantRuntime>(new Fake()),
+            _ => Task.FromResult<string?>(repaired ? null : "The model is missing."));
+
+        await model.CheckAsync(CancellationToken.None);
+        Assert.False(model.Available);
+
+        repaired = true;
+        await model.CheckAsync(CancellationToken.None);
+
+        Assert.True(model.Available);
+    }
+
+    [Fact]
+    public async Task ACheckThatThrowsIsReportedRatherThanCrashingTheScreen()
+    {
+        var model = new AssistantViewModel(
+            _ => Task.FromResult<IAssistantRuntime>(new Fake()),
+            _ => throw new UnauthorizedAccessException("Access to the model folder is denied."));
+
+        await model.CheckAsync(CancellationToken.None);
+
+        Assert.True(model.Checked);
+        Assert.NotNull(model.Unavailable);
     }
 
     private sealed class Fake(string answer = "An answer.", bool truncated = false, bool throws = false) : IAssistantRuntime

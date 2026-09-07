@@ -156,35 +156,20 @@ public sealed class FortiqApplication : Avalonia.Application
                         return;
                     }
 
-                    // And then the assistant, on the same terms. Fortiq is not offered in a reduced
-                    // form without its model: it is in the package or it is fetched at installation,
-                    // so a copy without one is an installation that did not finish, and saying that
-                    // here is far kinder than letting somebody meet it inside a screen later.
-                    message.Text = "Checking the assistant model...";
-                    var model = await ModelAvailability.InspectAsync(ResolveModelRoot(), CancellationToken.None);
-                    if (!model.Usable)
-                    {
-                        if (closed) return;
-                        Reveal();
-                        message.Text = model.Detail;
-                        retry.IsVisible = true;
-                        return;
-                    }
-
-                    // And the thing that runs it. Two separate absences with two separate fixes:
-                    // one message covering both would send somebody to reinstall what they have.
-                    var runtime = await RuntimeAvailability.InspectAsync(
-                        ResolveRuntimeRoot(),
-                        System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier,
-                        CancellationToken.None);
-                    if (!runtime.Usable)
-                    {
-                        if (closed) return;
-                        Reveal();
-                        message.Text = runtime.Detail;
-                        retry.IsVisible = true;
-                        return;
-                    }
+                    // The assistant is deliberately not checked here.
+                    //
+                    // It was, and that was wrong. Fortiq refused to open at all when model.gguf was
+                    // missing, which made a component that touches no backup, no key and no restore
+                    // into the thing standing between somebody and their data. For a product whose
+                    // whole purpose is recovery, an assistant that cannot answer must never be an
+                    // assistant that cannot be walked past.
+                    //
+                    // A release still ships the model and the runtime, and the bundle refuses to
+                    // build without them: required for a valid installation is not the same claim as
+                    // required in order to enter the application. When they are absent the Assistant
+                    // screen says so and offers to repair itself, and everything else works.
+                    //
+                    // The engine above keeps its check, because without it no backup can run at all.
 
                     message.Text = "Checking Fortiq installation...";
                     var inspector = new InstallationInspector();
@@ -407,8 +392,11 @@ public sealed class FortiqApplication : Avalonia.Application
             sourceSettings: (repositoryId, title) => new SourceSettingsViewModel(sourceSettings, repositoryId, title),
             history: () => ReceiptTimeline.ReadAsync(paths.Receipts, CancellationToken.None),
             // A factory, not an instance: nothing starts a model until somebody asks a question.
-            assistant: () => new AssistantViewModel(
-                new AssistantAdapter(ResolveModelRoot(), ResolveRuntimeRoot()).StartAsync));
+            assistant: () =>
+            {
+                var adapter = new AssistantAdapter(ResolveModelRoot(), ResolveRuntimeRoot());
+                return new AssistantViewModel(adapter.StartAsync, adapter.DescribeUnavailableAsync);
+            });
     }
 
     /// <summary>

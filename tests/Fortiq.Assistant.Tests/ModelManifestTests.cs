@@ -107,7 +107,7 @@ public sealed class ModelManifestTests : IDisposable
     public async Task TheManifestShippedInTheRepositoryIsOneThisBuildCanRead()
     {
         // It carries placeholders until a model is pinned, but it must always parse: a manifest that
-        // does not is a release that refuses to start, discovered by whoever installs it.
+        // does not is a release whose assistant is dead on arrival, found by whoever installs it.
         var repository = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "models", "manifest.json");
         if (!File.Exists(repository))
         {

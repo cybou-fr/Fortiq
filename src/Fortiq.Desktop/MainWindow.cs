@@ -1337,6 +1337,39 @@ public sealed class MainWindow : Window
         var model = _assistant ??= _assistantFactory();
         model.Suggestions = AssistantSuggestions();
 
+        if (!model.Checked)
+        {
+            // Asked once, when somebody first opens this screen. Not at startup: an assistant that
+            // cannot answer must never become an application that cannot open, which is exactly what
+            // checking for it before the main window did.
+            body.Children.Add(Card(Text("Looking for the assistant…", 13, FontWeight.Normal, Muted)));
+            _page.Child = new ScrollViewer { Content = body };
+            _ = CheckAssistantAsync(model);
+            return;
+        }
+
+        if (model.Unavailable is { } unavailable)
+        {
+            var missing = new StackPanel { Spacing = 8 };
+            missing.Children.Add(Text("The assistant is unavailable.", 14, FontWeight.SemiBold, Ink));
+            // The reassurance first, then the detail. Somebody reading this on a recovery product
+            // needs to know within one line that their backups are unaffected.
+            missing.Children.Add(Text(
+                "Backup, recovery and everything else on this PC continue to work normally - the "
+                + "assistant takes no part in them.",
+                12, FontWeight.Normal, Muted, wrap: true));
+            missing.Children.Add(Text(unavailable, 12, FontWeight.Normal, Muted, wrap: true));
+
+            var again = Secondary("Check again").Named("Look for the assistant again");
+            again.HorizontalAlignment = HorizontalAlignment.Left;
+            again.Click += (_, _) => { _ = CheckAssistantAsync(model); };
+            missing.Children.Add(again);
+
+            body.Children.Add(Card(missing, UnprovenSurface, Unproven));
+            _page.Child = new ScrollViewer { Content = body };
+            return;
+        }
+
         body.Children.Add(Card(new StackPanel
         {
             Spacing = 4,
@@ -1464,6 +1497,16 @@ public sealed class MainWindow : Window
         }
 
         _page.Child = new ScrollViewer { Content = body };
+    }
+
+    /// <summary>Looks for the assistant, then redraws whichever answer that produced.</summary>
+    private async Task CheckAssistantAsync(AssistantViewModel model)
+    {
+        await model.CheckAsync(CancellationToken.None);
+        if (_activeSection == "Assistant")
+        {
+            RenderActive();
+        }
     }
 
     /// <summary>

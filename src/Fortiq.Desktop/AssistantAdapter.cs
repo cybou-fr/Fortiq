@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Fortiq.Assistant;
 
 namespace Fortiq.Desktop;
@@ -11,13 +11,36 @@ namespace Fortiq.Desktop;
 /// them, and it exists so that <c>AssistantViewModel</c> can be tested against a fake runtime rather
 /// than against a gigabyte of weights and a child process.
 ///
-/// Both manifests are read again here rather than remembered from the startup check. They are two
-/// small files, this happens once per session at the moment somebody asks their first question, and
-/// carrying a cached copy of them around the application for the sake of that would be trading a
-/// clear path for nothing measurable.
+/// Both manifests are read here rather than at startup. Startup deliberately does not look for the
+/// assistant at all: it is required for a valid installation and not required in order to open the
+/// application, and this is the only place that difference has to be understood.
 /// </remarks>
 public sealed class AssistantAdapter(string modelRoot, string runtimeRoot)
 {
+    /// <summary>
+    /// Says why the assistant cannot run here, or null when it can.
+    /// </summary>
+    /// <remarks>
+    /// Asked by the screen before it offers a question box, so that a machine missing the model
+    /// explains itself instead of accepting a question and then failing. Startup does not ask this:
+    /// the assistant is required for a valid installation, and not required in order to open the
+    /// application, and confusing those two once cost Fortiq the ability to start at all.
+    /// </remarks>
+    public async Task<string?> DescribeUnavailableAsync(CancellationToken cancellationToken)
+    {
+        var model = await ModelAvailability.InspectAsync(modelRoot, cancellationToken);
+        if (!model.Usable)
+        {
+            return model.Detail;
+        }
+
+        var runtime = await RuntimeAvailability.InspectAsync(
+            runtimeRoot,
+            RuntimeInformation.RuntimeIdentifier,
+            cancellationToken);
+        return runtime.Usable ? null : runtime.Detail;
+    }
+
     public async Task<IAssistantRuntime> StartAsync(CancellationToken cancellationToken)
     {
         var model = await ModelAvailability.InspectAsync(modelRoot, cancellationToken);

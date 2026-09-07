@@ -7,9 +7,10 @@ namespace Fortiq.Assistant.Tests;
 /// Whether this machine has the model, asked before anything tries to use it.
 /// </summary>
 /// <remarks>
-/// Fortiq does not run without its assistant, so the interesting cases are all the ordinary ways a
-/// large file fails to arrive: an installation that was interrupted, a folder copied on its own, a
-/// download that stopped partway and left something of the right name and the wrong length.
+/// The interesting cases are the ordinary ways a large file fails to arrive: an installation that
+/// was interrupted, a folder copied on its own, a download that stopped partway and left something
+/// of the right name and the wrong length. What this answers decides whether the Assistant screen
+/// offers a question box or explains itself - never whether Fortiq opens.
 /// </remarks>
 public sealed class ModelAvailabilityTests : IDisposable
 {

@@ -97,7 +97,7 @@ public sealed class RuntimeAvailabilityTests : IDisposable
     [Fact]
     public async Task TheManifestShippedInTheRepositoryDescribesARuntimeThisBuildCanUse()
     {
-        // Placeholders here would mean a release that refuses to start, found by whoever installs it.
+        // Placeholders here would mean a release whose assistant never works, found by its users.
         var repository = Repository();
         if (repository is null)
         {
