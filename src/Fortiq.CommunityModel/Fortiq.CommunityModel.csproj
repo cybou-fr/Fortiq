@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!--
+    Deliberately no ProjectReference. This is the model the rest of Fortiq is meant to move onto, so
+    it must not depend on the layers it is meant to outlive - and a dependency here would be the
+    first step back towards one record that knows about folders, buckets, engines and clocks at once.
+  -->
+
+</Project>

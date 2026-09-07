@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\Fortiq.CommunityModel\Fortiq.CommunityModel.csproj" />
     <ProjectReference Include="..\Fortiq.Application\Fortiq.Application.csproj" />
   </ItemGroup>
 
