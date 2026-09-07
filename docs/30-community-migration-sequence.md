@@ -102,6 +102,29 @@ Do not block `0.1.0-beta.1` on the full Resource/Task redesign if the current re
 
 Use Specs 24–27 as the architectural contract for the next Community evolution.
 
+## Draft and validation layer
+
+> **Implemented**, between P1 and P3, and before anything the assistant can act through.
+> `Draft<T>`, `TaskProposal`, `DraftValidator` and `ActivationValidator` live in
+> `src/Fortiq.CommunityModel`. What is not built is a store to keep drafts in and a screen to review
+> them on; both wait for the native task documents of P3, so that a draft and a saved task have one
+> shape rather than two.
+
+A proposal reaches live configuration only along one path:
+
+```text
+proposal → validate → ReadyForReview → a person accepts → Accepted → activation allowed
+```
+
+Every step is enforced by the type rather than by convention. `Accept` is reachable only from
+`ReadyForReview`; re-validating clears an earlier acceptance, so a task accepted last week whose
+folder has since been deleted does not stay accepted; and `ActivationValidator` re-checks the
+blocking findings even on a draft somebody constructed directly in the `Accepted` state, because
+that is precisely how a validation step gets skipped by accident.
+
+There is no argument to any of it that would let a caller bypass review. That absence is what
+enforces RULE-TASK-002: an assistant holding a draft has no expressible way to activate it.
+
 ## P8 — Local Assistant foundation
 
 Introduce the assistant only after the Resource/Task schemas are stable enough to serve as typed targets.

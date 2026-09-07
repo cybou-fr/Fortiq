@@ -65,6 +65,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fortiq.Assistant.Tests", "t
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fortiq.CommunityModel", "src\Fortiq.CommunityModel\Fortiq.CommunityModel.csproj", "{8D408EA9-B165-4686-85E6-E74226492753}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fortiq.CommunityModel.Tests", "tests\Fortiq.CommunityModel.Tests\Fortiq.CommunityModel.Tests.csproj", "{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -423,6 +425,18 @@ Global
 		{8D408EA9-B165-4686-85E6-E74226492753}.Release|x64.Build.0 = Release|Any CPU
 		{8D408EA9-B165-4686-85E6-E74226492753}.Release|x86.ActiveCfg = Release|Any CPU
 		{8D408EA9-B165-4686-85E6-E74226492753}.Release|x86.Build.0 = Release|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Debug|x64.Build.0 = Debug|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Debug|x86.Build.0 = Debug|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Release|x64.ActiveCfg = Release|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Release|x64.Build.0 = Release|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Release|x86.ActiveCfg = Release|Any CPU
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -457,5 +471,6 @@ Global
 		{2CF41F9B-DD87-4237-AB8C-E4C89BFC116D} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{0BE26EDD-5818-41B9-A150-70FDDF2305DB} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{8D408EA9-B165-4686-85E6-E74226492753} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{2097BEDA-CAD2-4B53-9DD1-99CF0F14F0A9} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

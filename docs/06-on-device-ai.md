@@ -9,9 +9,9 @@
 > | Prompt / evidence boundary | implemented |
 > | Assistant screen | implemented |
 > | Prepared context | design intent |
-> | Typed proposals | design intent |
-> | Deterministic validator | design intent |
-> | Draft store and review | design intent |
+> | Typed proposals | implemented (`TaskProposal`, not yet produced by the model) |
+> | Deterministic validator | implemented |
+> | Draft store and review | draft lifecycle implemented; no store, no review screen |
 >
 > Today the assistant reads state and explains it, and every action is still reached by hand. The
 > flow further down this document describes where the typed path will go, not what runs now.
