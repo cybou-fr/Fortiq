@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Builds self-contained Windows service and emergency recovery folders with the pinned engine.
 .DESCRIPTION
@@ -29,6 +29,27 @@ $engine = Get-Item -LiteralPath $enginePath
 if ($engine.Length -ne $entry.binaryLength -or (Get-FileHash -LiteralPath $enginePath -Algorithm SHA256).Hash -ine $entry.binarySha256) {
     throw 'Pinned engine verification failed. Acquire it with scripts/Get-Engine.ps1.'
 }
+# The model, on the same terms as the engine. Fortiq refuses to start without it, so a bundle built
+# without one is a download that installs and then tells the person to install again. Verified here,
+# before anything is published, rather than discovered by whoever unzips it.
+$modelRoot = Join-Path $repositoryRoot 'models'
+$modelManifestPath = Join-Path $modelRoot 'manifest.json'
+$modelManifest = Get-Content -LiteralPath $modelManifestPath -Raw | ConvertFrom-Json
+$modelEntries = @($modelManifest.models)
+if ($modelEntries.Count -ne 1) { throw 'Exactly one pinned model is required.' }
+$modelEntry = $modelEntries[0]
+$modelPath = [IO.Path]::GetFullPath((Join-Path $modelRoot $modelEntry.relativePath))
+if (-not $modelPath.StartsWith($modelRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'The model path escapes the model directory.'
+}
+if (-not (Test-Path -LiteralPath $modelPath)) {
+    throw "The pinned model is not present. Acquire it with scripts/Get-Model.ps1."
+}
+$model = Get-Item -LiteralPath $modelPath
+if ($model.Length -ne $modelEntry.fileLength -or (Get-FileHash -LiteralPath $modelPath -Algorithm SHA256).Hash -ine $modelEntry.fileSha256) {
+    throw 'Pinned model verification failed. Acquire it with scripts/Get-Model.ps1.'
+}
+
 New-Item -ItemType Directory -Path $destination | Out-Null
 foreach ($component in @(@{Folder='desktop'; Project='Fortiq.Desktop'}, @{Folder='service'; Project='Fortiq.Service'}, @{Folder='recover'; Project='Fortiq.Recover'})) {
     $componentOutput = Join-Path $destination $component.Folder
@@ -56,6 +77,30 @@ foreach ($component in @(@{Folder='desktop'; Project='Fortiq.Desktop'}, @{Folder
     Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $engineOutput 'manifest.json')
     if ((Get-FileHash -LiteralPath $binaryOutput -Algorithm SHA256).Hash -ine $entry.binarySha256) {
         throw 'The copied engine failed verification; this bundle is incomplete.'
+    }
+
+    # The model goes to the desktop only. The service runs no assistant, and Fortiq.Recover is the
+    # folder somebody copies onto whatever they had to hand to get their files back on a machine that
+    # has never seen Fortiq - putting a gigabyte of model in it would be a cost paid by the person
+    # least able to afford it, for something recovery never consults.
+    if ($component.Folder -ceq 'desktop') {
+        $modelOutput = Join-Path $componentOutput 'models'
+        $modelBinaryOutput = Join-Path $modelOutput $modelEntry.relativePath
+        New-Item -ItemType Directory -Path (Split-Path $modelBinaryOutput -Parent) -Force | Out-Null
+        Copy-Item -LiteralPath $modelPath -Destination $modelBinaryOutput
+        Copy-Item -LiteralPath $modelManifestPath -Destination (Join-Path $modelOutput 'manifest.json')
+        foreach ($modelDocument in @('NOTICE.md', 'LICENSE-Apache-2.0.txt')) {
+            $modelDocumentPath = Join-Path $modelRoot $modelDocument
+            if (-not (Test-Path -LiteralPath $modelDocumentPath)) {
+                throw "'models/$modelDocument' is missing; the bundle would redistribute the model without its terms."
+            }
+
+            Copy-Item -LiteralPath $modelDocumentPath -Destination (Join-Path $modelOutput $modelDocument)
+        }
+
+        if ((Get-FileHash -LiteralPath $modelBinaryOutput -Algorithm SHA256).Hash -ine $modelEntry.fileSha256) {
+            throw 'The copied model failed verification; this bundle is incomplete.'
+        }
     }
 }
 

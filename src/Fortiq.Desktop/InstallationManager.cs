@@ -1,10 +1,11 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Fortiq.Application;
+using Fortiq.Assistant;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Platform.Windows;
 
@@ -622,18 +623,26 @@ public sealed class InstallationManager : IInstallationOperations
             }
         }
 
-        var candidates = new[]
+        // The engine and the model both sit in a folder of their own rather than among the binaries,
+        // and both can have been placed under a component or at the bundle root depending on how the
+        // bundle was made. The application refuses to start without either of them, so neither is
+        // optional here in anything but the code: a bundle missing one produces an installation that
+        // says so on its first launch.
+        foreach (var pinned in new[] { "engines", ModelAvailability.DirectoryName })
         {
-            Path.Combine(bundleRoot, "desktop", "engines"),
-            Path.Combine(bundleRoot, "service", "engines"),
-            Path.Combine(bundleRoot, "engines")
-        };
-        var enginesDir = candidates.FirstOrDefault(Directory.Exists);
-        if (enginesDir is not null)
-        {
-            var targetEngines = Path.Combine(targetDir, "engines");
-            Directory.CreateDirectory(targetEngines);
-            CopyDirectoryRecursive(enginesDir, targetEngines);
+            var candidates = new[]
+            {
+                Path.Combine(bundleRoot, "desktop", pinned),
+                Path.Combine(bundleRoot, "service", pinned),
+                Path.Combine(bundleRoot, pinned)
+            };
+
+            if (candidates.FirstOrDefault(Directory.Exists) is { } source)
+            {
+                var target = Path.Combine(targetDir, pinned);
+                Directory.CreateDirectory(target);
+                CopyDirectoryRecursive(source, target);
+            }
         }
 
         var manifestPath = Path.Combine(bundleRoot, "bundle-manifest.json");
@@ -786,32 +795,41 @@ public sealed class InstallationManager : IInstallationOperations
                 "Nothing was started from it. Free some disk space, close any running Fortiq, and install again.");
         }
 
-        CopyEngines(sourceDir, targetDir);
+        CopyPinned(sourceDir, targetDir, "engines");
+        CopyPinned(sourceDir, targetDir, ModelAvailability.DirectoryName);
     }
 
-    private static void CopyEngines(string sourceDir, string targetDir)
+    /// <summary>
+    /// Copies a folder of pinned binaries - the engine, the assistant model - into an installation.
+    /// </summary>
+    /// <remarks>
+    /// It is looked for beside the source and then upwards, because a development build runs out of a
+    /// bin folder several levels below the one these live in. This was written once for the engine
+    /// and the model needs exactly the same walk; one copy of it makes an installation that has the
+    /// engine and not the model impossible to produce by forgetting.
+    /// </remarks>
+    private static void CopyPinned(string sourceDir, string targetDir, string directoryName)
     {
-        var sourceEngines = Path.Combine(sourceDir, "engines");
-        var targetEngines = Path.Combine(targetDir, "engines");
+        var source = Path.Combine(sourceDir, directoryName);
 
-        if (!Directory.Exists(sourceEngines))
+        if (!Directory.Exists(source))
         {
             var parent = new DirectoryInfo(sourceDir).Parent;
             while (parent is not null)
             {
-                var candidate = Path.Combine(parent.FullName, "engines");
+                var candidate = Path.Combine(parent.FullName, directoryName);
                 if (Directory.Exists(candidate) && File.Exists(Path.Combine(candidate, "manifest.json")))
                 {
-                    sourceEngines = candidate;
+                    source = candidate;
                     break;
                 }
                 parent = parent.Parent;
             }
         }
 
-        if (Directory.Exists(sourceEngines))
+        if (Directory.Exists(source))
         {
-            CopyDirectoryRecursive(sourceEngines, targetEngines);
+            CopyDirectoryRecursive(source, Path.Combine(targetDir, directoryName));
         }
     }
 
