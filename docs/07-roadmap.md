@@ -82,7 +82,7 @@ The Fortiq roadmap is organized around risk reduction and verification milestone
 
 - [x] Pinned local model: manifest, acquisition with hash verification, installer integration, refusal to start without it;
 - [x] llama.cpp inference runtime in a child process, pinned and acquired like the engine;
-- [ ] Anywhere in the interface to ask the assistant a question;
+- [x] Assistant screen: questions drawn from this machine's state, answers shown and never acted on;
 - [ ] Natural-language local log explanation and restore assistance;
 - [ ] Natural-language recovery plan generation (strictly advisory; human-in-the-loop confirmation required);
 - [ ] Strict metadata-only privacy boundaries (payloads never processed by AI);

@@ -1,10 +1,10 @@
 # Fortiq Intelligence & On-Device AI Boundaries
 
-> **Implementation status: implemented, not yet surfaced.** The model and the llama.cpp runtime are
-> both pinned, acquired, verified and required at startup, and `LlamaServerRuntime` starts the model
-> in a process of its own and answers questions against it. What does not exist yet is anywhere in
-> the interface to ask one: no screen calls this. The boundaries below are the ones that path must
-> be built inside.
+> **Implementation status: implemented.** The model and the llama.cpp runtime are pinned, acquired,
+> verified and required at startup; `LlamaServerRuntime` runs the model in a process of its own; and
+> the desktop has an Assistant screen that asks it questions about this machine's own backup state.
+> What is not built is the structured-proposal path in the diagram below - today the assistant
+> explains, and every action is still reached by hand.
 
 ## Purpose & Scope
 

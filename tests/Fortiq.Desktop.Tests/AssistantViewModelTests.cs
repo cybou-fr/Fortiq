@@ -1,0 +1,166 @@
+using Fortiq.Assistant;
+using Fortiq.Desktop.ViewModels;
+
+namespace Fortiq.Desktop.Tests;
+
+/// <summary>
+/// The assistant screen's behaviour, against a runtime that answers instantly.
+/// </summary>
+/// <remarks>
+/// The real runtime is a child process and a gigabyte of weights; none of what is checked here is
+/// about the model, and all of it is about what somebody sees while and after they ask.
+/// </remarks>
+public sealed class AssistantViewModelTests
+{
+    [Fact]
+    public async Task NothingIsStartedUntilSomebodyAsks()
+    {
+        // Most sessions never ask. Loading a model on the chance that this one will is seconds and a
+        // gigabyte spent on somebody who opened the app to check last night's backup.
+        var starts = 0;
+        _ = new AssistantViewModel(_ => { starts++; return Task.FromResult<IAssistantRuntime>(new Fake()); });
+
+        await Task.Yield();
+
+        Assert.Equal(0, starts);
+    }
+
+    [Fact]
+    public async Task TheRuntimeIsStartedOnceAndReusedForLaterQuestions()
+    {
+        var starts = 0;
+        var model = new AssistantViewModel(_ => { starts++; return Task.FromResult<IAssistantRuntime>(new Fake()); });
+
+        model.Question = "First?";
+        await model.AskAsync(CancellationToken.None);
+        model.Question = "Second?";
+        await model.AskAsync(CancellationToken.None);
+
+        Assert.Equal(1, starts);
+    }
+
+    [Fact]
+    public async Task AnAnswerIsKeptWithTheQuestionItAnswers()
+    {
+        // They arrive after a wait. A paragraph on its own is one somebody has to remember a
+        // question for, and on a screen with suggestion buttons it is easy to lose track of which
+        // was pressed.
+        var model = new AssistantViewModel(_ => Task.FromResult<IAssistantRuntime>(new Fake("Because it is locked.")));
+
+        await model.AskAsync(
+            new AssistantSuggestion("Why is Documents not recoverable?", []),
+            CancellationToken.None);
+
+        Assert.Equal("Why is Documents not recoverable?", model.AnsweredQuestion);
+        Assert.Equal("Because it is locked.", model.Answer);
+    }
+
+    [Fact]
+    public async Task PressingASuggestionPutsItInTheQuestionBox()
+    {
+        var model = new AssistantViewModel(_ => Task.FromResult<IAssistantRuntime>(new Fake()));
+
+        await model.AskAsync(new AssistantSuggestion("What is a recovery phrase?", []), CancellationToken.None);
+
+        Assert.Equal("What is a recovery phrase?", model.Question);
+    }
+
+    [Fact]
+    public async Task AnEmptyQuestionIsNotAsked()
+    {
+        var starts = 0;
+        var model = new AssistantViewModel(_ => { starts++; return Task.FromResult<IAssistantRuntime>(new Fake()); });
+
+        model.Question = "   ";
+        await model.AskAsync(CancellationToken.None);
+
+        Assert.Equal(0, starts);
+        Assert.False(model.CanAsk);
+    }
+
+    [Fact]
+    public async Task AFailureIsShownInWordsAndTheAnswerIsNotLeftBehind()
+    {
+        var model = new AssistantViewModel(_ => Task.FromResult<IAssistantRuntime>(new Fake("First answer.")));
+        model.Question = "First?";
+        await model.AskAsync(CancellationToken.None);
+
+        var broken = new AssistantViewModel(_ => throw new InvalidOperationException("The model file is missing."));
+        broken.Question = "Second?";
+        await broken.AskAsync(CancellationToken.None);
+
+        Assert.Null(broken.Answer);
+        Assert.NotNull(broken.Failure);
+        Assert.False(broken.Busy);
+    }
+
+    [Fact]
+    public async Task ARuntimeThatFailedIsNotAskedAgain()
+    {
+        // A process that failed a question is not the one to ask the next one; the next attempt
+        // starts a fresh one, which is also how a crashed child gets replaced.
+        var starts = 0;
+        var model = new AssistantViewModel(_ =>
+        {
+            starts++;
+            return Task.FromResult<IAssistantRuntime>(new Fake(throws: true));
+        });
+
+        model.Question = "First?";
+        await model.AskAsync(CancellationToken.None);
+        model.Question = "Second?";
+        await model.AskAsync(CancellationToken.None);
+
+        Assert.Equal(2, starts);
+    }
+
+    [Fact]
+    public async Task DisposingEndsTheRuntimeThatWasStarted()
+    {
+        var runtime = new Fake();
+        var model = new AssistantViewModel(_ => Task.FromResult<IAssistantRuntime>(runtime));
+        model.Question = "Anything?";
+        await model.AskAsync(CancellationToken.None);
+
+        await model.DisposeAsync();
+
+        Assert.True(runtime.Disposed);
+    }
+
+    [Fact]
+    public async Task DisposingWithoutEverAskingIsHarmless()
+    {
+        var model = new AssistantViewModel(_ => throw new InvalidOperationException("Should never start."));
+
+        await model.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task AnAnswerCutOffAtItsLimitIsFlaggedSoTheScreenCanSaySo()
+    {
+        var model = new AssistantViewModel(_ => Task.FromResult<IAssistantRuntime>(new Fake("Half a sen", truncated: true)));
+        model.Question = "Why?";
+
+        await model.AskAsync(CancellationToken.None);
+
+        Assert.True(model.AnswerTruncated);
+    }
+
+    private sealed class Fake(string answer = "An answer.", bool truncated = false, bool throws = false) : IAssistantRuntime
+    {
+        public bool IsReady => true;
+
+        public bool Disposed { get; private set; }
+
+        public Task<AssistantReply> AskAsync(AssistantAsk ask, CancellationToken cancellationToken) =>
+            throws
+                ? Task.FromException<AssistantReply>(new InvalidDataException("The runtime stopped."))
+                : Task.FromResult(new AssistantReply(answer, truncated));
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return ValueTask.CompletedTask;
+        }
+    }
+}

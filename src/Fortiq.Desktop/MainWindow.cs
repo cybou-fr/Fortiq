@@ -1,10 +1,11 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Fortiq.Application;
 using Fortiq.Desktop.Controls;
+using Fortiq.Assistant;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Infrastructure.Receipts;
 using Fortiq.Monitoring;
@@ -25,6 +26,17 @@ public sealed class MainWindow : Window
     private readonly RepositoriesViewModel _model;
     private readonly SettingsViewModel _settings;
     private readonly Func<ProtectRepositoryViewModel>? _wizard;
+    private readonly Func<AssistantViewModel>? _assistantFactory;
+
+    /// <summary>
+    /// Kept for the life of the window, not built per visit.
+    /// </summary>
+    /// <remarks>
+    /// It owns a child process holding a gigabyte of weights. Rebuilding it every time somebody
+    /// clicks Assistant would start a second model, and abandoning the first would leave a process
+    /// nobody can see and nobody would think to look for.
+    /// </remarks>
+    private AssistantViewModel? _assistant;
     private readonly Border _page = new();
     private readonly Dictionary<string, Button> _navigation = new(StringComparer.Ordinal);
     private string _activeSection = "Home";
@@ -59,8 +71,10 @@ public sealed class MainWindow : Window
         Func<ProtectRepositoryViewModel>? wizard = null,
         SettingsViewModel? settings = null, bool installed = false, Func<FileRecoveryViewModel>? fileRecovery = null,
         Func<string, string, SourceSettingsViewModel>? sourceSettings = null,
-        Func<Task<IReadOnlyList<ReceiptEvent>>>? history = null)
+        Func<Task<IReadOnlyList<ReceiptEvent>>>? history = null,
+        Func<AssistantViewModel>? assistant = null)
     {
+        _assistantFactory = assistant;
         _sourceSettings = sourceSettings;
         _history = history;
         _installed = installed;
@@ -121,6 +135,7 @@ public sealed class MainWindow : Window
         Closed += (_, _) =>
         {
             refreshTimer.Stop();
+            StopAssistant();
             _disposeTray();
         };
 
@@ -142,6 +157,7 @@ public sealed class MainWindow : Window
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
             _isExplicitExit = true;
+            StopAssistant();
 
             // ProcessExit does not run on the UI thread, and a TrayIcon may only be touched from it.
             // Disposing directly threw every time the application closed - at the very end, where
@@ -238,6 +254,7 @@ public sealed class MainWindow : Window
         menu.Children.Add(Nav("Protected folders", RenderFolders, "\uE8B7"));
         menu.Children.Add(Nav("Restore", RenderRestore, "\uE777"));
         menu.Children.Add(Nav("Activity", RenderActivity, "\uE81C"));
+        menu.Children.Add(Nav("Assistant", RenderAssistant, "\uE8BD"));
         Grid.SetRow(menu, 1);
         rail.Children.Add(menu);
 
@@ -465,6 +482,7 @@ public sealed class MainWindow : Window
         if (_activeSection == "Protected folders") RenderFolders();
         else if (_activeSection == "Restore") RenderRestore();
         else if (_activeSection == "Activity") RenderActivity();
+        else if (_activeSection == "Assistant") RenderAssistant();
         else if (_activeSection == "Settings") RenderSettings();
         else RenderHome();
     }
@@ -1289,6 +1307,208 @@ public sealed class MainWindow : Window
         return Card(body, Surface, Line, new Thickness(20));
     }
 
+    /// <summary>
+    /// The assistant: a question, and what a local model said about it.
+    /// </summary>
+    /// <remarks>
+    /// It opens with the questions this machine actually raises rather than an empty box. A blank
+    /// prompt asks somebody to work out what an assistant is for while they are already worried
+    /// about their data; a button saying "Why is Documents at risk?" is the question they came with.
+    ///
+    /// What it can and cannot do is stated on the screen, not in a document. The claim that nothing
+    /// leaves the PC is the main reason anybody would use this at all, and the fact that it cannot
+    /// change anything is what makes it safe to ignore.
+    /// </remarks>
+    private void RenderAssistant()
+    {
+        Select("Assistant");
+        var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
+        body.Children.Add(Header("Assistant", "Explains what Fortiq did, in plain words."));
+
+        if (_assistantFactory is null)
+        {
+            body.Children.Add(Card(Text(
+                "This copy of Fortiq was built without an assistant.",
+                13, FontWeight.Normal, Muted, wrap: true)));
+            _page.Child = new ScrollViewer { Content = body };
+            return;
+        }
+
+        var model = _assistant ??= _assistantFactory();
+        model.Suggestions = AssistantSuggestions();
+
+        body.Children.Add(Card(new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                Text("Runs on this PC.", 13, FontWeight.SemiBold, Ink),
+                Text(
+                    "Nothing you type and nothing it reads is sent anywhere. It is never given your "
+                    + "recovery phrase or your passwords, and it cannot start, stop or delete anything - "
+                    + "it only explains.",
+                    12, FontWeight.Normal, Muted, wrap: true)
+            }
+        }, InfoSurface, Brand));
+
+        if (model.Suggestions.Count > 0)
+        {
+            var chips = new WrapPanel { ItemSpacing = 8, LineSpacing = 8 };
+            foreach (var suggestion in model.Suggestions)
+            {
+                var chip = Secondary(suggestion.Question).Named(suggestion.Question);
+                chip.IsEnabled = !model.Busy;
+                var captured = suggestion;
+                chip.Click += async (_, _) =>
+                {
+                    await model.AskAsync(captured, CancellationToken.None);
+                    RenderActive();
+                };
+                chips.Children.Add(chip);
+            }
+
+            body.Children.Add(new StackPanel
+            {
+                Spacing = 8,
+                Children = { Text("Ask about this PC", 12, FontWeight.SemiBold, Ink), chips }
+            });
+        }
+
+        var box = FortiqTextBox.Create("Ask a question about your backups");
+        box.Text = model.Question;
+        box.AcceptsReturn = false;
+        box.IsEnabled = !model.Busy;
+        box.Named("Your question for the assistant");
+        box.TextChanged += (_, _) => model.Question = box.Text ?? string.Empty;
+
+        var ask = Primary(model.Busy ? "Asking\u2026" : "Ask").Named("Ask the assistant");
+        ask.IsEnabled = !model.Busy && !string.IsNullOrWhiteSpace(box.Text);
+        ask.Click += async (_, _) =>
+        {
+            model.Question = box.Text ?? string.Empty;
+            await model.AskAsync(CancellationToken.None);
+            RenderActive();
+        };
+
+        // Enter asks. A single-line box where the only way to submit is the mouse is a box people
+        // type into and then wait at.
+        box.KeyDown += (_, args) =>
+        {
+            if (args.Key == Avalonia.Input.Key.Enter && ask.IsEnabled)
+            {
+                ask.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            }
+        };
+
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 10 };
+        row.Children.Add(box);
+        row.Children.Add(At(ask, 1));
+        body.Children.Add(row);
+
+        if (model.Busy)
+        {
+            var busy = new StackPanel
+            {
+                Spacing = 10,
+                Children = { Text(model.Status ?? "Thinking.", 13, FontWeight.Normal, Muted, wrap: true) }
+            };
+
+            // Cancellable, because the first question loads a model and some machines are slow.
+            var stop = Secondary("Stop").Named("Stop the assistant answering");
+            stop.HorizontalAlignment = HorizontalAlignment.Left;
+            stop.Click += (_, _) => model.Cancel();
+            busy.Children.Add(stop);
+            body.Children.Add(Card(busy));
+        }
+
+        if (model.Failure is { } failure)
+        {
+            body.Children.Add(Card(new StackPanel
+            {
+                Spacing = 4,
+                Children =
+                {
+                    Text("The assistant could not answer.", 13, FontWeight.SemiBold, Failure),
+                    Text(failure, 12, FontWeight.Normal, Muted, wrap: true)
+                }
+            }, AtRiskSurface, Failure));
+        }
+
+        if (model.Answer is { } answer)
+        {
+            var card = new StackPanel { Spacing = 8 };
+
+            // The question is repeated above the answer. Answers arrive after a wait, and a
+            // paragraph on its own is one somebody has to remember the question for.
+            card.Children.Add(Text(model.AnsweredQuestion ?? string.Empty, 12, FontWeight.SemiBold, Muted, wrap: true));
+            card.Children.Add(new SelectableTextBlock
+            {
+                Text = answer,
+                FontSize = 14,
+                Foreground = Ink,
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            if (model.AnswerTruncated)
+            {
+                card.Children.Add(Text("The answer stopped at its length limit.", 11, FontWeight.Normal, Unproven, wrap: true));
+            }
+
+            // Last, and always. This is the only screen in Fortiq whose text was not read off a
+            // receipt, and it must not be mistaken for one.
+            card.Children.Add(Text(
+                "Written by a model, and it can be wrong. What Fortiq actually recorded is on Activity.",
+                11, FontWeight.Normal, Muted, wrap: true));
+
+            body.Children.Add(Card(card));
+        }
+
+        _page.Child = new ScrollViewer { Content = body };
+    }
+
+    /// <summary>
+    /// The questions this PC raises, in the state it is in now.
+    /// </summary>
+    /// <remarks>
+    /// Each one carries the facts that answer it, so the model is never asked to guess at machine
+    /// state it was not given. A source that is not recoverable is offered first, because that is
+    /// what somebody opening this screen is most likely to be here about.
+    /// </remarks>
+    private List<AssistantSuggestion> AssistantSuggestions()
+    {
+        var suggestions = new List<AssistantSuggestion>();
+
+        foreach (var row in _model.Repositories.Where(item => item.Health.Verdict != HealthVerdict.Recoverable).Take(2))
+        {
+            suggestions.Add(new AssistantSuggestion(
+                $"Why is {row.Title} not recoverable?",
+                [
+                    new AssistantEvidence($"status of {row.Title}", row.Summary),
+                    new AssistantEvidence($"findings for {row.Title}", row.Detail)
+                ]));
+        }
+
+        if (_model.Repositories.Count > 0)
+        {
+            suggestions.Add(new AssistantSuggestion(
+                "What is protected on this PC, and is any of it at risk?",
+                [
+                    new AssistantEvidence(
+                        "protected sources",
+                        string.Join(
+                            "\n",
+                            _model.Repositories.Select(row => $"{row.Title}: {row.Summary}")))
+                ]));
+        }
+        else
+        {
+            suggestions.Add(new AssistantSuggestion("What does Fortiq protect me against?", []));
+        }
+
+        suggestions.Add(new AssistantSuggestion("What is a recovery phrase, and why does Fortiq keep asking about mine?", []));
+        return suggestions;
+    }
+
     private void RenderSettings()
     {
         Select("Settings");
@@ -1944,8 +2164,33 @@ public sealed class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Ends the assistant's process, if one was ever started.
+    /// </summary>
+    /// <remarks>
+    /// Synchronously, and on every path out of the window. Disposal here is a kill and a wait for a
+    /// process that is already being killed, so it costs milliseconds - and the alternative is a
+    /// llama-server holding a gigabyte of memory after Fortiq has visibly closed, which is not
+    /// something a person would connect to Fortiq or know how to end.
+    /// </remarks>
+    private void StopAssistant()
+    {
+        var assistant = _assistant;
+        _assistant = null;
+
+        try
+        {
+            assistant?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException or TaskCanceledException)
+        {
+            // Already gone, which is the outcome this wanted.
+        }
+    }
+
     public void ExplicitExit()
     {
+        StopAssistant();
         _isExplicitExit = true;
         _disposeTray?.Invoke();
         Close();

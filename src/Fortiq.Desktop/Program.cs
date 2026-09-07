@@ -405,7 +405,10 @@ public sealed class FortiqApplication : Avalonia.Application
             settings, installed: installed,
             fileRecovery: () => new FileRecoveryViewModel(new FileRecoveryAdapter(engineRoot, paths.Runs)),
             sourceSettings: (repositoryId, title) => new SourceSettingsViewModel(sourceSettings, repositoryId, title),
-            history: () => ReceiptTimeline.ReadAsync(paths.Receipts, CancellationToken.None));
+            history: () => ReceiptTimeline.ReadAsync(paths.Receipts, CancellationToken.None),
+            // A factory, not an instance: nothing starts a model until somebody asks a question.
+            assistant: () => new AssistantViewModel(
+                new AssistantAdapter(ResolveModelRoot(), ResolveRuntimeRoot()).StartAsync));
     }
 
     /// <summary>
