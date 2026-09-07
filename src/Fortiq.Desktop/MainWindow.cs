@@ -191,6 +191,12 @@ public sealed class MainWindow : Window
         };
 
         RenderActive();
+
+        // And read the machine, because Home shows it. Navigating to a resource screen re-reads it,
+        // but the first screen somebody sees is this one and nobody navigates to it - so without
+        // this the dashboard showed its resource summary only to people who had been somewhere else
+        // and come back. Caught by rendering the window rather than by any test.
+        _ = LoadMachineStateAsync();
     }
 
     /// <summary>Shrinks the window to fit the display it opened on, if it does not already.</summary>
@@ -266,7 +272,7 @@ public sealed class MainWindow : Window
         // files before they could pick one - three entries for one intention, at the moment they are
         // least able to study an architecture. "Backups" went the same way: the noun says what Fortiq
         // stores, and "Protected folders" says what they gave it.
-        menu.Children.Add(Nav("Home", RenderHome, "\uE80F"));
+        menu.Children.Add(Nav("Home", () => { RenderHome(); _ = LoadMachineStateAsync(); }, "\uE80F"));
         menu.Children.Add(Nav("Protected folders", RenderFolders, "\uE8B7"));
         // These three re-read the machine when they are opened rather than trusting what was read
         // last time. A schedule can change from the wizard, from Settings, or from another process
@@ -552,6 +558,19 @@ public sealed class MainWindow : Window
         body.Children.Add(new HeroHealthBanner(mode, headline, desc, actionText, HeroAction(mode)));
 
         body.Children.Add(MetricsGrid());
+
+        // What is on this machine, across resources rather than per repository. The tiles above
+        // count backups; this counts the things a person configures, and is how they get to them.
+        if (_state.Catalog.Tasks.Count > 0)
+        {
+            body.Children.Add(SetupStrip());
+        }
+
+        if (SetupAttention() is { Count: > 0 } attention)
+        {
+            body.Children.Add(AttentionCard(attention));
+        }
+
         body.Children.Add(RepositoriesSummaryCard());
 
         _page.Child = new ScrollViewer { Content = body };
@@ -1535,6 +1554,152 @@ public sealed class MainWindow : Window
         }
 
         _page.Child = new ScrollViewer { Content = body };
+    }
+
+    /// <summary>
+    /// How much of each kind of thing this PC has, and the way to each of them.
+    /// </summary>
+    /// <remarks>
+    /// Three counts rather than a menu, because the counts are what makes them worth opening: a
+    /// person with one storage and four tasks has a different problem from one with four storages,
+    /// and the number says which they are before they click anything.
+    /// </remarks>
+    private Grid SetupStrip()
+    {
+        var grid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,*,*"),
+            ColumnSpacing = 12
+        };
+
+        Add(grid, SetupTile("Tasks", _state.Catalog.Tasks.Count, "What gets backed up", RenderTasks), 0);
+        Add(grid, SetupTile("Storage", _state.Catalog.Storages.Count, "Where copies go", RenderStorage), 1);
+        Add(grid, SetupTile("Identities", _state.Catalog.Identities.Count, "Who can open them", RenderIdentities), 2);
+        return grid;
+    }
+
+    private Button SetupTile(string label, int count, string detail, Action open)
+    {
+        var tile = new Button
+        {
+            Background = Surface,
+            BorderBrush = Line,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(16),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Content = new StackPanel
+            {
+                Spacing = 2,
+                Children =
+                {
+                    Text(count.ToString(System.Globalization.CultureInfo.CurrentCulture), 24, FontWeight.SemiBold, Ink),
+                    Text(label, 13, FontWeight.SemiBold, Ink),
+                    Text(detail, 11, FontWeight.Normal, Muted)
+                }
+            }
+        };
+
+        tile.Named($"{label}: {count}. {detail}");
+        tile.Click += (_, _) => { Select(label); open(); };
+        return tile;
+    }
+
+    /// <summary>
+    /// What is wrong across the whole setup, rather than with one repository.
+    /// </summary>
+    /// <remarks>
+    /// These are the findings that only exist at the level of the catalogue. A repository cannot
+    /// notice that it is the only copy on the only disk in the house; the health model reports each
+    /// one separately and each can be perfectly healthy while the arrangement is not.
+    ///
+    /// Deterministic, and deliberately not the assistant's job. Fortiq must be able to say this on a
+    /// machine where the assistant has never been opened.
+    /// </remarks>
+    private List<string> SetupAttention()
+    {
+        var attention = new List<string>();
+        var catalog = _state.Catalog;
+
+        if (catalog.Tasks.Count == 0)
+        {
+            return attention;
+        }
+
+        var unconfirmed = catalog.IdentityKeys.Count(
+            key => key.Kind == IdentityKeyKind.RecoveryPhrase && !key.Confirmed);
+        if (unconfirmed > 0)
+        {
+            attention.Add(unconfirmed == 1
+                ? "One recovery phrase has never been confirmed, so nobody has shown they can open that backup elsewhere."
+                : $"{unconfirmed} recovery phrases have never been confirmed, so nobody has shown they can open those backups elsewhere.");
+        }
+
+        // The arrangement nobody notices until the disk dies. Every copy in one place is one failure
+        // away from none, however healthy each repository looks on its own.
+        var places = catalog.Routes.Select(route => route.StorageId).Distinct(StringComparer.Ordinal).Count();
+        if (places == 1 && catalog.Tasks.Count > 1)
+        {
+            var storage = catalog.Storage(catalog.Routes[0].StorageId);
+            attention.Add(
+                $"Every copy goes to one place{(storage is null ? string.Empty : $" - {storage.Name}")}. "
+                + "Losing it would lose all of them.");
+        }
+
+        var undrilled = catalog.Routes.Count(route => route.DrillTrigger is null);
+        if (undrilled > 0)
+        {
+            attention.Add(undrilled == 1
+                ? "One copy has no recovery drill, so nothing is checking that it restores."
+                : $"{undrilled} copies have no recovery drill, so nothing is checking that they restore.");
+        }
+
+        var unbounded = catalog.Routes.Count(route => route.Retention is null);
+        if (unbounded > 0)
+        {
+            attention.Add(unbounded == 1
+                ? "One copy keeps every snapshot for ever, so it will grow without bound."
+                : $"{unbounded} copies keep every snapshot for ever, so they will grow without bound.");
+        }
+
+        return attention;
+    }
+
+    private static Border AttentionCard(List<string> attention)
+    {
+        var card = new StackPanel { Spacing = 8 };
+        card.Children.Add(Text("Worth looking at", 14, FontWeight.SemiBold, Ink));
+
+        foreach (var item in attention)
+        {
+            card.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 9,
+                Children =
+                {
+                    new Border
+                    {
+                        Width = 6,
+                        Height = 6,
+                        CornerRadius = new CornerRadius(3),
+                        Background = Unproven,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        Margin = new Thickness(0, 6, 0, 0)
+                    }.Decorative(),
+                    Text(item, 12, FontWeight.Normal, Ink, wrap: true)
+                }
+            });
+        }
+
+        // None of these is a failure, and saying so stops the card reading as four broken things.
+        card.Children.Add(Text(
+            "Nothing here has gone wrong. These are the arrangements that decide what happens when "
+            + "something does.",
+            11, FontWeight.Normal, Muted, wrap: true));
+
+        return Card(card, UnprovenSurface, Unproven);
     }
 
     /// <summary>
