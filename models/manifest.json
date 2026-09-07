@@ -8,10 +8,10 @@
       "family": "qwen3.5-2b-instruct",
       "quantization": "Q4_K_M",
       "relativePath": "fortiq-assistant/0.1.0/model.gguf",
-      "fileLength": 0,
-      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "sourceUrl": "https://example.invalid/replace-before-release/model-q4_k_m.gguf",
-      "license": "REPLACE-BEFORE-RELEASE",
+      "fileLength": 1280835840,
+      "fileSha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+      "sourceUrl": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf",
+      "license": "Apache-2.0",
       "contextTokens": 8192
     }
   ]
