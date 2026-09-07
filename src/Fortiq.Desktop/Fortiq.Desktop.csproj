@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Fortiq.Assistant\Fortiq.Assistant.csproj" />
     <ProjectReference Include="..\Fortiq.Recover\Fortiq.Recover.csproj" />
     <ProjectReference Include="..\Fortiq.Desktop.ViewModels\Fortiq.Desktop.ViewModels.csproj" />
     <ProjectReference Include="..\Fortiq.Provisioning\Fortiq.Provisioning.csproj" />

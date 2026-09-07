@@ -6,6 +6,7 @@ using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 using Fortiq.Application;
+using Fortiq.Assistant;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Infrastructure.ObjectStorage;
 using Fortiq.Monitoring;
@@ -151,6 +152,21 @@ public sealed class FortiqApplication : Avalonia.Application
                         if (closed) return;
                         Reveal();
                         message.Text = missing;
+                        retry.IsVisible = true;
+                        return;
+                    }
+
+                    // And then the assistant, on the same terms. Fortiq is not offered in a reduced
+                    // form without its model: it is in the package or it is fetched at installation,
+                    // so a copy without one is an installation that did not finish, and saying that
+                    // here is far kinder than letting somebody meet it inside a screen later.
+                    message.Text = "Checking the assistant model...";
+                    var model = await ModelAvailability.InspectAsync(ResolveModelRoot(), CancellationToken.None);
+                    if (!model.Usable)
+                    {
+                        if (closed) return;
+                        Reveal();
+                        message.Text = model.Detail;
                         retry.IsVisible = true;
                         return;
                     }
@@ -521,14 +537,26 @@ public sealed class FortiqApplication : Avalonia.Application
             backup: backup));
     }
 
-    private static string ResolveEngineRoot()
+    private static string ResolveEngineRoot() => ResolvePinnedRoot("FORTIQ_ENGINE_ROOT", "engines");
+
+    private static string ResolveModelRoot() => ResolvePinnedRoot("FORTIQ_MODEL_ROOT", ModelAvailability.DirectoryName);
+
+    /// <summary>
+    /// Finds a folder of pinned binaries beside the application, or above it in a working tree.
+    /// </summary>
+    /// <remarks>
+    /// Engines and models arrive the same way and go missing the same way, so they are found the same
+    /// way: beside the installation in a package, and further up the tree during development, where
+    /// the application runs out of a bin folder several levels below the one the files live in.
+    /// </remarks>
+    private static string ResolvePinnedRoot(string environmentVariable, string directoryName)
     {
-        if (Environment.GetEnvironmentVariable("FORTIQ_ENGINE_ROOT") is { Length: > 0 } configured && Directory.Exists(configured))
+        if (Environment.GetEnvironmentVariable(environmentVariable) is { Length: > 0 } configured && Directory.Exists(configured))
         {
             return configured;
         }
 
-        var candidate = Path.Combine(AppContext.BaseDirectory, "engines");
+        var candidate = Path.Combine(AppContext.BaseDirectory, directoryName);
         if (File.Exists(Path.Combine(candidate, "manifest.json")))
         {
             return candidate;
@@ -537,10 +565,10 @@ public sealed class FortiqApplication : Avalonia.Application
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var enginesPath = Path.Combine(directory.FullName, "engines");
-            if (File.Exists(Path.Combine(enginesPath, "manifest.json")))
+            var path = Path.Combine(directory.FullName, directoryName);
+            if (File.Exists(Path.Combine(path, "manifest.json")))
             {
-                return enginesPath;
+                return path;
             }
 
             directory = directory.Parent;
