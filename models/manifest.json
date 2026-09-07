@@ -1,0 +1,18 @@
+{
+  "schema": "fortiq.model-manifest",
+  "version": 1,
+  "models": [
+    {
+      "name": "fortiq-assistant",
+      "version": "0.1.0",
+      "family": "qwen3.5-2b-instruct",
+      "quantization": "Q4_K_M",
+      "relativePath": "fortiq-assistant/0.1.0/model.gguf",
+      "fileLength": 0,
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sourceUrl": "https://example.invalid/replace-before-release/model-q4_k_m.gguf",
+      "license": "REPLACE-BEFORE-RELEASE",
+      "contextTokens": 8192
+    }
+  ]
+}

@@ -5,6 +5,7 @@
 
 # Engine downloads & binaries
 engines/restic/
+models/fortiq-assistant/
 
 # Build artifacts (.NET)
 **/[Bb]in/
