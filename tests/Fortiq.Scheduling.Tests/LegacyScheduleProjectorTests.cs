@@ -132,6 +132,43 @@ public sealed class LegacyScheduleProjectorTests
     }
 
     [Fact]
+    public void TwoRepositoriesGetTwoDistinguishableRecoveryPhrases()
+    {
+        // Three identities all called "Recovery phrase" is three things nobody can tell apart, on
+        // the screen somebody reads to find out who can get their data back. They are not
+        // interchangeable, so their names must not be either. Caught by looking at the screen.
+        var catalogue = LegacyScheduleProjector.Project(
+        [
+            Schedule(id: "a", stableId: "src-a", source: @"C:\Users\anna\Documents"),
+            Schedule(id: "b", stableId: "src-b", source: @"C:\Users\anna\Projects")
+        ]);
+
+        var phrases = catalogue.Identities.Where(identity => identity.Kind == IdentityKind.PaperRecovery).ToList();
+
+        Assert.Equal(2, phrases.Count);
+        Assert.Equal(2, phrases.Select(identity => identity.Name).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(phrases, identity => Assert.Contains("anna", identity.Name, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheOneDeviceIdentityHoldsAKeyPerRepositoryAndEachSaysWhatItUnlocks()
+    {
+        // One machine, one device identity, but a key per repository - and two identical lines under
+        // "This PC" tell a reader nothing about which is which.
+        var catalogue = LegacyScheduleProjector.Project(
+        [
+            Schedule(id: "a", stableId: "src-a", source: @"C:\Users\anna\Documents"),
+            Schedule(id: "b", stableId: "src-b", source: @"C:\Users\anna\Projects")
+        ]);
+
+        var device = Assert.Single(catalogue.Identities, identity => identity.Kind == IdentityKind.Device);
+        var keys = catalogue.IdentityKeys.Where(key => key.IdentityId == device.Id).ToList();
+
+        Assert.Equal(2, keys.Count);
+        Assert.Equal(2, keys.Select(key => key.Description).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
     public void ADailyScheduleKeepsItsTimeAndItsZone()
     {
         var catalogue = LegacyScheduleProjector.Project(

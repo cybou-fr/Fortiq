@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Fortiq.Application;
 using Fortiq.CommunityModel;
 using Fortiq.Domain;
@@ -92,7 +92,12 @@ public static class LegacyScheduleProjector
             var phraseIdentityId = "identity-phrase-" + scope;
             var deviceIdentityId = "identity-this-pc";
 
-            identities.Add(new Identity(phraseIdentityId, "Recovery phrase", IdentityKind.PaperRecovery));
+            // Named after what it opens. Every repository has its own phrase and they are not
+            // interchangeable, so a screen listing three identities all called "Recovery phrase"
+            // would be listing three things nobody could tell apart - which is worse than useless
+            // on the screen somebody reads to find out who can get their data back.
+            var protects = FolderName(schedule.SourcePath);
+            identities.Add(new Identity(phraseIdentityId, $"Recovery phrase for {protects}", IdentityKind.PaperRecovery));
             if (!identities.Any(identity => identity.Id == deviceIdentityId))
             {
                 identities.Add(new Identity(deviceIdentityId, "This PC", IdentityKind.Device));
@@ -114,7 +119,7 @@ public static class LegacyScheduleProjector
                     deviceKeyId,
                     deviceIdentityId,
                     IdentityKeyKind.DeviceBound,
-                    "Sealed to this machine, so unattended backups can write without anybody present",
+                    $"Sealed to this machine, and unlocks {protects} for unattended backups",
                     // A device key is proved by existing: the machine either can unlock or cannot.
                     Confirmed: true));
                 writers.Add(deviceKeyId);

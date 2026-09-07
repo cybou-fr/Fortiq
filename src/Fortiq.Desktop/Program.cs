@@ -289,6 +289,10 @@ public sealed class FortiqApplication : Avalonia.Application
             storeCredentials: storeCredentials);
 
         var schedules = new FileSystemScheduleStore(paths.Schedules);
+
+        // Read once, by everything that needs to know what is on this machine: the resource screens
+        // and the assistant both speak from this.
+        var catalogSource = new ResourceCatalogSource(schedules, new HealthFileSource(paths.HealthReport));
         var health = new HealthPublisher(
             schedules,
             paths.Receipts,
@@ -398,9 +402,10 @@ public sealed class FortiqApplication : Avalonia.Application
                 // What it is told about this PC comes from the schedules and the health report the
                 // rest of Fortiq reads, projected through the resource model. One account of the
                 // machine, not a second one assembled for the assistant.
-                var context = new AssistantContextAdapter(schedules, new HealthFileSource(paths.HealthReport));
+                var context = new AssistantContextAdapter(catalogSource);
                 return new AssistantViewModel(adapter.StartAsync, adapter.DescribeUnavailableAsync, context.PrepareAsync);
-            });
+            },
+            machine: catalogSource.ReadAsync);
     }
 
     /// <summary>

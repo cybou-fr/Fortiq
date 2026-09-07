@@ -48,6 +48,10 @@ Two constraints the implementation added, both learned from what the projection 
 
 ## P2 — GUI projection
 
+> **Partly implemented.** Tasks, Storage and Identities read the projected catalogue and are in the
+> rail. Home, Protected folders, Restore and Activity are unchanged and still read the schedule and
+> health files directly.
+
 Move toward:
 
 ```text
@@ -60,6 +64,14 @@ Settings
 ```
 
 Advanced/Diagnostics continues to expose repository/engine details.
+
+The resource screens are read-only, and say so on the screen. Editing writes configuration,
+configuration is still stored in the schedule shape, and a screen that let somebody change a task
+here would be editing a projection and hoping it round-tripped. They become editable at P3.
+
+Identities is the screen Fortiq did not have and most needed: a repository has always had two
+principals - a phrase somebody wrote down and a key sealed to the machine - and neither was named
+anywhere, so "who can recover this?" had no answer on any screen.
 
 ## P3 — Native task writer
 

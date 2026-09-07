@@ -6,6 +6,7 @@ using Avalonia.Styling;
 using Fortiq.Application;
 using Fortiq.Desktop.Controls;
 using Fortiq.Assistant;
+using Fortiq.CommunityModel;
 using Fortiq.Desktop.ViewModels;
 using Fortiq.Infrastructure.Receipts;
 using Fortiq.Monitoring;
@@ -26,6 +27,19 @@ public sealed class MainWindow : Window
     private readonly RepositoriesViewModel _model;
     private readonly SettingsViewModel _settings;
     private readonly Func<ProtectRepositoryViewModel>? _wizard;
+    private readonly Func<CancellationToken, Task<MachineState>>? _machine;
+
+    /// <summary>
+    /// What this PC has, as the resource model sees it.
+    /// </summary>
+    /// <remarks>
+    /// Read once per visit to a resource screen and kept until the next one, rather than on every
+    /// redraw: a redraw happens on every keystroke in a filter box, and re-reading every schedule
+    /// file for one of those would make the interface slower the more somebody had protected.
+    /// </remarks>
+    private MachineState _state = MachineState.Empty;
+    private bool _stateLoading;
+
     private readonly Func<AssistantViewModel>? _assistantFactory;
 
     /// <summary>
@@ -72,9 +86,11 @@ public sealed class MainWindow : Window
         SettingsViewModel? settings = null, bool installed = false, Func<FileRecoveryViewModel>? fileRecovery = null,
         Func<string, string, SourceSettingsViewModel>? sourceSettings = null,
         Func<Task<IReadOnlyList<ReceiptEvent>>>? history = null,
-        Func<AssistantViewModel>? assistant = null)
+        Func<AssistantViewModel>? assistant = null,
+        Func<CancellationToken, Task<MachineState>>? machine = null)
     {
         _assistantFactory = assistant;
+        _machine = machine;
         _sourceSettings = sourceSettings;
         _history = history;
         _installed = installed;
@@ -252,6 +268,13 @@ public sealed class MainWindow : Window
         // stores, and "Protected folders" says what they gave it.
         menu.Children.Add(Nav("Home", RenderHome, "\uE80F"));
         menu.Children.Add(Nav("Protected folders", RenderFolders, "\uE8B7"));
+        // These three re-read the machine when they are opened rather than trusting what was read
+        // last time. A schedule can change from the wizard, from Settings, or from another process
+        // between two visits, and a resource screen showing yesterday's answer is worse than one
+        // that takes a moment.
+        menu.Children.Add(Nav("Tasks", () => { RenderTasks(); _ = LoadMachineStateAsync(); }, "\uE823"));
+        menu.Children.Add(Nav("Storage", () => { RenderStorage(); _ = LoadMachineStateAsync(); }, "\uEDA2"));
+        menu.Children.Add(Nav("Identities", () => { RenderIdentities(); _ = LoadMachineStateAsync(); }, "\uE8D7"));
         menu.Children.Add(Nav("Restore", RenderRestore, "\uE777"));
         menu.Children.Add(Nav("Activity", RenderActivity, "\uE81C"));
         menu.Children.Add(Nav("Assistant", RenderAssistant, "\uE8BD"));
@@ -482,6 +505,9 @@ public sealed class MainWindow : Window
         if (_activeSection == "Protected folders") RenderFolders();
         else if (_activeSection == "Restore") RenderRestore();
         else if (_activeSection == "Activity") RenderActivity();
+        else if (_activeSection == "Tasks") RenderTasks();
+        else if (_activeSection == "Storage") RenderStorage();
+        else if (_activeSection == "Identities") RenderIdentities();
         else if (_activeSection == "Assistant") RenderAssistant();
         else if (_activeSection == "Settings") RenderSettings();
         else RenderHome();
@@ -1510,6 +1536,432 @@ public sealed class MainWindow : Window
 
         _page.Child = new ScrollViewer { Content = body };
     }
+
+    /// <summary>
+    /// What Fortiq backs up, when, and into which copies.
+    /// </summary>
+    /// <remarks>
+    /// The first screen in Fortiq that speaks the resource model rather than the schedule file. A
+    /// task here is one intention - this folder, this often, into these copies - where the underlying
+    /// record still conflates all three with the repository and the recovery kit. Two schedules
+    /// protecting one folder appear as one source, which is a thing the old screens could not say.
+    ///
+    /// Read-only, and honestly so. Editing writes configuration, and configuration is still stored
+    /// in the schedule shape; a screen that let somebody change a task here would be editing a
+    /// projection and hoping it round-tripped. What edits today is Protected folders, and this says
+    /// where to go.
+    /// </remarks>
+    private void RenderTasks()
+    {
+        Select("Tasks");
+        var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
+        body.Children.Add(Header("Tasks", "What Fortiq backs up, when, and where each copy goes."));
+
+        if (!EnsureMachineState(body))
+        {
+            return;
+        }
+
+        AddBanners(body);
+
+        if (_state.Catalog.Tasks.Count == 0)
+        {
+            body.Children.Add(EmptyResourceCard(
+                "No tasks yet.",
+                "Protect a folder and it appears here, with its schedule and its copies."));
+            _page.Child = new ScrollViewer { Content = body };
+            return;
+        }
+
+        foreach (var task in _state.Catalog.Tasks)
+        {
+            body.Children.Add(TaskCard(task));
+        }
+
+        body.Children.Add(Text(
+            "Tasks are shown as Fortiq now models them. Changing one is still done from Protected folders.",
+            11, FontWeight.Normal, Muted, wrap: true));
+
+        _page.Child = new ScrollViewer { Content = body };
+    }
+
+    private Border TaskCard(BackupTask task)
+    {
+        var card = new StackPanel { Spacing = 10 };
+
+        var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        heading.Children.Add(new StackPanel
+        {
+            Spacing = 2,
+            Children =
+            {
+                Text(task.Name, 15, FontWeight.SemiBold, Ink),
+                Text(DescribeTrigger(task.Trigger), 12, FontWeight.Normal, Muted, wrap: true)
+            }
+        });
+
+        // The verdict, not a tick. Whether a task runs and whether its copies can be restored are
+        // different questions, and only the second one matters on the day somebody needs it.
+        if (_state.HealthOf(task) is { } health)
+        {
+            var colours = VerdictColours(health.Verdict);
+            heading.Children.Add(At(new Border
+            {
+                Background = colours.Background,
+                BorderBrush = colours.Foreground,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 3),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = Text(VerdictWord(health.Verdict), 11, FontWeight.SemiBold, colours.Foreground)
+            }, 1));
+        }
+        else if (!task.Enabled)
+        {
+            heading.Children.Add(At(Text("Paused", 11, FontWeight.SemiBold, Muted), 1));
+        }
+
+        card.Children.Add(heading);
+
+        foreach (var source in _state.Catalog.SourcesOf(task))
+        {
+            card.Children.Add(DetailRow("Backs up", source.Path));
+        }
+
+        foreach (var route in _state.Catalog.RoutesOf(task))
+        {
+            card.Children.Add(DetailRow("Copy", DescribeRoute(route)));
+        }
+
+        return Card(card);
+    }
+
+    /// <summary>
+    /// Where copies are kept, and what is actually known about each place.
+    /// </summary>
+    /// <remarks>
+    /// A storage is not a repository, and this screen exists partly to stop the two being one word.
+    /// Several tasks may write to one place; the place is a thing in its own right with its own
+    /// properties, and whether those properties hold is the question a ransomware claim rests on.
+    /// </remarks>
+    private void RenderStorage()
+    {
+        Select("Storage");
+        var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
+        body.Children.Add(Header("Storage", "Where copies are kept, and what Fortiq knows about each place."));
+
+        if (!EnsureMachineState(body))
+        {
+            return;
+        }
+
+        if (_state.Catalog.Storages.Count == 0)
+        {
+            body.Children.Add(EmptyResourceCard(
+                "No storage yet.",
+                "The folder, disk or object store a backup is written to appears here once something uses it."));
+            _page.Child = new ScrollViewer { Content = body };
+            return;
+        }
+
+        foreach (var storage in _state.Catalog.Storages)
+        {
+            var card = new StackPanel { Spacing = 10 };
+            card.Children.Add(Text(storage.Name, 15, FontWeight.SemiBold, Ink));
+            card.Children.Add(DetailRow("Kind", DescribeBackend(storage.Backend)));
+            card.Children.Add(DetailRow("Location", storage.Location));
+
+            if (storage.Backend != StorageBackend.FileSystem)
+            {
+                card.Children.Add(DetailRow(
+                    "Sign-in",
+                    storage.CredentialRef is null ? "No credential configured" : "Credential configured"));
+            }
+
+            var used = _state.Catalog.Routes.Count(route => route.StorageId == storage.Id);
+            card.Children.Add(DetailRow("Used by", used == 1 ? "1 copy" : $"{used} copies"));
+
+            // Only what has been established. Object lock and versioning are not readable from an
+            // address, and nothing probes them yet, so this says so rather than implying either.
+            card.Children.Add(DetailRow("Known properties", DescribeCapabilities(storage.Capabilities)));
+            body.Children.Add(Card(card));
+        }
+
+        foreach (var engine in _state.Catalog.Engines)
+        {
+            // The engine is named on the same screen as the places it writes to, because the pair is
+            // what a recovery kit has to record: an archive in a folder is openable only by somebody
+            // who knows what wrote it. "Whatever Fortiq shipped that year" is not an answer in five
+            // years' time, with a disk and no Fortiq.
+            body.Children.Add(Card(new StackPanel
+            {
+                Spacing = 10,
+                Children =
+                {
+                    Text("Engine", 15, FontWeight.SemiBold, Ink),
+                    DetailRow("Writes the archives", $"{engine.Name} {engine.Version}"),
+                    DetailRow("Verified", "Pinned by hash, and checked immediately before it runs")
+                }
+            }));
+        }
+
+        body.Children.Add(Text(
+            "Fortiq claims a property only where it has established it. Immutability and versioning "
+            + "are not read from an address, and nothing probes them yet.",
+            11, FontWeight.Normal, Muted, wrap: true));
+
+        _page.Child = new ScrollViewer { Content = body };
+    }
+
+    /// <summary>
+    /// Who and what can open the backups.
+    /// </summary>
+    /// <remarks>
+    /// The screen Fortiq did not have and most needed. A repository has always had two principals -
+    /// a phrase somebody wrote down and a key sealed to this machine - and neither was ever named
+    /// anywhere, so "who can recover this?" had no answer on any screen. It does now, and so does
+    /// the more uncomfortable question of whether anybody has proved they hold the phrase.
+    /// </remarks>
+    private void RenderIdentities()
+    {
+        Select("Identities");
+        var body = new StackPanel { Spacing = 18, Margin = new Thickness(32, 26) };
+        body.Children.Add(Header("Identities", "Who and what can open your backups."));
+
+        if (!EnsureMachineState(body))
+        {
+            return;
+        }
+
+        if (_state.Catalog.Identities.Count == 0)
+        {
+            body.Children.Add(EmptyResourceCard(
+                "Nothing to open yet.",
+                "Protect a folder and the recovery phrase and this PC's key appear here."));
+            _page.Child = new ScrollViewer { Content = body };
+            return;
+        }
+
+        var unconfirmed = _state.Catalog.IdentityKeys.Count(
+            key => key.Kind == IdentityKeyKind.RecoveryPhrase && !key.Confirmed);
+        if (unconfirmed > 0)
+        {
+            body.Children.Add(Card(new StackPanel
+            {
+                Spacing = 4,
+                Children =
+                {
+                    Text(
+                        unconfirmed == 1
+                            ? "One recovery phrase has never been confirmed."
+                            : $"{unconfirmed} recovery phrases have never been confirmed.",
+                        13, FontWeight.SemiBold, Ink),
+                    Text(
+                        "Fortiq showed the words and never saw them entered back. Until that happens, "
+                        + "nobody has demonstrated they can open those backups on another machine.",
+                        12, FontWeight.Normal, Muted, wrap: true)
+                }
+            }, AtRiskSurface, Failure));
+        }
+
+        foreach (var identity in _state.Catalog.Identities)
+        {
+            var card = new StackPanel { Spacing = 10 };
+            card.Children.Add(Text(identity.Name, 15, FontWeight.SemiBold, Ink));
+            card.Children.Add(DetailRow("Kind", DescribeIdentity(identity.Kind)));
+
+            foreach (var key in _state.Catalog.IdentityKeys.Where(key => key.IdentityId == identity.Id))
+            {
+                card.Children.Add(DetailRow(
+                    key.Kind == IdentityKeyKind.RecoveryPhrase ? "Recovery phrase" : "Key",
+                    key.Confirmed ? key.Description : key.Description + " - never confirmed"));
+
+                // What this identity may do, which is the distinction the whole model turns on: a
+                // key that writes is not a key that recovers, and a machine that is stolen must not
+                // take the only way back with it.
+                card.Children.Add(DetailRow("Can", DescribeAuthority(key.Id)));
+            }
+
+            body.Children.Add(Card(card));
+        }
+
+        body.Children.Add(Text(
+            "Fortiq never shows you a recovery phrase here. It is written once, into the recovery kit.",
+            11, FontWeight.Normal, Muted, wrap: true));
+
+        _page.Child = new ScrollViewer { Content = body };
+    }
+
+    /// <summary>
+    /// Loads this machine's resources if they are not loaded, and says so while it happens.
+    /// </summary>
+    /// <returns>True when the screen may draw its content.</returns>
+    private bool EnsureMachineState(StackPanel body)
+    {
+        if (_machine is null)
+        {
+            body.Children.Add(EmptyResourceCard(
+                "This screen is not available.",
+                "This copy of Fortiq was built without the resource model."));
+            _page.Child = new ScrollViewer { Content = body };
+            return false;
+        }
+
+        if (_stateLoading)
+        {
+            body.Children.Add(Card(Text("Reading what this PC has\u2026", 13, FontWeight.Normal, Muted)));
+            _page.Child = new ScrollViewer { Content = body };
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Re-reads this machine, then redraws whichever resource screen is open.</summary>
+    private async Task LoadMachineStateAsync()
+    {
+        if (_machine is null || _stateLoading)
+        {
+            return;
+        }
+
+        _stateLoading = true;
+        RenderActive();
+        try
+        {
+            _state = await _machine(CancellationToken.None);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            // A machine whose schedules cannot be read shows fewer resources, not an error page.
+            _state = MachineState.Empty;
+        }
+        finally
+        {
+            _stateLoading = false;
+            RenderActive();
+        }
+    }
+
+    private static Border EmptyResourceCard(string title, string detail) => Card(new StackPanel
+    {
+        Spacing = 4,
+        Children =
+        {
+            Text(title, 13, FontWeight.SemiBold, Ink),
+            Text(detail, 12, FontWeight.Normal, Muted, wrap: true)
+        }
+    });
+
+    private string DescribeRoute(BackupRoute route)
+    {
+        var storage = _state.Catalog.Storage(route.StorageId);
+        var profile = _state.Catalog.EncryptionProfile(route.EncryptionProfileId);
+        var parts = new List<string> { storage?.Name ?? route.StorageId };
+
+        if (profile is not null)
+        {
+            parts.Add(_state.Catalog.HasConfirmedRecipient(profile)
+                ? "recovery key confirmed"
+                : "recovery key never confirmed");
+        }
+
+        if (route.Retention is { } retention && retention.KeepsSomething)
+        {
+            parts.Add("keeps " + DescribeRetention(retention));
+        }
+
+        parts.Add(route.DrillTrigger is null ? "no recovery drill" : "drill " + DescribeTrigger(route.DrillTrigger));
+        return string.Join(", ", parts);
+    }
+
+    private string DescribeAuthority(string keyId)
+    {
+        var recovers = _state.Catalog.EncryptionProfiles.Any(profile => profile.Recipients.Contains(keyId));
+        var writes = _state.Catalog.EncryptionProfiles.Any(profile => profile.Writers.Contains(keyId));
+
+        return (recovers, writes) switch
+        {
+            (true, true) => "Recover backups, and write them unattended",
+            (true, false) => "Recover backups",
+            (false, true) => "Write backups unattended - it cannot recover them",
+            _ => "Nothing yet"
+        };
+    }
+
+    private static string DescribeCapabilities(StorageCapabilities capabilities)
+    {
+        if (capabilities == StorageCapabilities.None)
+        {
+            return "Nothing established";
+        }
+
+        var named = new List<string>();
+        if (capabilities.HasFlag(StorageCapabilities.Remote)) named.Add("off this PC");
+        if (capabilities.HasFlag(StorageCapabilities.Removable)) named.Add("can be disconnected");
+        if (capabilities.HasFlag(StorageCapabilities.EncryptedTransport)) named.Add("encrypted in transit");
+        if (capabilities.HasFlag(StorageCapabilities.IndependentOfEndpoint)) named.Add("reachable without this PC");
+        if (capabilities.HasFlag(StorageCapabilities.Versioned)) named.Add("keeps previous versions");
+        if (capabilities.HasFlag(StorageCapabilities.Immutable)) named.Add("refuses overwrites");
+        if (capabilities.HasFlag(StorageCapabilities.ObjectLock)) named.Add("object lock configured");
+        return named.Count == 0 ? "Nothing established" : string.Join(", ", named);
+    }
+
+    private static string DescribeBackend(StorageBackend backend) => backend switch
+    {
+        StorageBackend.FileSystem => "A folder, disk or share",
+        StorageBackend.S3 => "Object storage",
+        _ => "SFTP"
+    };
+
+    private static string DescribeIdentity(IdentityKind kind) => kind switch
+    {
+        IdentityKind.PaperRecovery => "Words you wrote down",
+        IdentityKind.Device => "This machine",
+        IdentityKind.Person => "A person",
+        _ => "Something else"
+    };
+
+    private static string DescribeRetention(RetentionRule retention)
+    {
+        var parts = new List<string>();
+        if (retention.KeepLast is > 0) parts.Add($"the last {retention.KeepLast}");
+        if (retention.KeepDaily is > 0) parts.Add($"{retention.KeepDaily} daily");
+        if (retention.KeepWeekly is > 0) parts.Add($"{retention.KeepWeekly} weekly");
+        if (retention.KeepMonthly is > 0) parts.Add($"{retention.KeepMonthly} monthly");
+        if (retention.KeepYearly is > 0) parts.Add($"{retention.KeepYearly} yearly");
+        return parts.Count == 0 ? "everything" : string.Join(" and ", parts);
+    }
+
+    private static string DescribeTrigger(Trigger trigger) => trigger switch
+    {
+        ManualTrigger => "Only when you ask",
+        OnceTrigger once => $"Once, on {once.At.ToLocalTime():d MMMM} at {once.At.ToLocalTime():HH:mm}",
+        IntervalTrigger interval when interval.Period.TotalHours >= 24 && interval.Period.TotalHours % 24 == 0 =>
+            interval.Period.TotalDays == 1 ? "Every day" : $"Every {interval.Period.TotalDays:N0} days",
+        IntervalTrigger interval => interval.Period.TotalHours == 1
+            ? "Every hour"
+            : $"Every {interval.Period.TotalHours:N0} hours",
+        DailyTrigger daily when daily.Days is { Count: > 0 } days =>
+            $"{string.Join(" and ", days)} at {daily.TimeOfDay:HH\\:mm}",
+        DailyTrigger daily => $"Every day at {daily.TimeOfDay:HH\\:mm}",
+        FileChangeTrigger => "When files change",
+        _ => "On a schedule Fortiq does not recognise"
+    };
+
+    private static string VerdictWord(HealthVerdict verdict) => verdict switch
+    {
+        HealthVerdict.Recoverable => "Recoverable",
+        HealthVerdict.Unproven => "Unproven",
+        _ => "At risk"
+    };
+
+    private static (IBrush Background, IBrush Foreground) VerdictColours(HealthVerdict verdict) => verdict switch
+    {
+        HealthVerdict.Recoverable => (RecoverableSurface, Recoverable),
+        HealthVerdict.Unproven => (UnprovenSurface, Unproven),
+        _ => (AtRiskSurface, Failure)
+    };
 
     /// <summary>Looks for the assistant, then redraws whichever answer that produced.</summary>
     private async Task CheckAssistantAsync(AssistantViewModel model)
