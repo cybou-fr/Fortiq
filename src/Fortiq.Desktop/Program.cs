@@ -395,7 +395,11 @@ public sealed class FortiqApplication : Avalonia.Application
             assistant: () =>
             {
                 var adapter = new AssistantAdapter(ResolveModelRoot(), ResolveRuntimeRoot());
-                return new AssistantViewModel(adapter.StartAsync, adapter.DescribeUnavailableAsync);
+                // What it is told about this PC comes from the schedules and the health report the
+                // rest of Fortiq reads, projected through the resource model. One account of the
+                // machine, not a second one assembled for the assistant.
+                var context = new AssistantContextAdapter(schedules, new HealthFileSource(paths.HealthReport));
+                return new AssistantViewModel(adapter.StartAsync, adapter.DescribeUnavailableAsync, context.PrepareAsync);
             });
     }
 

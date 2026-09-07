@@ -207,16 +207,87 @@ public sealed class AssistantViewModelTests
         Assert.NotNull(model.Unavailable);
     }
 
+    [Fact]
+    public async Task WhatFortiqKnowsAboutThePcGoesInFrontOfTheQuestion()
+    {
+        var runtime = new Fake();
+        var model = new AssistantViewModel(
+            _ => Task.FromResult<IAssistantRuntime>(runtime),
+            prepareContext: _ => Task.FromResult("FORTIQ CONTEXT v1\ntask Documents: daily at 02:00"));
+        model.Question = "Is anything at risk?";
+
+        await model.AskAsync(CancellationToken.None);
+
+        var context = Assert.Single(runtime.LastAsk!.Evidence);
+        Assert.Contains("task Documents", context.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheContextComesBeforeTheEvidenceASuggestionCarries()
+    {
+        var runtime = new Fake();
+        var model = new AssistantViewModel(
+            _ => Task.FromResult<IAssistantRuntime>(runtime),
+            prepareContext: _ => Task.FromResult("FORTIQ CONTEXT v1"));
+
+        await model.AskAsync(
+            new AssistantSuggestion("Why?", [new AssistantEvidence("engine error", "locked")]),
+            CancellationToken.None);
+
+        Assert.Equal(2, runtime.LastAsk!.Evidence.Count);
+        Assert.Contains("FORTIQ CONTEXT", runtime.LastAsk.Evidence[0].Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheContextIsRebuiltForEveryQuestion()
+    {
+        // A backup finishes, a drill fails, a disk is unplugged. An assistant answering from the
+        // machine as it was when the screen opened would confidently describe one that is gone.
+        var built = 0;
+        var model = new AssistantViewModel(
+            _ => Task.FromResult<IAssistantRuntime>(new Fake()),
+            prepareContext: _ => { built++; return Task.FromResult("context"); });
+
+        model.Question = "First?";
+        await model.AskAsync(CancellationToken.None);
+        model.Question = "Second?";
+        await model.AskAsync(CancellationToken.None);
+
+        Assert.Equal(2, built);
+    }
+
+    [Fact]
+    public async Task AContextThatCannotBeBuiltIsLeftOutRatherThanFailingTheQuestion()
+    {
+        // "What is a recovery phrase?" does not need this machine's configuration.
+        var runtime = new Fake();
+        var model = new AssistantViewModel(
+            _ => Task.FromResult<IAssistantRuntime>(runtime),
+            prepareContext: _ => throw new IOException("The schedule folder is unreadable."));
+        model.Question = "What is a recovery phrase?";
+
+        await model.AskAsync(CancellationToken.None);
+
+        Assert.Null(model.Failure);
+        Assert.NotNull(model.Answer);
+        Assert.Empty(runtime.LastAsk!.Evidence);
+    }
+
     private sealed class Fake(string answer = "An answer.", bool truncated = false, bool throws = false) : IAssistantRuntime
     {
         public bool IsReady => true;
 
         public bool Disposed { get; private set; }
 
-        public Task<AssistantReply> AskAsync(AssistantAsk ask, CancellationToken cancellationToken) =>
-            throws
+        public AssistantAsk? LastAsk { get; private set; }
+
+        public Task<AssistantReply> AskAsync(AssistantAsk ask, CancellationToken cancellationToken)
+        {
+            LastAsk = ask;
+            return throws
                 ? Task.FromException<AssistantReply>(new InvalidDataException("The runtime stopped."))
                 : Task.FromResult(new AssistantReply(answer, truncated));
+        }
 
         public ValueTask DisposeAsync()
         {

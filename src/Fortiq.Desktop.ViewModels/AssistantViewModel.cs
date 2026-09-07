@@ -35,15 +35,18 @@ public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposabl
 {
     private readonly Func<CancellationToken, Task<IAssistantRuntime>> _start;
     private readonly Func<CancellationToken, Task<string?>>? _describeUnavailable;
+    private readonly Func<CancellationToken, Task<string>>? _prepareContext;
     private IAssistantRuntime? _runtime;
     private CancellationTokenSource? _operation;
 
     public AssistantViewModel(
         Func<CancellationToken, Task<IAssistantRuntime>> start,
-        Func<CancellationToken, Task<string?>>? describeUnavailable = null)
+        Func<CancellationToken, Task<string?>>? describeUnavailable = null,
+        Func<CancellationToken, Task<string>>? prepareContext = null)
     {
         _start = start ?? throw new ArgumentNullException(nameof(start));
         _describeUnavailable = describeUnavailable;
+        _prepareContext = prepareContext;
     }
 
     /// <summary>True once availability has been established, either way.</summary>
@@ -152,7 +155,7 @@ public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposabl
             Status = "Thinking.";
             RaiseAll();
 
-            var reply = await _runtime.AskAsync(ask, operation.Token);
+            var reply = await _runtime.AskAsync(await WithContextAsync(ask, operation.Token), operation.Token);
             Answer = reply.Text;
             AnswerTruncated = reply.Truncated;
             AnsweredQuestion = ask.Question;
@@ -174,6 +177,42 @@ public sealed class AssistantViewModel : INotifyPropertyChanged, IAsyncDisposabl
             Busy = false;
             Status = null;
             RaiseAll();
+        }
+    }
+
+    /// <summary>
+    /// Puts what Fortiq knows about this machine in front of the question.
+    /// </summary>
+    /// <remarks>
+    /// As evidence, deliberately, and not as a second system instruction. Most of the context is
+    /// names that came off somebody's disk - folders, storages, tasks - and a folder called "ignore
+    /// previous instructions" is one anybody can create. Fenced with everything else, it cannot
+    /// address the model however it is worded.
+    ///
+    /// Rebuilt for every question rather than once per session. A backup finishes, a drill fails, a
+    /// disk is unplugged; an assistant answering from the state of the machine as it was when the
+    /// screen opened would be confidently describing a machine that no longer exists.
+    ///
+    /// A context that cannot be built is left out rather than reported. The question is still a
+    /// question, and "what is a recovery phrase?" does not need this machine's configuration.
+    /// </remarks>
+    private async Task<AssistantAsk> WithContextAsync(AssistantAsk ask, CancellationToken cancellationToken)
+    {
+        if (_prepareContext is null)
+        {
+            return ask;
+        }
+
+        try
+        {
+            var context = await _prepareContext(cancellationToken);
+            return string.IsNullOrWhiteSpace(context)
+                ? ask
+                : ask with { Evidence = [new AssistantEvidence("what Fortiq knows about this PC", context), .. ask.Evidence] };
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            return ask;
         }
     }
 
