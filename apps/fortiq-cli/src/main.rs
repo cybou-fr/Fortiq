@@ -271,9 +271,15 @@ async fn cmd_shell(
 
         let mut stdout = tokio::io::stdout();
         while let Ok(Some(frame)) = ShellFrame::read_from(&mut stream_read).await {
-            if let ShellFrame::Data(bytes) = frame {
-                stdout.write_all(&bytes).await?;
-                stdout.flush().await?;
+            match frame {
+                ShellFrame::Data(bytes) => {
+                    stdout.write_all(&bytes).await?;
+                    stdout.flush().await?;
+                }
+                ShellFrame::Ping => {
+                    ShellFrame::Pong.write_to(&mut write_half).await?;
+                }
+                ShellFrame::Pong | ShellFrame::Resize { .. } => {}
             }
         }
         return Ok(());

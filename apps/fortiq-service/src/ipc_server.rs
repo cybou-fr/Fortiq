@@ -477,25 +477,33 @@ where
     };
     let _ = initial_resize.write_to(&mut p2p_write).await;
 
-    let forward_in = tokio::spawn(async move {
+    let mut forward_in = tokio::spawn(async move {
         while let Ok(Some(frame)) = fortiq_shell::ShellFrame::read_from(&mut ipc_read).await {
             if frame.write_to(&mut p2p_write).await.is_err() {
                 break;
             }
         }
+        let _ = p2p_write.shutdown().await;
     });
 
-    let forward_out = tokio::spawn(async move {
+    let mut forward_out = tokio::spawn(async move {
         while let Ok(Some(frame)) = fortiq_shell::ShellFrame::read_from(&mut p2p_read).await {
             if frame.write_to(&mut ipc_write).await.is_err() {
                 break;
             }
         }
+        let _ = ipc_write.shutdown().await;
     });
 
     tokio::select! {
-        _ = forward_in => {}
-        _ = forward_out => {}
+        _ = &mut forward_in => {
+            forward_out.abort();
+            let _ = forward_out.await;
+        }
+        _ = &mut forward_out => {
+            forward_in.abort();
+            let _ = forward_in.await;
+        }
     }
 
     Ok(())

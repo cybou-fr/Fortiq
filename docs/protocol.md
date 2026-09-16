@@ -23,15 +23,23 @@ The receiver verifies that the claimed PeerId equals the authenticated connectio
 
 Protocol ID: `/fortiq/shell/1.0`
 
-The receiving peer obtains the remote PeerId from the authenticated libp2p connection and compares it with `authorization.operator_peer_id`. It sends a one-byte allow/deny result before any shell data. A denial closes the stream without launching a process. Only one concurrent shell session is permitted per managed peer; any secondary shell connection attempts while an active session exists are denied.
+The receiving peer obtains the remote PeerId from the authenticated libp2p connection and compares it with `authorization.operator_peer_id`. It sends a one-byte authorization status code before any shell data:
+- `0x01` (`AUTHORIZED`): Operator is authorized, ticket is open, and no other session is running.
+- `0x00` (`DENIED`): Peer is not an authorized operator.
+- `0x02` (`DENIED_NO_TICKET`): Peer is authorized, but no ticket is open (client user has not opened a session).
+- `0x03` (`DENIED_BUSY`): Peer is authorized and ticket is open, but another shell session is already active.
+
+A denial code closes the stream immediately without launching a process. Only one concurrent shell session is permitted per managed peer; any secondary shell connection attempts while an active session exists return `DENIED_BUSY`.
 
 On an authorized peer with an open ticket and no active shell session, FORTIQ selects the platform shell. Linux uses `/bin/bash` then `/bin/sh`; Windows uses `pwsh.exe`, `powershell.exe`, then `cmd.exe`.
-In Milestone 12, native pseudoterminal allocation is performed via `portable-pty` (ConPTY on Windows, openpty on Unix). The `/fortiq/shell/1.0` stream is framed using binary `ShellFrame` packets:
-- `0x01` (`Data`): standard terminal byte streams with a 24-bit length prefix (up to 16 MiB payload).
-- `0x02` (`Resize`): dynamic window geometry updates (`cols: u16`, `rows: u16`) propagated to the ConPTY master buffer.
-- `0x03` (`Ping`) and `0x04` (`Pong`): keepalive telemetry.
+Native pseudoterminal allocation is performed via `portable-pty` (ConPTY on Windows, openpty on Unix). The `/fortiq/shell/1.0` stream is framed using binary `ShellFrame` packets with a 3-byte header (`tag: u8`, `len: u16` big-endian):
+- `0x00` (`Data`): standard terminal byte streams with a 16-bit big-endian length prefix (up to 64 KiB payload).
+- `0x01` (`Resize`): dynamic window geometry updates (`len = 4`, `cols: u16`, `rows: u16` big-endian) propagated to the ConPTY/PTY master buffer.
+- `0x02` (`Ping`): keepalive telemetry sent periodically (every 15s) by the host to verify operator liveness.
+- `0x03` (`Pong`): keepalive response sent back to the host.
 
-Closing the connection drops the PTY master, terminates the child process tree when necessary, and cleans up the session.
+A 60-second liveness timeout (`LIVENESS_TIMEOUT`) applies to active sessions: if no frame is received from the operator within 60 seconds, the served session automatically closes to avoid stranded processes.
+Closing the connection drops the PTY master, terminates the child process tree immediately, and cleans up the session guard.
 
 ## Ticket administration
 

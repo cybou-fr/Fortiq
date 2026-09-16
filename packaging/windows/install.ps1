@@ -54,10 +54,28 @@ function Remove-DirectoryWithRetry([string]$Path) {
             Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
             return
         } catch {
-            if ($attempt -eq 10) {
-                throw "Impossible de supprimer $Path apres 10 tentatives : $($_.Exception.Message)"
+            if ($attempt -lt 10) {
+                Start-Sleep -Milliseconds 500
+                continue
             }
-            Start-Sleep -Milliseconds 500
+            # Windows refuses to delete a file that is still mapped, but it does
+            # allow renaming one. Move the stragglers aside so the new product
+            # can be laid down, and let the next installation sweep them up.
+            Write-Host "Fichiers verrouilles detectes, mise de cote..." -ForegroundColor Yellow
+            Get-ChildItem -LiteralPath $Path -File -Recurse -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    try {
+                        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop
+                    } catch {
+                        $aside = "$($_.FullName).old-$((Get-Date).Ticks)"
+                        try {
+                            Rename-Item -LiteralPath $_.FullName -NewName (Split-Path -Leaf $aside) -Force -ErrorAction Stop
+                        } catch {
+                            throw "Impossible de liberer $($_.FullName) : $($_.Exception.Message). Fermez FORTIQ et relancez l'installation."
+                        }
+                    }
+                }
+            return
         }
     }
 }
@@ -130,16 +148,32 @@ if (Get-Service -Name $LegacyServiceName -ErrorAction SilentlyContinue) {
     Stop-Service -Name $LegacyServiceName -Force -ErrorAction SilentlyContinue
     & sc.exe delete $LegacyServiceName | Out-Null
 }
+# Stop by name first: Process.Path is empty for a process this session cannot
+# open, so the path filter alone silently skipped the running desktop app and
+# the installation then failed on a locked fortiq-desktop.exe.
+$fortiqProcessNames = @("fortiq-desktop", "fortiq-service", "fortiq")
+foreach ($name in $fortiqProcessNames) {
+    Get-Process -Name $name -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+}
 Get-Process -ErrorAction SilentlyContinue |
     Where-Object {
         $_.Path -and $_.Path.StartsWith($InstallDir, [StringComparison]::OrdinalIgnoreCase)
     } |
     Stop-Process -Force -ErrorAction SilentlyContinue
+
+foreach ($name in $fortiqProcessNames) {
+    foreach ($process in Get-Process -Name $name -ErrorAction SilentlyContinue) {
+        try { $process.WaitForExit(5000) | Out-Null } catch { }
+    }
+}
 if (Test-Path -LiteralPath $InstallDir) {
     Remove-DirectoryWithRetry $InstallDir
 }
 
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+Get-ChildItem -LiteralPath $InstallDir -Filter "*.old-*" -File -ErrorAction SilentlyContinue |
+    Remove-Item -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
 foreach ($file in $requiredFiles + @("install.ps1")) {
     $source = Join-Path $scriptDir $file

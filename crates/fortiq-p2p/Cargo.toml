@@ -19,3 +19,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio-util = { workspace = true, features = ["compat"] }
+tracing-subscriber = { workspace = true }

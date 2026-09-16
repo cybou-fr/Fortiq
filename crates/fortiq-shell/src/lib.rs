@@ -439,26 +439,26 @@ where
     }
 
     // Give a brief window for remaining buffered output to drain
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
+    keepalive_task.abort();
+    let _ = killer.kill();
     drop(pty_in_tx);
-    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut write_task).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(300), &mut write_task).await;
 
     // Drop the master PTY handle so ConPTY closes the pseudo console and unblocks master_reader
     master.lock().unwrap().take();
 
-    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut read_task).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(300), &mut read_task).await;
     read_task.abort();
 
     if !send_completed {
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut send_task).await;
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(300), &mut send_task).await;
         send_task.abort();
     }
 
-    keepalive_task.abort();
-    let _ = killer.kill();
     if !child_completed {
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut child_task).await;
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(300), &mut child_task).await;
     }
 
     Ok(())

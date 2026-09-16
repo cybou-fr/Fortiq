@@ -23,7 +23,7 @@ pub const SHELL_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/shell/1.
 pub const TICKET_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/ticket/1.0");
 const MAX_HELLO_BYTES: usize = 16 * 1024;
 /// How often a node re-queries the rendezvous points it knows.
-const REDISCOVERY_INTERVAL: Duration = Duration::from_secs(60);
+const REDISCOVERY_INTERVAL: Duration = Duration::from_secs(10);
 
 struct ShellSessionGuard(Arc<AtomicBool>);
 
@@ -271,6 +271,45 @@ fn dial_peer_candidates(
     }
 }
 
+fn spawn_open_shell_stream(
+    peer: PeerId,
+    mut control: libp2p_stream::Control,
+    reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
+) {
+    tokio::spawn(async move {
+        use futures::AsyncReadExt;
+        let res = match tokio::time::timeout(
+            Duration::from_secs(12),
+            control.open_stream(peer, SHELL_PROTOCOL),
+        )
+        .await
+        {
+            Ok(Ok(mut stream)) => {
+                let mut auth = [0u8; 1];
+                match stream.read_exact(&mut auth).await {
+                    Ok(()) => {
+                        if auth[0] == fortiq_shell::AUTHORIZED {
+                            Ok(stream)
+                        } else {
+                            Err(match auth[0] {
+                                fortiq_shell::DENIED_NO_TICKET => "Aucun ticket ouvert sur le poste distant : son utilisateur doit l'ouvrir lui-même".to_string(),
+                                fortiq_shell::DENIED_BUSY => "Une session terminal est déjà active sur le poste distant".to_string(),
+                                _ => "Le poste distant a refusé l'accès au terminal (PeerId opérateur non autorisé)".to_string(),
+                            })
+                        }
+                    }
+                    Err(e) => Err(format!("Échec de lecture de l'autorisation shell: {e}")),
+                }
+            }
+            Ok(Err(err)) => Err(format!("Échec d'ouverture du flux shell: {err}")),
+            Err(_) => {
+                Err("Délai d'attente dépassé lors de l'établissement du flux shell".to_string())
+            }
+        };
+        let _ = reply.send(res);
+    });
+}
+
 pub struct RunOptions {
     pub config: Config,
     pub listen_address: Multiaddr,
@@ -459,13 +498,16 @@ async fn event_loop(
     // Rendezvous is queried once per identify, which only happens at startup.
     // Keep the nodes so discovery can be repeated: a peer that registers later,
     // or comes back after a restart, is otherwise never seen again.
-    let mut rendezvous_nodes: std::collections::HashSet<PeerId> =
-        std::collections::HashSet::new();
+    let mut rendezvous_nodes: std::collections::HashSet<PeerId> = std::collections::HashSet::new();
     let mut discovery_ticker = tokio::time::interval(REDISCOVERY_INTERVAL);
     discovery_ticker.tick().await;
     let mut pending_close_tickets: std::collections::HashMap<
         libp2p::request_response::OutboundRequestId,
         tokio::sync::oneshot::Sender<Result<(), String>>,
+    > = std::collections::HashMap::new();
+    let mut pending_shell_opens: std::collections::HashMap<
+        PeerId,
+        Vec<tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>>,
     > = std::collections::HashMap::new();
 
     loop {
@@ -477,6 +519,17 @@ async fn event_loop(
             Some(cmd) = command_receiver.recv() => {
                 match cmd {
                     P2pCommand::ListPeers { reply } => {
+                        let namespace = rendezvous::Namespace::from_static("fortiq");
+                        for node in &rendezvous_nodes {
+                            if swarm.is_connected(node) {
+                                swarm.behaviour_mut().rendezvous_client.discover(
+                                    Some(namespace.clone()),
+                                    None,
+                                    None,
+                                    *node,
+                                );
+                            }
+                        }
                         let _ = reply.send(peer_registry.to_summaries());
                     }
                     P2pCommand::CloseTicket { peer, dial, reply } => {
@@ -499,50 +552,43 @@ async fn event_loop(
                         pending_close_tickets.insert(request_id, reply);
                     }
                     P2pCommand::OpenShellStream { peer, dial, reply } => {
-                        if let Some(addr) = dial {
-                            if let Err(error) = swarm.dial(addr.clone()) {
-                                warn!(%addr, %error, "failed to dial target for shell stream");
-                            }
-                        } else if !swarm.is_connected(&peer) {
-                            dial_peer_candidates(
-                                swarm,
-                                peer,
-                                &peer_registry,
-                                config.network.relay_peer.as_deref(),
-                            );
-                        }
+                        if swarm.is_connected(&peer) {
+                            spawn_open_shell_stream(peer, shell_control.clone(), reply);
+                        } else {
+                            pending_shell_opens.entry(peer).or_default().push(reply);
 
-                        let mut control = shell_control.clone();
-                        tokio::spawn(async move {
-                            use futures::AsyncReadExt;
-                            let res = match tokio::time::timeout(
-                                std::time::Duration::from_secs(12),
-                                control.open_stream(peer, SHELL_PROTOCOL),
-                            )
-                            .await
-                            {
-                                Ok(Ok(mut stream)) => {
-                                    let mut auth = [0u8; 1];
-                                    match stream.read_exact(&mut auth).await {
-                                        Ok(()) => {
-                                            if auth[0] == fortiq_shell::AUTHORIZED {
-                                                Ok(stream)
-                                            } else {
-                                                Err(match auth[0] {
-                                                    fortiq_shell::DENIED_NO_TICKET => "Aucun ticket ouvert sur le poste distant : son utilisateur doit l'ouvrir lui-même".to_string(),
-                                                    fortiq_shell::DENIED_BUSY => "Une session terminal est déjà active sur le poste distant".to_string(),
-                                                    _ => "Le poste distant a refusé l'accès au terminal (PeerId opérateur non autorisé)".to_string(),
-                                                })
-                                            }
-                                        }
-                                        Err(e) => Err(format!("Échec de lecture de l'autorisation shell: {e}")),
+                            let candidates: Vec<Multiaddr> = if let Some(addr) = dial {
+                                vec![addr]
+                            } else {
+                                dial_candidates(peer, &peer_registry, config.network.relay_peer.as_deref())
+                            };
+
+                            if candidates.is_empty() {
+                                warn!(remote_peer_id = %peer, "no dial candidates for shell stream");
+                                if let Some(pending) = pending_shell_opens.remove(&peer) {
+                                    for reply in pending {
+                                        let _ = reply.send(Err(format!("Aucune adresse connue pour joindre le poste {peer}")));
                                     }
                                 }
-                                Ok(Err(err)) => Err(format!("Échec d'ouverture du flux shell: {err}")),
-                                Err(_) => Err("Délai d'attente dépassé lors de l'établissement du flux shell".to_string()),
-                            };
-                            let _ = reply.send(res);
-                        });
+                            } else {
+                                use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
+                                let opts = DialOpts::peer_id(peer)
+                                    .addresses(candidates)
+                                    .condition(PeerCondition::DisconnectedAndNotDialing)
+                                    .build();
+                                match swarm.dial(opts) {
+                                    Ok(()) => info!(remote_peer_id = %peer, "dialing peer for pending shell stream"),
+                                    Err(error) => {
+                                        warn!(remote_peer_id = %peer, %error, "dial attempt failed for shell stream");
+                                        if let Some(pending) = pending_shell_opens.remove(&peer) {
+                                            for reply in pending {
+                                                let _ = reply.send(Err(format!("Échec de la tentative de connexion vers {peer}: {error}")));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -614,6 +660,11 @@ async fn event_loop(
                     if !swarm.is_connected(node) {
                         continue;
                     }
+                    let _ = swarm.behaviour_mut().rendezvous_client.register(
+                        namespace.clone(),
+                        *node,
+                        None,
+                    );
                     swarm.behaviour_mut().rendezvous_client.discover(
                         Some(namespace.clone()),
                         None,
@@ -633,10 +684,29 @@ async fn event_loop(
                     } else {
                         println!("Listening: {address}/p2p/{}", swarm.local_peer_id());
                     }
+                    if address.iter().any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit)) {
+                        info!(%address, "adding circuit address to external addresses");
+                        swarm.add_external_address(address.clone());
+                        let namespace = rendezvous::Namespace::from_static("fortiq");
+                        for r_node in &rendezvous_nodes {
+                            if let Err(error) = swarm.behaviour_mut().rendezvous_client.register(
+                                namespace.clone(),
+                                *r_node,
+                                None,
+                            ) {
+                                warn!(remote_peer_id = %r_node, %error, "rendezvous registration could not start");
+                            }
+                        }
+                    }
                 }
                 libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                     info!(remote_peer_id = %peer_id, ?endpoint, "authenticated connection established");
                     peer_registry.record_connection(peer_id, &endpoint);
+                    if let Some(pending) = pending_shell_opens.remove(&peer_id) {
+                        for reply in pending {
+                            spawn_open_shell_stream(peer_id, shell_control.clone(), reply);
+                        }
+                    }
                     if endpoint.is_dialer() {
                         swarm.behaviour_mut().hello.send_request(
                             &peer_id,
@@ -694,6 +764,16 @@ async fn event_loop(
                     match event {
                         relay::client::Event::ReservationReqAccepted { relay_peer_id, renewal, .. } => {
                             info!(%relay_peer_id, renewal, "relay reservation accepted");
+                            let namespace = rendezvous::Namespace::from_static("fortiq");
+                            for r_node in &rendezvous_nodes {
+                                if let Err(error) = swarm.behaviour_mut().rendezvous_client.register(
+                                    namespace.clone(),
+                                    *r_node,
+                                    None,
+                                ) {
+                                    warn!(remote_peer_id = %r_node, %error, "rendezvous re-registration failed");
+                                }
+                            }
                         }
                         relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. } => {
                             info!(%relay_peer_id, "outbound relay circuit established");
@@ -723,6 +803,7 @@ async fn event_loop(
                 )) => {
                     info!(remote_peer_id = %peer_id, protocol_version = %info.protocol_version, "identify received");
                     peer_registry.record_identify(peer_id, &info);
+                    swarm.add_external_address(info.observed_addr.clone());
                     if info
                         .protocols
                         .iter()
@@ -755,6 +836,17 @@ async fn event_loop(
                 }
                 libp2p::swarm::SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                     warn!(?peer_id, %error, "outgoing connection failed");
+                    if let Some(peer) = peer_id {
+                        if !swarm.is_connected(&peer) {
+                            if let Some(pending) = pending_shell_opens.remove(&peer) {
+                                for reply in pending {
+                                    let _ = reply.send(Err(format!(
+                                        "Impossible d'établir la connexion avec le poste distant: {error}"
+                                    )));
+                                }
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
