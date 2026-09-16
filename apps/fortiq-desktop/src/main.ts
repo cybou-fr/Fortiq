@@ -27,6 +27,8 @@ let selectedPeerId: string | null = null;
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let isTerminalActive = false;
+let terminalSwitchGeneration = 0;
+let terminalSwitchQueue: Promise<void> = Promise.resolve();
 let activeOperatorTab: "tickets" | "peers" = "tickets";
 
 function escapeHtml(text: string): string {
@@ -282,7 +284,7 @@ function renderPeerList(peers: DesktopPeer[], isOnline: boolean) {
       // open the session straight away instead of requiring a second click.
       // An already running session is left alone: reconnecting would kill it.
       if (isPeerConnected(peer.status) && (switchedPeer || !isTerminalActive)) {
-        void connectTerminalSession(false);
+        queueTerminalSession(peer.peerId, false);
       }
     };
     card.addEventListener("click", selectPeer);
@@ -549,8 +551,14 @@ function initTerminal() {
   });
 }
 
-async function connectTerminalSession(announceFailure = true) {
-  if (!selectedPeerId) return;
+function queueTerminalSession(peerId: string, announceFailure = true) {
+  const generation = ++terminalSwitchGeneration;
+  terminalSwitchQueue = terminalSwitchQueue
+    .catch(() => undefined)
+    .then(() => connectTerminalSession(peerId, generation, announceFailure));
+}
+
+async function connectTerminalSession(peerId: string, generation: number, announceFailure = true) {
   const container = document.getElementById("xterm-container");
   const placeholder = document.getElementById("terminal-placeholder");
   const btnConnect = document.getElementById("btn-connect") as HTMLButtonElement | null;
@@ -574,7 +582,7 @@ async function connectTerminalSession(announceFailure = true) {
   if (term) {
     term.reset();
     term.write(
-      `\x1b[1;36m[FORTIQ]\x1b[0m Établissement de la liaison P2P sécurisée vers ${selectedPeerId}...\r\n`
+      `\x1b[1;36m[FORTIQ]\x1b[0m Établissement de la liaison P2P sécurisée vers ${peerId}...\r\n`
     );
   }
 
@@ -585,14 +593,18 @@ async function connectTerminalSession(announceFailure = true) {
 
   try {
     await invoke("start_terminal_session", {
-      peer: selectedPeerId,
+      peer: peerId,
       cols,
       rows,
     });
+    // A faster subsequent click may have queued another peer while this invoke
+    // was in flight. Let that queued switch own the visible state.
+    if (generation !== terminalSwitchGeneration) return;
     isTerminalActive = true;
     if (termDot) termDot.className = "status-dot online";
-    if (termTitle) termTitle.textContent = `Terminal actif — ${selectedPeerId.substring(0, 14)}`;
+    if (termTitle) termTitle.textContent = `Terminal actif — ${peerId.substring(0, 14)}`;
   } catch (err) {
+    if (generation !== terminalSwitchGeneration) return;
     isTerminalActive = false;
     if (term) {
       term.write(`\r\n\x1b[1;31m[ERREUR]\x1b[0m ${err}\r\n`);

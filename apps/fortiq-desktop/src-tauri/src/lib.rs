@@ -228,9 +228,14 @@ pub struct TerminalSession {
 }
 
 impl TerminalSession {
-    fn shutdown(self) {
+    async fn shutdown(self) {
         self.writer.abort();
         self.reader.abort();
+        // Await cancellation so both IPC halves are actually dropped before a
+        // replacement session is requested. Merely calling abort leaves a
+        // short race where the daemon and remote peer still see the old shell.
+        let _ = self.writer.await;
+        let _ = self.reader.await;
     }
 }
 
@@ -246,6 +251,18 @@ async fn start_terminal_session(
 ) -> Result<(), String> {
     use tauri::Emitter;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    // Serialize the complete switch. Most importantly, close the old IPC/P2P
+    // stream *before* asking the next remote peer for a shell. The previous
+    // ordering performed the new handshake first, so any failure left the old
+    // shell alive and later attempts were rejected as DENIED_BUSY.
+    let mut session_guard = state.0.lock().await;
+    if let Some(previous) = session_guard.take() {
+        previous.shutdown().await;
+        // The managed host performs bounded PTY cleanup after observing EOF.
+        // Give that cleanup time to release its single-session guard.
+        tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+    }
 
     #[cfg(windows)]
     let stream = {
@@ -308,17 +325,6 @@ async fn start_terminal_session(
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<fortiq_shell::ShellFrame>(128);
 
-    {
-        // Tear the previous session down before opening a new one. Dropping its
-        // sender alone was not enough: the read task held a clone, so the pipe
-        // stayed open, the daemon kept the P2P stream, and the remote host went
-        // on refusing every later session as "already active".
-        let mut session_guard = state.0.lock().await;
-        if let Some(previous) = session_guard.take() {
-            previous.shutdown();
-        }
-    }
-
     let writer = tokio::spawn(async move {
         while let Some(frame) = rx.recv().await {
             if frame.write_to(&mut write_half).await.is_err() {
@@ -357,14 +363,11 @@ async fn start_terminal_session(
         let _ = app_clone.emit("terminal-closed", ());
     });
 
-    {
-        let mut session_guard = state.0.lock().await;
-        *session_guard = Some(TerminalSession {
-            sender: tx,
-            writer,
-            reader: session_reader,
-        });
-    }
+    *session_guard = Some(TerminalSession {
+        sender: tx,
+        writer,
+        reader: session_reader,
+    });
 
     Ok(())
 }
@@ -410,7 +413,7 @@ async fn resize_terminal(
 async fn close_terminal_session(state: tauri::State<'_, TerminalState>) -> Result<(), String> {
     let mut guard = state.0.lock().await;
     if let Some(session) = guard.take() {
-        session.shutdown();
+        session.shutdown().await;
     }
     Ok(())
 }
