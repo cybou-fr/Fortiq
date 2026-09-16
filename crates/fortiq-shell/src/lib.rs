@@ -16,6 +16,10 @@ pub const DENIED: u8 = 0;
 pub const DENIED_NO_TICKET: u8 = 2;
 /// Another shell session is already running on the remote peer.
 pub const DENIED_BUSY: u8 = 3;
+/// The ticket for this session is closed.
+pub const DENIED_TICKET_CLOSED: u8 = 4;
+/// Remote access for this ticket is currently disabled by the client.
+pub const DENIED_REMOTE_ACCESS_DISABLED: u8 = 5;
 
 /// How often the served session pings an idle operator.
 const KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
@@ -31,7 +35,62 @@ pub fn describe_denial(code: u8) -> &'static str {
     match code {
         DENIED_NO_TICKET => "no open ticket on the remote host: its user has not opened one",
         DENIED_BUSY => "another shell session is already active on the remote host",
+        DENIED_TICKET_CLOSED => "the ticket for this session is closed",
+        DENIED_REMOTE_ACCESS_DISABLED => "remote access for this ticket is currently disabled by the client",
         _ => "the remote host refused the terminal",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ShellHandshake {
+    pub ticket_id: Option<String>,
+}
+
+impl ShellHandshake {
+    pub fn new(ticket_id: Option<String>) -> Self {
+        Self { ticket_id }
+    }
+
+    pub async fn write_to_async<W: futures::AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
+        use futures::AsyncWriteExt;
+        let json = serde_json::to_vec(self)?;
+        let len = u16::try_from(json.len()).map_err(|_| anyhow::anyhow!("handshake too large"))?;
+        writer.write_all(&len.to_be_bytes()).await?;
+        writer.write_all(&json).await?;
+        writer.flush().await?;
+        Ok(())
+    }
+
+    pub async fn read_from_async<R: futures::AsyncRead + Unpin>(reader: &mut R) -> Result<Self> {
+        use futures::AsyncReadExt;
+        let mut len_bytes = [0u8; 2];
+        reader.read_exact(&mut len_bytes).await?;
+        let len = u16::from_be_bytes(len_bytes) as usize;
+        let mut buf = vec![0u8; len];
+        reader.read_exact(&mut buf).await?;
+        let handshake = serde_json::from_slice(&buf)?;
+        Ok(handshake)
+    }
+
+    pub async fn write_to_tokio<W: tokio::io::AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
+        use tokio::io::AsyncWriteExt;
+        let json = serde_json::to_vec(self)?;
+        let len = u16::try_from(json.len()).map_err(|_| anyhow::anyhow!("handshake too large"))?;
+        writer.write_all(&len.to_be_bytes()).await?;
+        writer.write_all(&json).await?;
+        writer.flush().await?;
+        Ok(())
+    }
+
+    pub async fn read_from_tokio<R: tokio::io::AsyncRead + Unpin>(reader: &mut R) -> Result<Self> {
+        use tokio::io::AsyncReadExt;
+        let mut len_bytes = [0u8; 2];
+        reader.read_exact(&mut len_bytes).await?;
+        let len = u16::from_be_bytes(len_bytes) as usize;
+        let mut buf = vec![0u8; len];
+        reader.read_exact(&mut buf).await?;
+        let handshake = serde_json::from_slice(&buf)?;
+        Ok(handshake)
     }
 }
 
@@ -710,5 +769,15 @@ mod tests {
             !active_flag.load(std::sync::atomic::Ordering::SeqCst),
             "session active flag must be released upon abandoned timeout"
         );
+    }
+
+    #[tokio::test]
+    async fn handshake_encoding_decoding_roundtrip() {
+        let (mut client, mut server) = tokio::io::duplex(256);
+        let handshake = ShellHandshake::new(Some("TCK-2026-001".to_string()));
+        handshake.write_to_tokio(&mut client).await.unwrap();
+
+        let received = ShellHandshake::read_from_tokio(&mut server).await.unwrap();
+        assert_eq!(received, handshake);
     }
 }

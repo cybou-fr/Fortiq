@@ -20,10 +20,63 @@ use tracing::{info, warn};
 
 pub const HELLO_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/hello/1.0");
 pub const SHELL_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/shell/1.0");
+pub const SHELL_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/shell/2.0");
 pub const TICKET_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/ticket/1.0");
+pub const TICKET_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/ticket/2.0");
+pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/1.0");
+pub const FILE_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/file/1.0");
 const MAX_HELLO_BYTES: usize = 16 * 1024;
 /// How often a node re-queries the rendezvous points it knows.
 const REDISCOVERY_INTERVAL: Duration = Duration::from_secs(10);
+
+pub const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
+pub const FILE_ACCEPT: u8 = 0x01;
+pub const FILE_DENIED: u8 = 0x00;
+pub const FILE_DENIED_NO_TICKET: u8 = 0x02;
+pub const FILE_DENIED_TICKET_CLOSED: u8 = 0x03;
+pub const FILE_DENIED_TOO_LARGE: u8 = 0x04;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TicketSyncRequest {
+    GetTickets,
+    GetTicket { ticket_id: String },
+    PushTicket(Box<fortiq_core::TicketRecord>),
+    UpdateStatus { ticket_id: String, state: fortiq_core::TicketState },
+    SetRemoteAccess { ticket_id: String, enabled: bool },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TicketSyncResponse {
+    Tickets(Vec<fortiq_core::TicketRecord>),
+    Ticket(Option<fortiq_core::TicketRecord>),
+    Ack { success: bool, message: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessageWire {
+    pub id: String,
+    pub ticket_id: String,
+    pub sender_peer_id: String,
+    pub body: String,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatAckWire {
+    pub message_id: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileOfferWire {
+    pub ticket_id: String,
+    pub file_id: String,
+    pub filename: String,
+    pub file_size: u64,
+    pub sha256: String,
+    pub sender_peer_id: String,
+}
 
 struct ShellSessionGuard(Arc<AtomicBool>);
 
@@ -45,8 +98,28 @@ pub enum P2pCommand {
     },
     OpenShellStream {
         peer: PeerId,
+        ticket_id: Option<String>,
         dial: Option<Multiaddr>,
         reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
+    },
+    SyncTickets {
+        peer: PeerId,
+        dial: Option<Multiaddr>,
+        request: TicketSyncRequest,
+        reply: tokio::sync::oneshot::Sender<Result<TicketSyncResponse, String>>,
+    },
+    SendChatMessage {
+        peer: PeerId,
+        dial: Option<Multiaddr>,
+        message: ChatMessageWire,
+        reply: tokio::sync::oneshot::Sender<Result<ChatAckWire, String>>,
+    },
+    SendFile {
+        peer: PeerId,
+        dial: Option<Multiaddr>,
+        ticket_id: String,
+        file_path: std::path::PathBuf,
+        reply: tokio::sync::oneshot::Sender<Result<fortiq_core::AttachmentRecord, String>>,
     },
 }
 
@@ -305,6 +378,7 @@ fn dial_peer_candidates(
 
 fn spawn_open_shell_stream(
     peer: PeerId,
+    ticket_id: Option<String>,
     mut control: libp2p_stream::Control,
     reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
 ) {
@@ -312,32 +386,194 @@ fn spawn_open_shell_stream(
         use futures::AsyncReadExt;
         let res = match tokio::time::timeout(
             Duration::from_secs(12),
-            control.open_stream(peer, SHELL_PROTOCOL),
+            control.open_stream(peer, SHELL_PROTOCOL_V2),
         )
         .await
         {
             Ok(Ok(mut stream)) => {
-                let mut auth = [0u8; 1];
-                match stream.read_exact(&mut auth).await {
-                    Ok(()) => {
-                        if auth[0] == fortiq_shell::AUTHORIZED {
-                            Ok(stream)
-                        } else {
-                            Err(match auth[0] {
-                                fortiq_shell::DENIED_NO_TICKET => "Aucun ticket ouvert sur le poste distant : son utilisateur doit l'ouvrir lui-même".to_string(),
-                                fortiq_shell::DENIED_BUSY => "Une session terminal est déjà active sur le poste distant".to_string(),
-                                _ => "Le poste distant a refusé l'accès au terminal (PeerId opérateur non autorisé)".to_string(),
-                            })
+                let handshake = fortiq_shell::ShellHandshake::new(ticket_id.clone());
+                if let Err(e) = handshake.write_to_async(&mut stream).await {
+                    Err(format!("Échec de l'envoi du handshake shell: {e}"))
+                } else {
+                    let mut auth = [0u8; 1];
+                    match stream.read_exact(&mut auth).await {
+                        Ok(()) => {
+                            if auth[0] == fortiq_shell::AUTHORIZED {
+                                Ok(stream)
+                            } else {
+                                Err(match auth[0] {
+                                    fortiq_shell::DENIED_NO_TICKET => "Aucun ticket ouvert sur le poste distant : son utilisateur doit l'ouvrir lui-même".to_string(),
+                                    fortiq_shell::DENIED_BUSY => "Une session terminal est déjà active sur le poste distant".to_string(),
+                                    fortiq_shell::DENIED_TICKET_CLOSED => "Le ticket associé à cette session est fermé".to_string(),
+                                    fortiq_shell::DENIED_REMOTE_ACCESS_DISABLED => "L'accès à distance est actuellement désactivé par le client sur ce ticket".to_string(),
+                                    _ => "Le poste distant a refusé l'accès au terminal (PeerId opérateur non autorisé)".to_string(),
+                                })
+                            }
                         }
+                        Err(e) => Err(format!("Échec de lecture de l'autorisation shell: {e}")),
                     }
-                    Err(e) => Err(format!("Échec de lecture de l'autorisation shell: {e}")),
                 }
             }
-            Ok(Err(err)) => Err(format!("Échec d'ouverture du flux shell: {err}")),
+            Ok(Err(v2_err)) => {
+                // Fallback to legacy v1
+                match tokio::time::timeout(
+                    Duration::from_secs(8),
+                    control.open_stream(peer, SHELL_PROTOCOL),
+                )
+                .await
+                {
+                    Ok(Ok(mut stream)) => {
+                        let mut auth = [0u8; 1];
+                        match stream.read_exact(&mut auth).await {
+                            Ok(()) => {
+                                if auth[0] == fortiq_shell::AUTHORIZED {
+                                    Ok(stream)
+                                } else {
+                                    Err(match auth[0] {
+                                        fortiq_shell::DENIED_NO_TICKET => "Aucun ticket ouvert sur le poste distant : son utilisateur doit l'ouvrir lui-même".to_string(),
+                                        fortiq_shell::DENIED_BUSY => "Une session terminal est déjà active sur le poste distant".to_string(),
+                                        fortiq_shell::DENIED_TICKET_CLOSED => "Le ticket associé à cette session est fermé".to_string(),
+                                        fortiq_shell::DENIED_REMOTE_ACCESS_DISABLED => "L'accès à distance est actuellement désactivé par le client sur ce ticket".to_string(),
+                                        _ => "Le poste distant a refusé l'accès au terminal (PeerId opérateur non autorisé)".to_string(),
+                                    })
+                                }
+                            }
+                            Err(e) => Err(format!("Échec de lecture de l'autorisation shell: {e}")),
+                        }
+                    }
+                    Ok(Err(err)) => Err(format!("Échec d'ouverture du flux shell: {err} (v2: {v2_err})")),
+                    Err(_) => Err("Délai d'attente dépassé lors de l'établissement du flux shell".to_string()),
+                }
+            }
             Err(_) => {
                 Err("Délai d'attente dépassé lors de l'établissement du flux shell".to_string())
             }
         };
+        let _ = reply.send(res);
+    });
+}
+
+fn spawn_send_file_stream(
+    peer: PeerId,
+    ticket_id: String,
+    file_path: std::path::PathBuf,
+    sender_peer_id: String,
+    mut control: libp2p_stream::Control,
+    ticket_store: TicketStore,
+    reply: tokio::sync::oneshot::Sender<Result<fortiq_core::AttachmentRecord, String>>,
+) {
+    tokio::spawn(async move {
+        use futures::{AsyncReadExt, AsyncWriteExt};
+        use sha2::{Digest, Sha256};
+        use tokio::io::AsyncReadExt as TokioAsyncReadExt;
+
+        let res = async {
+            let metadata = tokio::fs::metadata(&file_path)
+                .await
+                .map_err(|e| format!("Impossible de lire le fichier: {e}"))?;
+            let file_size = metadata.len();
+            if file_size > MAX_FILE_SIZE {
+                return Err(format!("Le fichier dépasse la taille maximale (50 Mo): {file_size} octets"));
+            }
+
+            let file_name = file_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("file.bin")
+                .to_string();
+
+            let mut file = tokio::fs::File::open(&file_path)
+                .await
+                .map_err(|e| format!("Impossible d'ouvrir le fichier: {e}"))?;
+            let mut hasher = Sha256::new();
+            let mut buf = [0u8; 8192];
+            loop {
+                let n = file.read(&mut buf).await.map_err(|e| format!("Erreur lecture: {e}"))?;
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buf[..n]);
+            }
+            let sha256 = format!("{:x}", hasher.finalize());
+
+            let file_id = uuid::Uuid::new_v4().to_string();
+            let offer = FileOfferWire {
+                ticket_id: ticket_id.clone(),
+                file_id: file_id.clone(),
+                filename: file_name.clone(),
+                file_size,
+                sha256: sha256.clone(),
+                sender_peer_id: sender_peer_id.clone(),
+            };
+
+            let mut stream = control
+                .open_stream(peer, FILE_PROTOCOL)
+                .await
+                .map_err(|e| format!("Échec d'ouverture du flux fichier: {e}"))?;
+
+            let json = serde_json::to_vec(&offer).map_err(|e| format!("Erreur sérialisation: {e}"))?;
+            let len = u16::try_from(json.len()).map_err(|_| "Header de fichier trop grand".to_string())?;
+            stream.write_all(&len.to_be_bytes()).await.map_err(|e| format!("Erreur envoi header: {e}"))?;
+            stream.write_all(&json).await.map_err(|e| format!("Erreur envoi offre: {e}"))?;
+            stream.flush().await.map_err(|e| format!("Erreur flush: {e}"))?;
+
+            let mut response = [0u8; 1];
+            stream.read_exact(&mut response).await.map_err(|e| format!("Erreur lecture réponse: {e}"))?;
+            if response[0] != FILE_ACCEPT {
+                let reason = match response[0] {
+                    FILE_DENIED_NO_TICKET => "Aucun ticket correspondant sur le poste distant",
+                    FILE_DENIED_TICKET_CLOSED => "Le ticket est fermé",
+                    FILE_DENIED_TOO_LARGE => "Fichier trop volumineux",
+                    _ => "Transfert refusé par le poste distant",
+                };
+                return Err(reason.to_string());
+            }
+
+            let mut file = tokio::fs::File::open(&file_path)
+                .await
+                .map_err(|e| format!("Impossible de réouvrir le fichier: {e}"))?;
+            let mut remaining = file_size;
+            while remaining > 0 {
+                let to_read = std::cmp::min(remaining, buf.len() as u64) as usize;
+                let n = file.read_exact(&mut buf[..to_read]).await.map_err(|e| format!("Erreur lecture chunk: {e}"))?;
+                stream.write_all(&buf[..n]).await.map_err(|e| format!("Erreur envoi chunk: {e}"))?;
+                remaining -= n as u64;
+            }
+            stream.flush().await.map_err(|e| format!("Erreur flush données: {e}"))?;
+
+            let mut ack = [0u8; 1];
+            stream.read_exact(&mut ack).await.map_err(|e| format!("Erreur confirmation: {e}"))?;
+            if ack[0] != FILE_ACCEPT {
+                return Err("Échec de vérification du fichier par le destinataire (SHA-256 invalide)".to_string());
+            }
+
+            let attachment = fortiq_core::AttachmentRecord {
+                id: file_id,
+                ticket_id: ticket_id.clone(),
+                sender_peer_id: sender_peer_id.clone(),
+                filename: file_name,
+                size_bytes: file_size,
+                sha256,
+                local_path: file_path.to_string_lossy().to_string(),
+                created_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                state: "STORED".to_string(),
+            };
+
+            let _ = ticket_store.db().add_attachment(&attachment);
+            let _ = ticket_store.db().record_event(
+                &ticket_id,
+                "ATTACHMENT_SENT",
+                &sender_peer_id,
+                Some(&format!("Fichier envoyé: {}", attachment.filename)),
+            );
+
+            Ok(attachment)
+        }
+        .await;
+
         let _ = reply.send(res);
     });
 }
@@ -386,6 +622,8 @@ struct Behaviour {
     ping: ping::Behaviour,
     hello: request_response::json::Behaviour<HelloRequest, HelloResponse>,
     ticket: request_response::json::Behaviour<TicketRequest, TicketResponse>,
+    ticket_v2: request_response::json::Behaviour<TicketSyncRequest, TicketSyncResponse>,
+    chat: request_response::json::Behaviour<ChatMessageWire, ChatAckWire>,
     stream: libp2p_stream::Behaviour,
     rendezvous_client: rendezvous::client::Behaviour,
     rendezvous_server: Toggle<rendezvous::server::Behaviour>,
@@ -430,51 +668,69 @@ pub async fn run(
         .with_tokio()
         .with_quic()
         .with_relay_client(noise::Config::new, libp2p::yamux::Config::default)?
-        .with_behaviour(move |_, relay_client| Behaviour {
-            identify: identify::Behaviour::new(identify_config),
-            ping: ping::Behaviour::default(),
-            hello,
-            ticket: request_response::Behaviour::with_codec(
+        .with_behaviour(move |_, relay_client| {
+            let ticket_v2 = request_response::Behaviour::with_codec(
                 request_response::json::codec::Codec::default()
-                    .set_request_size_maximum(1024)
-                    .set_response_size_maximum(4096),
-                [(TICKET_PROTOCOL, ProtocolSupport::Full)],
+                    .set_request_size_maximum(64 * 1024)
+                    .set_response_size_maximum(256 * 1024),
+                [(TICKET_PROTOCOL_V2, ProtocolSupport::Full)],
                 request_response::Config::default().with_request_timeout(Duration::from_secs(10)),
-            ),
-            stream: libp2p_stream::Behaviour::new(),
-            rendezvous_client: rendezvous::client::Behaviour::new(rendezvous_client_key),
-            rendezvous_server: rendezvous_enabled
-                .then(|| rendezvous::server::Behaviour::new(Default::default()))
-                .into(),
-            relay_client,
-            relay_server: relay_enabled
-                .then(|| {
-                    let mut relay_config = relay::Config {
-                        max_reservations: 256,
-                        max_reservations_per_peer: 16,
-                        reservation_duration: Duration::from_secs(3600),
-                        reservation_rate_limiters: Vec::new(),
-                        max_circuits: 256,
-                        max_circuits_per_peer: 16,
-                        max_circuit_duration: Duration::from_secs(2 * 3600),
-                        max_circuit_bytes: 1024 * 1024 * 1024,
-                        circuit_src_rate_limiters: Vec::new(),
-                    };
-                    if relay_rate_limit_enabled {
-                        let limit_peer = std::num::NonZeroU32::new(60).expect("60 > 0");
-                        let limit_ip = std::num::NonZeroU32::new(120).expect("120 > 0");
-                        relay_config = relay_config
-                            .reservation_rate_per_peer(limit_peer, Duration::from_secs(10))
-                            .reservation_rate_per_ip(limit_ip, Duration::from_secs(5))
-                            .circuit_src_per_peer(limit_peer, Duration::from_secs(2))
-                            .circuit_src_per_ip(limit_ip, Duration::from_secs(1));
-                    }
-                    relay::Behaviour::new(local_peer_id, relay_config)
-                })
-                .into(),
-            dcutr: dcutr_enabled
-                .then(|| dcutr::Behaviour::new(local_peer_id))
-                .into(),
+            );
+            let chat = request_response::Behaviour::with_codec(
+                request_response::json::codec::Codec::default()
+                    .set_request_size_maximum(64 * 1024)
+                    .set_response_size_maximum(4096),
+                [(CHAT_PROTOCOL, ProtocolSupport::Full)],
+                request_response::Config::default().with_request_timeout(Duration::from_secs(10)),
+            );
+            Behaviour {
+                identify: identify::Behaviour::new(identify_config),
+                ping: ping::Behaviour::default(),
+                hello,
+                ticket: request_response::Behaviour::with_codec(
+                    request_response::json::codec::Codec::default()
+                        .set_request_size_maximum(1024)
+                        .set_response_size_maximum(4096),
+                    [(TICKET_PROTOCOL, ProtocolSupport::Full)],
+                    request_response::Config::default().with_request_timeout(Duration::from_secs(10)),
+                ),
+                ticket_v2,
+                chat,
+                stream: libp2p_stream::Behaviour::new(),
+                rendezvous_client: rendezvous::client::Behaviour::new(rendezvous_client_key),
+                rendezvous_server: rendezvous_enabled
+                    .then(|| rendezvous::server::Behaviour::new(Default::default()))
+                    .into(),
+                relay_client,
+                relay_server: relay_enabled
+                    .then(|| {
+                        let mut relay_config = relay::Config {
+                            max_reservations: 256,
+                            max_reservations_per_peer: 16,
+                            reservation_duration: Duration::from_secs(3600),
+                            reservation_rate_limiters: Vec::new(),
+                            max_circuits: 256,
+                            max_circuits_per_peer: 16,
+                            max_circuit_duration: Duration::from_secs(2 * 3600),
+                            max_circuit_bytes: 1024 * 1024 * 1024,
+                            circuit_src_rate_limiters: Vec::new(),
+                        };
+                        if relay_rate_limit_enabled {
+                            let limit_peer = std::num::NonZeroU32::new(60).expect("60 > 0");
+                            let limit_ip = std::num::NonZeroU32::new(120).expect("120 > 0");
+                            relay_config = relay_config
+                                .reservation_rate_per_peer(limit_peer, Duration::from_secs(10))
+                                .reservation_rate_per_ip(limit_ip, Duration::from_secs(5))
+                                .circuit_src_per_peer(limit_peer, Duration::from_secs(2))
+                                .circuit_src_per_ip(limit_ip, Duration::from_secs(1));
+                        }
+                        relay::Behaviour::new(local_peer_id, relay_config)
+                    })
+                    .into(),
+                dcutr: dcutr_enabled
+                    .then(|| dcutr::Behaviour::new(local_peer_id))
+                    .into(),
+            }
         })?
         .with_swarm_config(|config| config.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
@@ -508,10 +764,16 @@ pub async fn run(
         swarm.dial(address).context("failed to start dial")?;
     }
 
-    let mut shell_control = swarm.behaviour().stream.new_control();
-    let incoming_shells = shell_control
+    let mut stream_control = swarm.behaviour().stream.new_control();
+    let incoming_shells_v2 = stream_control
+        .accept(SHELL_PROTOCOL_V2)
+        .context("shell v2 protocol already registered")?;
+    let incoming_shells_v1 = stream_control
         .accept(SHELL_PROTOCOL)
-        .context("shell protocol already registered")?;
+        .context("shell v1 protocol already registered")?;
+    let incoming_files = stream_control
+        .accept(FILE_PROTOCOL)
+        .context("file protocol already registered")?;
 
     let ticket_store = TicketStore::new(config.ticket_path());
     let active_shells = Arc::new(AtomicBool::new(false));
@@ -525,13 +787,23 @@ pub async fn run(
         active_shells,
         command_receiver,
     };
-    event_loop(&mut swarm, incoming_shells, shell_control, event_options).await
+    event_loop(
+        &mut swarm,
+        incoming_shells_v2,
+        incoming_shells_v1,
+        incoming_files,
+        stream_control,
+        event_options,
+    )
+    .await
 }
 
 async fn event_loop(
     swarm: &mut Swarm<Behaviour>,
-    mut incoming_shells: libp2p_stream::IncomingStreams,
-    shell_control: libp2p_stream::Control,
+    mut incoming_shells_v2: libp2p_stream::IncomingStreams,
+    mut incoming_shells_v1: libp2p_stream::IncomingStreams,
+    mut incoming_files: libp2p_stream::IncomingStreams,
+    stream_control: libp2p_stream::Control,
     options: EventOptions,
 ) -> Result<()> {
     let EventOptions {
@@ -563,10 +835,23 @@ async fn event_loop(
         libp2p::request_response::OutboundRequestId,
         tokio::sync::oneshot::Sender<Result<(), String>>,
     > = std::collections::HashMap::new();
-    let mut pending_shell_opens: std::collections::HashMap<
-        PeerId,
-        Vec<tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>>,
+    let mut pending_sync_tickets: std::collections::HashMap<
+        libp2p::request_response::OutboundRequestId,
+        tokio::sync::oneshot::Sender<Result<TicketSyncResponse, String>>,
     > = std::collections::HashMap::new();
+    let mut pending_chat_messages: std::collections::HashMap<
+        libp2p::request_response::OutboundRequestId,
+        tokio::sync::oneshot::Sender<Result<ChatAckWire, String>>,
+    > = std::collections::HashMap::new();
+    type PendingShellOpen = (Option<String>, tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>);
+    type PendingSyncDial = (TicketSyncRequest, tokio::sync::oneshot::Sender<Result<TicketSyncResponse, String>>);
+    type PendingChatDial = (ChatMessageWire, tokio::sync::oneshot::Sender<Result<ChatAckWire, String>>);
+    type PendingFileDial = (String, std::path::PathBuf, tokio::sync::oneshot::Sender<Result<fortiq_core::AttachmentRecord, String>>);
+
+    let mut pending_shell_opens: std::collections::HashMap<PeerId, Vec<PendingShellOpen>> = std::collections::HashMap::new();
+    let mut pending_sync_dials: std::collections::HashMap<PeerId, Vec<PendingSyncDial>> = std::collections::HashMap::new();
+    let mut pending_chat_dials: std::collections::HashMap<PeerId, Vec<PendingChatDial>> = std::collections::HashMap::new();
+    let mut pending_file_dials: std::collections::HashMap<PeerId, Vec<PendingFileDial>> = std::collections::HashMap::new();
 
     loop {
         tokio::select! {
@@ -609,11 +894,11 @@ async fn event_loop(
                         );
                         pending_close_tickets.insert(request_id, reply);
                     }
-                    P2pCommand::OpenShellStream { peer, dial, reply } => {
+                    P2pCommand::OpenShellStream { peer, ticket_id, dial, reply } => {
                         if swarm.is_connected(&peer) {
-                            spawn_open_shell_stream(peer, shell_control.clone(), reply);
+                            spawn_open_shell_stream(peer, ticket_id, stream_control.clone(), reply);
                         } else {
-                            pending_shell_opens.entry(peer).or_default().push(reply);
+                            pending_shell_opens.entry(peer).or_default().push((ticket_id, reply));
 
                             let candidates: Vec<Multiaddr> = if let Some(addr) = dial {
                                 vec![addr]
@@ -624,7 +909,7 @@ async fn event_loop(
                             if candidates.is_empty() {
                                 warn!(remote_peer_id = %peer, "no dial candidates for shell stream");
                                 if let Some(pending) = pending_shell_opens.remove(&peer) {
-                                    for reply in pending {
+                                    for (_, reply) in pending {
                                         let _ = reply.send(Err(format!("Aucune adresse connue pour joindre le poste {peer}")));
                                     }
                                 }
@@ -637,16 +922,10 @@ async fn event_loop(
                                 match swarm.dial(opts) {
                                     Ok(()) => info!(remote_peer_id = %peer, "dialing peer for pending shell stream"),
                                     Err(libp2p::swarm::DialError::DialPeerConditionFalse(_)) => {
-                                        // Discovery may already be dialing this peer, or the
-                                        // connection can become established between the check
-                                        // above and `dial`. Keep the requests queued: the normal
-                                        // ConnectionEstablished event will open their streams.
-                                        // If the peer won the race and is connected already,
-                                        // drain the queue immediately.
                                         if swarm.is_connected(&peer) {
                                             if let Some(pending) = pending_shell_opens.remove(&peer) {
-                                                for reply in pending {
-                                                    spawn_open_shell_stream(peer, shell_control.clone(), reply);
+                                                for (tid, reply) in pending {
+                                                    spawn_open_shell_stream(peer, tid, stream_control.clone(), reply);
                                                 }
                                             }
                                         } else {
@@ -656,7 +935,7 @@ async fn event_loop(
                                     Err(error) => {
                                         warn!(remote_peer_id = %peer, %error, "dial attempt failed for shell stream");
                                         if let Some(pending) = pending_shell_opens.remove(&peer) {
-                                            for reply in pending {
+                                            for (_, reply) in pending {
                                                 let _ = reply.send(Err(format!("Échec de la tentative de connexion vers {peer}: {error}")));
                                             }
                                         }
@@ -665,65 +944,79 @@ async fn event_loop(
                             }
                         }
                     }
+                    P2pCommand::SyncTickets { peer, dial, request, reply } => {
+                        if swarm.is_connected(&peer) {
+                            let req_id = swarm.behaviour_mut().ticket_v2.send_request(&peer, request);
+                            pending_sync_tickets.insert(req_id, reply);
+                        } else {
+                            pending_sync_dials.entry(peer).or_default().push((request, reply));
+                            if let Some(addr) = dial {
+                                let _ = swarm.dial(addr);
+                            } else {
+                                dial_peer_candidates(swarm, peer, &peer_registry, config.network.relay_peer.as_deref());
+                            }
+                        }
+                    }
+                    P2pCommand::SendChatMessage { peer, dial, message, reply } => {
+                        if swarm.is_connected(&peer) {
+                            let req_id = swarm.behaviour_mut().chat.send_request(&peer, message);
+                            pending_chat_messages.insert(req_id, reply);
+                        } else {
+                            pending_chat_dials.entry(peer).or_default().push((message, reply));
+                            if let Some(addr) = dial {
+                                let _ = swarm.dial(addr);
+                            } else {
+                                dial_peer_candidates(swarm, peer, &peer_registry, config.network.relay_peer.as_deref());
+                            }
+                        }
+                    }
+                    P2pCommand::SendFile { peer, dial, ticket_id, file_path, reply } => {
+                        if swarm.is_connected(&peer) {
+                            spawn_send_file_stream(
+                                peer,
+                                ticket_id,
+                                file_path,
+                                local_info.peer_id.clone(),
+                                stream_control.clone(),
+                                ticket_store.clone(),
+                                reply,
+                            );
+                        } else {
+                            pending_file_dials.entry(peer).or_default().push((ticket_id, file_path, reply));
+                            if let Some(addr) = dial {
+                                let _ = swarm.dial(addr);
+                            } else {
+                                dial_peer_candidates(swarm, peer, &peer_registry, config.network.relay_peer.as_deref());
+                            }
+                        }
+                    }
                 }
             }
-            Some((remote_peer, stream)) = incoming_shells.next() => {
-                let ticket_open = ticket_store.is_open().await.unwrap_or_else(|error| {
-                    warn!(%error, "failed to check ticket state; denying shell");
-                    false
-                });
-                let mut stream = stream;
-
-                if !is_authorized_operator(remote_peer, &config) {
-                    warn!(remote_peer_id = %remote_peer, "denied shell from unauthorized peer");
-                    let _ = fortiq_shell::send_authorization_code(
-                        &mut stream,
-                        fortiq_shell::DENIED,
-                    )
-                    .await;
-                    drop(stream);
-                    continue;
-                }
-
-                if !ticket_open {
-                    warn!(remote_peer_id = %remote_peer, "denied shell: no open ticket");
-                    let _ = fortiq_shell::send_authorization_code(
-                        &mut stream,
-                        fortiq_shell::DENIED_NO_TICKET,
-                    )
-                    .await;
-                    drop(stream);
-                    continue;
-                }
-
-                if active_shells
-                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                    .is_err()
-                {
-                    warn!(remote_peer_id = %remote_peer, "denied shell: another shell session is already active");
-                    let _ = fortiq_shell::send_authorization_code(
-                        &mut stream,
-                        fortiq_shell::DENIED_BUSY,
-                    )
-                    .await;
-                    drop(stream);
-                    continue;
-                }
-
-                if let Err(error) = fortiq_shell::send_authorization(&mut stream, true).await {
-                    warn!(remote_peer_id = %remote_peer, %error, "failed to send shell authorization result");
-                    active_shells.store(false, Ordering::SeqCst);
-                    continue;
-                }
-
-                info!(remote_peer_id = %remote_peer, "accepted authorized shell");
-                let info = local_info.clone();
-                let shells_flag = active_shells.clone();
+            Some((remote_peer, stream)) = incoming_shells_v2.next() => {
+                handle_incoming_shell_v2(
+                    stream,
+                    remote_peer,
+                    &config,
+                    &ticket_store,
+                    &active_shells,
+                    &local_info,
+                ).await;
+            }
+            Some((remote_peer, stream)) = incoming_shells_v1.next() => {
+                handle_incoming_shell_v1(
+                    stream,
+                    remote_peer,
+                    &config,
+                    &ticket_store,
+                    &active_shells,
+                    &local_info,
+                ).await;
+            }
+            Some((remote_peer, stream)) = incoming_files.next() => {
+                let files_dir = ticket_store.storage_dir().join("tickets");
+                let t_store = ticket_store.clone();
                 tokio::spawn(async move {
-                    let _guard = ShellSessionGuard(shells_flag);
-                    if let Err(error) = fortiq_shell::serve(stream, info).await {
-                        warn!(remote_peer_id = %remote_peer, %error, "shell session failed");
-                    }
+                    handle_incoming_file_stream(stream, remote_peer, t_store, files_dir).await;
                 });
             }
             Some(result) = shell_result_receiver.recv() => {
@@ -778,8 +1071,33 @@ async fn event_loop(
                     info!(remote_peer_id = %peer_id, ?endpoint, "authenticated connection established");
                     peer_registry.record_connection(peer_id, &endpoint);
                     if let Some(pending) = pending_shell_opens.remove(&peer_id) {
-                        for reply in pending {
-                            spawn_open_shell_stream(peer_id, shell_control.clone(), reply);
+                        for (tid, reply) in pending {
+                            spawn_open_shell_stream(peer_id, tid, stream_control.clone(), reply);
+                        }
+                    }
+                    if let Some(pending) = pending_sync_dials.remove(&peer_id) {
+                        for (req, reply) in pending {
+                            let req_id = swarm.behaviour_mut().ticket_v2.send_request(&peer_id, req);
+                            pending_sync_tickets.insert(req_id, reply);
+                        }
+                    }
+                    if let Some(pending) = pending_chat_dials.remove(&peer_id) {
+                        for (msg, reply) in pending {
+                            let req_id = swarm.behaviour_mut().chat.send_request(&peer_id, msg);
+                            pending_chat_messages.insert(req_id, reply);
+                        }
+                    }
+                    if let Some(pending) = pending_file_dials.remove(&peer_id) {
+                        for (tid, file_path, reply) in pending {
+                            spawn_send_file_stream(
+                                peer_id,
+                                tid,
+                                file_path,
+                                local_info.peer_id.clone(),
+                                stream_control.clone(),
+                                ticket_store.clone(),
+                                reply,
+                            );
                         }
                     }
                     if endpoint.is_dialer() {
@@ -789,7 +1107,7 @@ async fn event_loop(
                         );
                         if shell_peer == Some(peer_id) && !shell_started {
                             shell_started = true;
-                            let mut control = shell_control.clone();
+                            let mut control = stream_control.clone();
                             let sender = shell_result_sender.clone();
                             let command = shell_command.clone();
                             tokio::spawn(async move {
@@ -827,6 +1145,24 @@ async fn event_loop(
                         &active_shells,
                         &shell_result_sender,
                         &mut pending_close_tickets,
+                    ).await;
+                }
+                libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::TicketV2(event)) => {
+                    handle_ticket_v2(
+                        event,
+                        swarm,
+                        &config,
+                        &ticket_store,
+                        &mut pending_sync_tickets,
+                    ).await;
+                }
+                libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::Chat(event)) => {
+                    handle_chat(
+                        event,
+                        swarm,
+                        &config,
+                        &ticket_store,
+                        &mut pending_chat_messages,
                     ).await;
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::RendezvousClient(event)) => {
@@ -924,7 +1260,28 @@ async fn event_loop(
                     if let Some(peer) = peer_id {
                         if !swarm.is_connected(&peer) {
                             if let Some(pending) = pending_shell_opens.remove(&peer) {
-                                for reply in pending {
+                                for (_, reply) in pending {
+                                    let _ = reply.send(Err(format!(
+                                        "Impossible d'établir la connexion avec le poste distant: {error}"
+                                    )));
+                                }
+                            }
+                            if let Some(pending) = pending_sync_dials.remove(&peer) {
+                                for (_, reply) in pending {
+                                    let _ = reply.send(Err(format!(
+                                        "Impossible d'établir la connexion avec le poste distant: {error}"
+                                    )));
+                                }
+                            }
+                            if let Some(pending) = pending_chat_dials.remove(&peer) {
+                                for (_, reply) in pending {
+                                    let _ = reply.send(Err(format!(
+                                        "Impossible d'établir la connexion avec le poste distant: {error}"
+                                    )));
+                                }
+                            }
+                            if let Some(pending) = pending_file_dials.remove(&peer) {
+                                for (_, _, reply) in pending {
                                     let _ = reply.send(Err(format!(
                                         "Impossible d'établir la connexion avec le poste distant: {error}"
                                     )));
@@ -1150,6 +1507,527 @@ async fn handle_ticket(
             info!(remote_peer_id = %peer, "ticket response sent");
         }
     }
+}
+
+async fn handle_ticket_v2(
+    event: request_response::Event<TicketSyncRequest, TicketSyncResponse>,
+    swarm: &mut Swarm<Behaviour>,
+    _config: &Config,
+    ticket_store: &TicketStore,
+    pending_sync_tickets: &mut std::collections::HashMap<
+        request_response::OutboundRequestId,
+        tokio::sync::oneshot::Sender<Result<TicketSyncResponse, String>>,
+    >,
+) {
+    match event {
+        request_response::Event::Message { peer, message, .. } => match message {
+            request_response::Message::Request {
+                request, channel, ..
+            } => {
+                let response = match request {
+                    TicketSyncRequest::GetTickets => {
+                        let tickets = ticket_store.db().list_tickets(None).unwrap_or_default();
+                        TicketSyncResponse::Tickets(tickets)
+                    }
+                    TicketSyncRequest::GetTicket { ticket_id } => {
+                        let ticket = ticket_store.db().get_ticket(&ticket_id).ok().flatten();
+                        TicketSyncResponse::Ticket(ticket)
+                    }
+                    TicketSyncRequest::PushTicket(ticket) => {
+                        let res = ticket_store.db().import_ticket(&ticket);
+                        match res {
+                            Ok(()) => TicketSyncResponse::Ack {
+                                success: true,
+                                message: "Ticket synchronisé".to_string(),
+                            },
+                            Err(e) => TicketSyncResponse::Ack {
+                                success: false,
+                                message: format!("Erreur: {e}"),
+                            },
+                        }
+                    }
+                    TicketSyncRequest::UpdateStatus { ticket_id, state } => {
+                        match ticket_store.db().update_ticket_state(&ticket_id, state, &peer.to_string()) {
+                            Ok(Some(_)) => TicketSyncResponse::Ack {
+                                success: true,
+                                message: "Statut mis à jour".to_string(),
+                            },
+                            Ok(None) => TicketSyncResponse::Ack {
+                                success: false,
+                                message: "Ticket introuvable".to_string(),
+                            },
+                            Err(e) => TicketSyncResponse::Ack {
+                                success: false,
+                                message: format!("Erreur: {e}"),
+                            },
+                        }
+                    }
+                    TicketSyncRequest::SetRemoteAccess { ticket_id, enabled } => {
+                        match ticket_store.db().set_remote_access(&ticket_id, enabled, &peer.to_string()) {
+                            Ok(Some(_)) => TicketSyncResponse::Ack {
+                                success: true,
+                                message: "Accès à distance mis à jour".to_string(),
+                            },
+                            Ok(None) => TicketSyncResponse::Ack {
+                                success: false,
+                                message: "Ticket introuvable".to_string(),
+                            },
+                            Err(e) => TicketSyncResponse::Ack {
+                                success: false,
+                                message: format!("Erreur: {e}"),
+                            },
+                        }
+                    }
+                };
+                let _ = swarm.behaviour_mut().ticket_v2.send_response(channel, response);
+            }
+            request_response::Message::Response {
+                request_id,
+                response,
+            } => {
+                if let Some(reply) = pending_sync_tickets.remove(&request_id) {
+                    let _ = reply.send(Ok(response));
+                }
+            }
+        },
+        request_response::Event::OutboundFailure {
+            request_id, error, ..
+        } => {
+            if let Some(reply) = pending_sync_tickets.remove(&request_id) {
+                let _ = reply.send(Err(format!("Échec de la requête ticket sync: {error}")));
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn handle_chat(
+    event: request_response::Event<ChatMessageWire, ChatAckWire>,
+    swarm: &mut Swarm<Behaviour>,
+    _config: &Config,
+    ticket_store: &TicketStore,
+    pending_chat_messages: &mut std::collections::HashMap<
+        request_response::OutboundRequestId,
+        tokio::sync::oneshot::Sender<Result<ChatAckWire, String>>,
+    >,
+) {
+    match event {
+        request_response::Event::Message { peer: _, message, .. } => match message {
+            request_response::Message::Request {
+                request, channel, ..
+            } => {
+                let ack = match ticket_store.db().get_ticket(&request.ticket_id) {
+                    Ok(Some(ticket)) => {
+                        if !ticket.state.permits_work() {
+                            ChatAckWire {
+                                message_id: request.id,
+                                success: false,
+                                error: Some("Le ticket est fermé".to_string()),
+                            }
+                        } else {
+                            let chat_msg = fortiq_core::ChatMessage {
+                                id: request.id.clone(),
+                                ticket_id: request.ticket_id.clone(),
+                                sender_peer_id: request.sender_peer_id.clone(),
+                                body: request.body.clone(),
+                                created_at: request.created_at,
+                                delivery_state: "DELIVERED".to_string(),
+                            };
+                            let _ = ticket_store.db().add_chat_message(&chat_msg);
+                            let preview: String = request.body.chars().take(40).collect();
+                            let _ = ticket_store
+                                .db()
+                                .record_event(
+                                    &request.ticket_id,
+                                    "CHAT_MESSAGE_RECEIVED",
+                                    &request.sender_peer_id,
+                                    Some(&format!("{}: {}", request.sender_peer_id, preview)),
+                                );
+                            ChatAckWire {
+                                message_id: request.id,
+                                success: true,
+                                error: None,
+                            }
+                        }
+                    }
+                    _ => ChatAckWire {
+                        message_id: request.id,
+                        success: false,
+                        error: Some("Ticket introuvable sur le poste distant".to_string()),
+                    },
+                };
+                let _ = swarm.behaviour_mut().chat.send_response(channel, ack);
+            }
+            request_response::Message::Response {
+                request_id,
+                response,
+            } => {
+                if let Some(reply) = pending_chat_messages.remove(&request_id) {
+                    let _ = reply.send(Ok(response));
+                }
+            }
+        },
+        request_response::Event::OutboundFailure {
+            request_id, error, ..
+        } => {
+            if let Some(reply) = pending_chat_messages.remove(&request_id) {
+                let _ = reply.send(Err(format!("Échec de l'envoi du message chat: {error}")));
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn handle_incoming_shell_v2(
+    mut stream: libp2p::Stream,
+    remote_peer: PeerId,
+    config: &Config,
+    ticket_store: &TicketStore,
+    active_shells: &Arc<AtomicBool>,
+    local_info: &NodeInfo,
+) {
+    if !is_authorized_operator(remote_peer, config) {
+        warn!(remote_peer_id = %remote_peer, "denied shell v2 from unauthorized peer");
+        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED).await;
+        return;
+    }
+
+    let handshake = match tokio::time::timeout(
+        Duration::from_secs(5),
+        fortiq_shell::ShellHandshake::read_from_async(&mut stream),
+    )
+    .await
+    {
+        Ok(Ok(h)) => h,
+        Ok(Err(e)) => {
+            warn!(remote_peer_id = %remote_peer, %e, "failed to read shell handshake");
+            let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED).await;
+            return;
+        }
+        Err(_) => {
+            warn!(remote_peer_id = %remote_peer, "timeout reading shell handshake");
+            let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED).await;
+            return;
+        }
+    };
+
+    let ticket_opt = if let Some(ref tid) = handshake.ticket_id {
+        ticket_store.db().get_ticket(tid).ok().flatten()
+    } else {
+        ticket_store.db().get_active_ticket().ok().flatten()
+    };
+
+    let ticket = match ticket_opt {
+        Some(t) => t,
+        None => {
+            warn!(remote_peer_id = %remote_peer, "denied shell v2: ticket not found");
+            let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_NO_TICKET)
+                .await;
+            return;
+        }
+    };
+
+    if !ticket.state.permits_work() {
+        warn!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "denied shell v2: ticket is closed");
+        let _ = fortiq_shell::send_authorization_code(
+            &mut stream,
+            fortiq_shell::DENIED_TICKET_CLOSED,
+        )
+        .await;
+        return;
+    }
+
+    if !ticket.remote_access_enabled {
+        warn!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "denied shell v2: remote access disabled on ticket");
+        let _ = fortiq_shell::send_authorization_code(
+            &mut stream,
+            fortiq_shell::DENIED_REMOTE_ACCESS_DISABLED,
+        )
+        .await;
+        return;
+    }
+
+    if active_shells
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        warn!(remote_peer_id = %remote_peer, "denied shell v2: another shell session is already active");
+        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_BUSY).await;
+        return;
+    }
+
+    if let Err(error) = fortiq_shell::send_authorization(&mut stream, true).await {
+        warn!(remote_peer_id = %remote_peer, %error, "failed to send shell authorization result");
+        active_shells.store(false, Ordering::SeqCst);
+        return;
+    }
+
+    info!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "accepted authorized shell v2");
+    let info = local_info.clone();
+    let shells_flag = active_shells.clone();
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let db = ticket_store.db().clone();
+    let tid = ticket.id.clone();
+    let op_peer_str = remote_peer.to_string();
+
+    tokio::spawn(async move {
+        let _guard = ShellSessionGuard(shells_flag);
+        let _ = db.record_shell_session_start(&session_id, &tid, &op_peer_str, "QUIC/Relay");
+        let _ = db.record_event(
+            &tid,
+            "SHELL_SESSION_STARTED",
+            &op_peer_str,
+            Some("Session shell démarrée"),
+        );
+
+        let res = fortiq_shell::serve(stream, info).await;
+        let result_str = if res.is_ok() { "SUCCESS" } else { "ERROR" };
+        let _ = db.record_shell_session_end(&session_id, Some(result_str));
+        let _ = db.record_event(
+            &tid,
+            "SHELL_SESSION_ENDED",
+            &op_peer_str,
+            Some("Session shell terminée"),
+        );
+    });
+}
+
+async fn handle_incoming_shell_v1(
+    mut stream: libp2p::Stream,
+    remote_peer: PeerId,
+    config: &Config,
+    ticket_store: &TicketStore,
+    active_shells: &Arc<AtomicBool>,
+    local_info: &NodeInfo,
+) {
+    if !is_authorized_operator(remote_peer, config) {
+        warn!(remote_peer_id = %remote_peer, "denied shell v1 from unauthorized peer");
+        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED).await;
+        return;
+    }
+
+    let ticket = match ticket_store.db().get_active_ticket() {
+        Ok(Some(t)) => t,
+        _ => {
+            warn!(remote_peer_id = %remote_peer, "denied shell v1: no active ticket");
+            let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_NO_TICKET)
+                .await;
+            return;
+        }
+    };
+
+    if !ticket.state.permits_work() {
+        warn!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "denied shell v1: ticket closed");
+        let _ = fortiq_shell::send_authorization_code(
+            &mut stream,
+            fortiq_shell::DENIED_TICKET_CLOSED,
+        )
+        .await;
+        return;
+    }
+
+    if !ticket.remote_access_enabled {
+        warn!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "denied shell v1: remote access disabled");
+        let _ = fortiq_shell::send_authorization_code(
+            &mut stream,
+            fortiq_shell::DENIED_REMOTE_ACCESS_DISABLED,
+        )
+        .await;
+        return;
+    }
+
+    if active_shells
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        warn!(remote_peer_id = %remote_peer, "denied shell v1: busy");
+        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_BUSY).await;
+        return;
+    }
+
+    if let Err(error) = fortiq_shell::send_authorization(&mut stream, true).await {
+        warn!(remote_peer_id = %remote_peer, %error, "failed to send shell authorization result");
+        active_shells.store(false, Ordering::SeqCst);
+        return;
+    }
+
+    info!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "accepted authorized shell v1");
+    let info = local_info.clone();
+    let shells_flag = active_shells.clone();
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let db = ticket_store.db().clone();
+    let tid = ticket.id.clone();
+    let op_peer_str = remote_peer.to_string();
+
+    tokio::spawn(async move {
+        let _guard = ShellSessionGuard(shells_flag);
+        let _ = db.record_shell_session_start(&session_id, &tid, &op_peer_str, "QUIC/Relay (v1)");
+        let _ = db.record_event(
+            &tid,
+            "SHELL_SESSION_STARTED",
+            &op_peer_str,
+            Some("Session shell démarrée (v1)"),
+        );
+
+        let res = fortiq_shell::serve(stream, info).await;
+        let result_str = if res.is_ok() { "SUCCESS" } else { "ERROR" };
+        let _ = db.record_shell_session_end(&session_id, Some(result_str));
+        let _ = db.record_event(
+            &tid,
+            "SHELL_SESSION_ENDED",
+            &op_peer_str,
+            Some("Session shell terminée (v1)"),
+        );
+    });
+}
+
+async fn handle_incoming_file_stream(
+    mut stream: libp2p::Stream,
+    remote_peer: PeerId,
+    ticket_store: TicketStore,
+    files_base_dir: std::path::PathBuf,
+) {
+    use futures::{AsyncReadExt, AsyncWriteExt};
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncWriteExt as TokioAsyncWriteExt;
+
+    let mut len_bytes = [0u8; 2];
+    if stream.read_exact(&mut len_bytes).await.is_err() {
+        return;
+    }
+    let len = u16::from_be_bytes(len_bytes) as usize;
+    let mut buf = vec![0u8; len];
+    if stream.read_exact(&mut buf).await.is_err() {
+        return;
+    }
+    let offer: FileOfferWire = match serde_json::from_slice(&buf) {
+        Ok(o) => o,
+        Err(_) => return,
+    };
+
+    let ticket = match ticket_store.db().get_ticket(&offer.ticket_id) {
+        Ok(Some(t)) => t,
+        _ => {
+            let _ = stream.write_all(&[FILE_DENIED_NO_TICKET]).await;
+            return;
+        }
+    };
+
+    if !ticket.state.permits_work() {
+        let _ = stream.write_all(&[FILE_DENIED_TICKET_CLOSED]).await;
+        return;
+    }
+
+    if offer.file_size > MAX_FILE_SIZE {
+        let _ = stream.write_all(&[FILE_DENIED_TOO_LARGE]).await;
+        return;
+    }
+
+    let original_name = std::path::Path::new(&offer.filename)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file.bin");
+    let safe_name = original_name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+
+    let ticket_dir = files_base_dir.join(&offer.ticket_id).join("files");
+    if let Err(e) = tokio::fs::create_dir_all(&ticket_dir).await {
+        warn!(%e, "failed to create files dir for ticket");
+        let _ = stream.write_all(&[FILE_DENIED]).await;
+        return;
+    }
+
+    if stream.write_all(&[FILE_ACCEPT]).await.is_err() {
+        return;
+    }
+    let _ = stream.flush().await;
+
+    let part_path = ticket_dir.join(format!("{}.part", offer.file_id));
+    let final_path = ticket_dir.join(format!("{}_{}", offer.file_id, safe_name));
+
+    let mut part_file = match tokio::fs::File::create(&part_path).await {
+        Ok(f) => f,
+        Err(e) => {
+            warn!(%e, "failed to create part file");
+            return;
+        }
+    };
+
+    let mut hasher = Sha256::new();
+    let mut remaining = offer.file_size;
+    let mut chunk_buf = [0u8; 8192];
+    let mut success = true;
+
+    while remaining > 0 {
+        let to_read = std::cmp::min(remaining, chunk_buf.len() as u64) as usize;
+        match stream.read_exact(&mut chunk_buf[..to_read]).await {
+            Ok(()) => {
+                hasher.update(&chunk_buf[..to_read]);
+                if let Err(e) = part_file.write_all(&chunk_buf[..to_read]).await {
+                    warn!(%e, "failed to write chunk to part file");
+                    success = false;
+                    break;
+                }
+                remaining -= to_read as u64;
+            }
+            Err(e) => {
+                warn!(%e, "error reading file chunk from stream");
+                success = false;
+                break;
+            }
+        }
+    }
+
+    let _ = part_file.flush().await;
+    drop(part_file);
+
+    if !success {
+        let _ = tokio::fs::remove_file(&part_path).await;
+        let _ = stream.write_all(&[FILE_DENIED]).await;
+        return;
+    }
+
+    let computed_hash = format!("{:x}", hasher.finalize());
+    if computed_hash != offer.sha256 {
+        warn!(computed = %computed_hash, expected = %offer.sha256, "file SHA-256 mismatch");
+        let _ = tokio::fs::remove_file(&part_path).await;
+        let _ = stream.write_all(&[FILE_DENIED]).await;
+        return;
+    }
+
+    if let Err(e) = tokio::fs::rename(&part_path, &final_path).await {
+        warn!(%e, "failed to rename part file to final path");
+        let _ = tokio::fs::remove_file(&part_path).await;
+        let _ = stream.write_all(&[FILE_DENIED]).await;
+        return;
+    }
+
+    let attachment = fortiq_core::AttachmentRecord {
+        id: offer.file_id.clone(),
+        ticket_id: offer.ticket_id.clone(),
+        sender_peer_id: offer.sender_peer_id.clone(),
+        filename: safe_name.clone(),
+        size_bytes: offer.file_size,
+        sha256: computed_hash,
+        local_path: final_path.to_string_lossy().to_string(),
+        created_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        state: "STORED".to_string(),
+    };
+
+    let _ = ticket_store.db().add_attachment(&attachment);
+    let _ = ticket_store
+        .db()
+        .record_event(
+            &offer.ticket_id,
+            "ATTACHMENT_RECEIVED",
+            &offer.sender_peer_id,
+            Some(&format!("Fichier reçu de {}: {safe_name}", remote_peer)),
+        );
+
+    let _ = stream.write_all(&[FILE_ACCEPT]).await;
+    let _ = stream.flush().await;
 }
 
 fn handle_hello(

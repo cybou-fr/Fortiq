@@ -502,6 +502,305 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 IpcResponse::Peers(Vec::new())
             }
         }
+        IpcRequest::ListTickets { state_filter } => {
+            match state.ticket_store.db().list_tickets(state_filter) {
+                Ok(tickets) => IpcResponse::Tickets(tickets),
+                Err(e) => IpcResponse::Error(format!("Échec de listage des tickets: {e}")),
+            }
+        }
+        IpcRequest::GetTicket { ticket_id } => {
+            match state.ticket_store.db().get_ticket_detail(&ticket_id) {
+                Ok(detail) => IpcResponse::TicketDetail(detail),
+                Err(e) => IpcResponse::Error(format!("Échec de consultation du ticket: {e}")),
+            }
+        }
+        IpcRequest::CreateTicket {
+            title,
+            description,
+            priority,
+        } => {
+            let client_peer = if state.config.mode() == NodeMode::Managed {
+                state.peer_id.to_string()
+            } else {
+                "local".to_string()
+            };
+            let operator_peer = if state.config.mode() == NodeMode::Managed {
+                state
+                    .config
+                    .authorization
+                    .operator_peer_id
+                    .clone()
+                    .unwrap_or_else(|| "unassigned".to_string())
+            } else {
+                state.peer_id.to_string()
+            };
+
+            match state.ticket_store.db().create_ticket(
+                &title,
+                &description,
+                priority,
+                &client_peer,
+                &operator_peer,
+            ) {
+                Ok(record) => {
+                    let target_str = if state.config.mode() == NodeMode::Managed {
+                        state.config.authorization.operator_peer_id.as_deref()
+                    } else {
+                        None
+                    };
+                    if let Some(target) = target_str {
+                        if let Ok(peer) = target.parse::<PeerId>() {
+                            if let Some(ref sender) = state.p2p_sender {
+                                let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+                                let _ = sender
+                                    .send(fortiq_p2p::P2pCommand::SyncTickets {
+                                        peer,
+                                        dial: None,
+                                        request: fortiq_p2p::TicketSyncRequest::PushTicket(Box::new(
+                                            record.clone(),
+                                        )),
+                                        reply: reply_tx,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                    IpcResponse::TicketCreated(record)
+                }
+                Err(e) => IpcResponse::Error(format!("Échec de création du ticket: {e}")),
+            }
+        }
+        IpcRequest::UpdateTicketStatus {
+            ticket_id,
+            state: new_state,
+        } => {
+            match state
+                .ticket_store
+                .db()
+                .update_ticket_state(&ticket_id, new_state, &state.peer_id.to_string())
+            {
+                Ok(updated) => {
+                    if let Some(ref ticket) = updated {
+                        let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
+                            &ticket.operator_peer_id
+                        } else {
+                            &ticket.client_peer_id
+                        };
+                        if let Ok(peer) = target_str.parse::<PeerId>() {
+                            if let Some(ref sender) = state.p2p_sender {
+                                let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+                                let _ = sender
+                                    .send(fortiq_p2p::P2pCommand::SyncTickets {
+                                        peer,
+                                        dial: None,
+                                        request: fortiq_p2p::TicketSyncRequest::UpdateStatus {
+                                            ticket_id: ticket.id.clone(),
+                                            state: new_state,
+                                        },
+                                        reply: reply_tx,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                    IpcResponse::TicketUpdated(updated)
+                }
+                Err(e) => IpcResponse::Error(format!("Échec de mise à jour du statut: {e}")),
+            }
+        }
+        IpcRequest::SetRemoteAccess { ticket_id, enabled } => {
+            match state
+                .ticket_store
+                .db()
+                .set_remote_access(&ticket_id, enabled, &state.peer_id.to_string())
+            {
+                Ok(updated) => {
+                    if let Some(ref ticket) = updated {
+                        let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
+                            &ticket.operator_peer_id
+                        } else {
+                            &ticket.client_peer_id
+                        };
+                        if let Ok(peer) = target_str.parse::<PeerId>() {
+                            if let Some(ref sender) = state.p2p_sender {
+                                let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+                                let _ = sender
+                                    .send(fortiq_p2p::P2pCommand::SyncTickets {
+                                        peer,
+                                        dial: None,
+                                        request: fortiq_p2p::TicketSyncRequest::SetRemoteAccess {
+                                            ticket_id: ticket.id.clone(),
+                                            enabled,
+                                        },
+                                        reply: reply_tx,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                    IpcResponse::TicketUpdated(updated)
+                }
+                Err(e) => IpcResponse::Error(format!(
+                    "Échec de configuration de l'accès à distance: {e}"
+                )),
+            }
+        }
+        IpcRequest::SendChatMessage { ticket_id, body } => {
+            match state.ticket_store.db().get_ticket(&ticket_id) {
+                Ok(Some(ticket)) => {
+                    if !ticket.state.permits_work() {
+                        return IpcResponse::Error(
+                            "Impossible d'envoyer un message : le ticket est fermé".to_string(),
+                        );
+                    }
+                    let msg_id = format!("MSG-{}", uuid::Uuid::new_v4().simple());
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let chat_msg = fortiq_core::ChatMessage {
+                        id: msg_id.clone(),
+                        ticket_id: ticket_id.clone(),
+                        sender_peer_id: state.peer_id.to_string(),
+                        body: body.clone(),
+                        created_at: now,
+                        delivery_state: "PENDING".to_string(),
+                    };
+                    let _ = state.ticket_store.db().add_chat_message(&chat_msg);
+                    let preview: String = body.chars().take(40).collect();
+                    let _ = state.ticket_store.db().record_event(
+                        &ticket_id,
+                        "CHAT_MESSAGE_SENT",
+                        &state.peer_id.to_string(),
+                        Some(&preview),
+                    );
+
+                    let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
+                        &ticket.operator_peer_id
+                    } else {
+                        &ticket.client_peer_id
+                    };
+                    if let Ok(peer) = target_str.parse::<PeerId>() {
+                        if let Some(ref sender) = state.p2p_sender {
+                            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                            let wire_msg = fortiq_p2p::ChatMessageWire {
+                                id: msg_id,
+                                ticket_id: ticket_id.clone(),
+                                sender_peer_id: state.peer_id.to_string(),
+                                body,
+                                created_at: now,
+                            };
+                            let _ = sender
+                                .send(fortiq_p2p::P2pCommand::SendChatMessage {
+                                    peer,
+                                    dial: None,
+                                    message: wire_msg,
+                                    reply: reply_tx,
+                                })
+                                .await;
+                            match tokio::time::timeout(std::time::Duration::from_secs(8), reply_rx)
+                                .await
+                            {
+                                Ok(Ok(Ok(ack))) => {
+                                    if ack.success {
+                                        let _ = state
+                                            .ticket_store
+                                            .db()
+                                            .update_message_delivery(&chat_msg.id, "DELIVERED");
+                                    } else {
+                                        return IpcResponse::Error(
+                                            ack.error.unwrap_or_else(|| {
+                                                "Erreur du destinataire".to_string()
+                                            }),
+                                        );
+                                    }
+                                }
+                                Ok(Ok(Err(err))) => return IpcResponse::Error(err),
+                                _ => {}
+                            }
+                        }
+                    }
+                    IpcResponse::MessageSent(chat_msg)
+                }
+                Ok(None) => IpcResponse::Error("Ticket introuvable".to_string()),
+                Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
+            }
+        }
+        IpcRequest::ListMessages { ticket_id } => {
+            match state.ticket_store.db().list_messages(&ticket_id) {
+                Ok(messages) => IpcResponse::Messages(messages),
+                Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
+            }
+        }
+        IpcRequest::SendFile {
+            ticket_id,
+            file_path,
+        } => {
+            match state.ticket_store.db().get_ticket(&ticket_id) {
+                Ok(Some(ticket)) => {
+                    if !ticket.state.permits_work() {
+                        return IpcResponse::Error(
+                            "Impossible d'envoyer un fichier : le ticket est fermé".to_string(),
+                        );
+                    }
+                    let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
+                        &ticket.operator_peer_id
+                    } else {
+                        &ticket.client_peer_id
+                    };
+                    let peer = match target_str.parse::<PeerId>() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            return IpcResponse::Error(format!("PeerId distant invalide: {e}"))
+                        }
+                    };
+                    if let Some(ref sender) = state.p2p_sender {
+                        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                        if sender
+                            .send(fortiq_p2p::P2pCommand::SendFile {
+                                peer,
+                                dial: None,
+                                ticket_id: ticket_id.clone(),
+                                file_path: std::path::PathBuf::from(file_path),
+                                reply: reply_tx,
+                            })
+                            .await
+                            .is_err()
+                        {
+                            return IpcResponse::Error("Canal de commande P2P fermé".to_string());
+                        }
+                        match tokio::time::timeout(std::time::Duration::from_secs(60), reply_rx)
+                            .await
+                        {
+                            Ok(Ok(Ok(attachment))) => IpcResponse::FileSent(attachment),
+                            Ok(Ok(Err(err))) => IpcResponse::Error(err),
+                            Ok(Err(_)) => {
+                                IpcResponse::Error("Canal de réponse fichier abandonné".to_string())
+                            }
+                            Err(_) => IpcResponse::Error(
+                                "Délai d'attente dépassé pour l'envoi du fichier (60s)".to_string(),
+                            ),
+                        }
+                    } else {
+                        IpcResponse::Error("Sous-système P2P indisponible".to_string())
+                    }
+                }
+                Ok(None) => IpcResponse::Error("Ticket introuvable".to_string()),
+                Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
+            }
+        }
+        IpcRequest::ListAttachments { ticket_id } => {
+            match state.ticket_store.db().list_attachments(&ticket_id) {
+                Ok(attachments) => IpcResponse::Attachments(attachments),
+                Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
+            }
+        }
+        IpcRequest::ListShellSessions { ticket_id } => {
+            match state.ticket_store.db().list_shell_sessions(&ticket_id) {
+                Ok(sessions) => IpcResponse::ShellSessions(sessions),
+                Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
+            }
+        }
     }
 }
 
@@ -567,6 +866,7 @@ where
     if p2p_sender
         .send(fortiq_p2p::P2pCommand::OpenShellStream {
             peer: target_peer,
+            ticket_id: init.ticket_id,
             dial: dial_addr,
             reply: reply_tx,
         })

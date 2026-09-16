@@ -10,6 +10,8 @@ anyhow.workspace = true
 fortiq-core = { path = "../fortiq-core" }
 futures.workspace = true
 portable-pty.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true

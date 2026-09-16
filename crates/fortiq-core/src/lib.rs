@@ -259,85 +259,117 @@ pub struct IpcConfig {
     pub terminal_sock: Option<String>,
 }
 
+pub mod ticket_db;
+pub use ticket_db::*;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ticket {
     pub id: String,
     pub state: TicketState,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum TicketState {
-    Open,
-    Closed,
-}
-
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TicketStore {
-    path: PathBuf,
+    db: TicketDb,
 }
 
 impl TicketStore {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        let (db_path, legacy_path) = if path.extension().is_some_and(|ext| ext == "json") {
+            let db_p = path.with_extension("db");
+            (db_p, Some(path))
+        } else {
+            (path, None)
+        };
+        let db = TicketDb::open(&db_path).unwrap_or_else(|_| {
+            TicketDb::open_in_memory().expect("in-memory db must open")
+        });
+        if let Some(ref leg) = legacy_path {
+            let _ = db.migrate_from_legacy_file(leg, "local", "operator");
+        }
+        Self { db }
+    }
+
+    pub fn in_memory() -> Self {
+        Self {
+            db: TicketDb::open_in_memory().expect("in-memory db must open"),
+        }
+    }
+
+    pub fn from_db(db: TicketDb) -> Self {
+        Self { db }
+    }
+
+    pub fn db(&self) -> &TicketDb {
+        &self.db
+    }
+
+    pub fn storage_dir(&self) -> PathBuf {
+        if let Some(path) = self.db.path() {
+            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                return parent.to_path_buf();
+            }
+        }
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     }
 
     pub async fn get(&self) -> Result<Option<Ticket>> {
-        match tokio::fs::read(&self.path).await {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .context("ticket file contains invalid data")
-                .map(Some),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => {
-                Err(error).with_context(|| format!("failed to read ticket {}", self.path.display()))
-            }
+        let tickets = self.db.list_tickets(None)?;
+        if let Some(active) = tickets.iter().find(|t| t.state.permits_work()) {
+            return Ok(Some(Ticket {
+                id: active.id.clone(),
+                state: active.state,
+            }));
         }
+        if let Some(first) = tickets.first() {
+            return Ok(Some(Ticket {
+                id: first.id.clone(),
+                state: first.state,
+            }));
+        }
+        Ok(None)
     }
 
     pub async fn is_open(&self) -> Result<bool> {
-        Ok(self
-            .get()
-            .await?
-            .is_some_and(|ticket| ticket.state == TicketState::Open))
+        let tickets = self.db.list_tickets(None)?;
+        Ok(tickets.iter().any(|t| t.state.permits_work() && t.remote_access_enabled))
     }
 
     pub async fn open(&self) -> Result<Ticket> {
-        if let Some(ticket) = self.get().await? {
-            if ticket.state == TicketState::Open {
-                return Ok(ticket);
-            }
+        let tickets = self.db.list_tickets(None)?;
+        if let Some(active) = tickets.iter().find(|t| t.state.permits_work()) {
+            return Ok(Ticket {
+                id: active.id.clone(),
+                state: active.state,
+            });
         }
-        let ticket = Ticket {
-            id: uuid::Uuid::new_v4().to_string(),
-            state: TicketState::Open,
-        };
-        self.save(&ticket).await?;
-        Ok(ticket)
+        let created = self.db.create_ticket(
+            "Assistance générale",
+            "Demande d'assistance initiée par l'utilisateur",
+            TicketPriority::Normal,
+            "local",
+            "operator",
+        )?;
+        Ok(Ticket {
+            id: created.id,
+            state: created.state,
+        })
     }
 
     pub async fn close(&self) -> Result<Option<Ticket>> {
-        let Some(mut ticket) = self.get().await? else {
-            return Ok(None);
-        };
-        ticket.state = TicketState::Closed;
-        self.save(&ticket).await?;
-        Ok(Some(ticket))
-    }
-
-    async fn save(&self, ticket: &Ticket) -> Result<()> {
-        if let Some(parent) = self
-            .path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            tokio::fs::create_dir_all(parent).await.with_context(|| {
-                format!("failed to create ticket directory {}", parent.display())
-            })?;
+        let tickets = self.db.list_tickets(None)?;
+        let mut closed_ticket = None;
+        for t in tickets {
+            if t.state.permits_work() {
+                if let Ok(Some(updated)) = self.db.update_ticket_state(&t.id, TicketState::Closed, "local") {
+                    closed_ticket = Some(Ticket {
+                        id: updated.id,
+                        state: updated.state,
+                    });
+                }
+            }
         }
-        let bytes = serde_json::to_vec_pretty(ticket)?;
-        tokio::fs::write(&self.path, bytes)
-            .await
-            .with_context(|| format!("failed to persist ticket {}", self.path.display()))
+        Ok(closed_ticket)
     }
 }
 

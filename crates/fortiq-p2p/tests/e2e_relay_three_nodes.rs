@@ -221,6 +221,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     op_cmd_tx
         .send(P2pCommand::OpenShellStream {
             peer: managed_peer_id,
+            ticket_id: None,
             dial: None,
             reply: shell_tx,
         })
@@ -316,6 +317,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         if op_cmd_tx
             .send(P2pCommand::OpenShellStream {
                 peer: managed_peer_id,
+                ticket_id: None,
                 dial: None,
                 reply: shell_tx2,
             })
@@ -630,6 +632,7 @@ async fn e2e_relay_production_rate_limiting_smoke() {
     op_cmd_tx
         .send(P2pCommand::OpenShellStream {
             peer: managed_peer_id,
+            ticket_id: None,
             dial: None,
             reply: shell_tx,
         })

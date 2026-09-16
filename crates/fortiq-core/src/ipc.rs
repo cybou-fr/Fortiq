@@ -29,6 +29,8 @@ pub fn unix_terminal_socket_path() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TerminalSessionInit {
     pub peer: String,
+    #[serde(default)]
+    pub ticket_id: Option<String>,
     #[serde(default = "default_terminal_cols")]
     pub cols: u16,
     #[serde(default = "default_terminal_rows")]
@@ -56,6 +58,45 @@ pub enum IpcRequest {
         dial: Option<String>,
     },
     ListPeers,
+
+    // Ticket Core v2 additions:
+    ListTickets {
+        #[serde(default)]
+        state_filter: Option<crate::TicketState>,
+    },
+    GetTicket {
+        ticket_id: String,
+    },
+    CreateTicket {
+        title: String,
+        description: String,
+        priority: crate::TicketPriority,
+    },
+    UpdateTicketStatus {
+        ticket_id: String,
+        state: crate::TicketState,
+    },
+    SetRemoteAccess {
+        ticket_id: String,
+        enabled: bool,
+    },
+    SendChatMessage {
+        ticket_id: String,
+        body: String,
+    },
+    ListMessages {
+        ticket_id: String,
+    },
+    SendFile {
+        ticket_id: String,
+        file_path: String,
+    },
+    ListAttachments {
+        ticket_id: String,
+    },
+    ListShellSessions {
+        ticket_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -65,6 +106,16 @@ pub enum IpcResponse {
     TicketOpened(Ticket),
     TicketClosed,
     Peers(Vec<PeerSummary>),
+    Tickets(Vec<crate::TicketRecord>),
+    TicketDetail(Option<crate::TicketDetail>),
+    TicketCreated(crate::TicketRecord),
+    TicketUpdated(Option<crate::TicketRecord>),
+    Messages(Vec<crate::ChatMessage>),
+    MessageSent(crate::ChatMessage),
+    Attachments(Vec<crate::AttachmentRecord>),
+    FileSent(crate::AttachmentRecord),
+    ShellSessions(Vec<crate::ShellSessionRecord>),
+    Success,
     Error(String),
 }
 

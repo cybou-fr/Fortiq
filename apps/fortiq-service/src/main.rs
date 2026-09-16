@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use fortiq_core::{Config, NodeInfo, NodeMode, TicketState, TicketStore};
+use fortiq_core::{Config, NodeInfo, NodeMode, TicketStore};
 use fortiq_p2p::{load_or_create_identity, IdentityStatus, RunOptions};
 use fs2::FileExt;
 use libp2p::{multiaddr::Protocol, Multiaddr};
@@ -257,14 +257,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
             }
             TicketAction::Status => {
                 match ticket_store.get().await? {
-                    Some(ticket) => println!(
-                        "Ticket {}: {}",
-                        ticket.id,
-                        match ticket.state {
-                            TicketState::Open => "OPEN",
-                            TicketState::Closed => "CLOSED",
-                        }
-                    ),
+                    Some(ticket) => println!("Ticket {}: {}", ticket.id, ticket.state.as_str()),
                     None => println!("No ticket"),
                 }
                 return Ok(());

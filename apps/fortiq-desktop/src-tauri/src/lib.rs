@@ -249,6 +249,172 @@ async fn list_peers() -> Result<Vec<DesktopPeer>, String> {
     }
 }
 
+#[tauri::command]
+async fn list_tickets(
+    state_filter: Option<String>,
+) -> Result<Vec<fortiq_core::TicketRecord>, String> {
+    let filter = state_filter.and_then(|s| fortiq_core::TicketState::parse_str(&s.to_uppercase()));
+    if let Some(resp) =
+        send_ipc_request(&fortiq_core::ipc::IpcRequest::ListTickets { state_filter: filter }).await
+    {
+        match resp {
+            fortiq_core::ipc::IpcResponse::Tickets(tickets) => Ok(tickets),
+            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
+            _ => Err("Réponse inattendue du démon".to_string()),
+        }
+    } else {
+        Err("Service FORTIQ indisponible".to_string())
+    }
+}
+
+#[tauri::command]
+async fn get_ticket(ticket_id: String) -> Result<Option<fortiq_core::TicketDetail>, String> {
+    if let Some(resp) =
+        send_ipc_request(&fortiq_core::ipc::IpcRequest::GetTicket { ticket_id }).await
+    {
+        match resp {
+            fortiq_core::ipc::IpcResponse::TicketDetail(detail) => Ok(detail),
+            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
+            _ => Err("Réponse inattendue du démon".to_string()),
+        }
+    } else {
+        Err("Service FORTIQ indisponible".to_string())
+    }
+}
+
+#[tauri::command]
+async fn create_ticket(
+    title: String,
+    description: String,
+    priority: String,
+) -> Result<fortiq_core::TicketRecord, String> {
+    let prio = fortiq_core::TicketPriority::parse_str(&priority.to_uppercase());
+    if let Some(resp) = send_ipc_request(&fortiq_core::ipc::IpcRequest::CreateTicket {
+        title,
+        description,
+        priority: prio,
+    })
+    .await
+    {
+        match resp {
+            fortiq_core::ipc::IpcResponse::TicketCreated(record) => Ok(record),
+            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
+            _ => Err("Réponse inattendue du démon".to_string()),
+        }
+    } else {
+        Err("Service FORTIQ indisponible".to_string())
+    }
+}
+
+#[tauri::command]
+async fn send_chat_message(
+    ticket_id: String,
+    body: String,
+) -> Result<fortiq_core::ChatMessage, String> {
+    if let Some(resp) =
+        send_ipc_request(&fortiq_core::ipc::IpcRequest::SendChatMessage { ticket_id, body }).await
+    {
+        match resp {
+            fortiq_core::ipc::IpcResponse::MessageSent(msg) => Ok(msg),
+            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
+            _ => Err("Réponse inattendue du démon".to_string()),
+        }
+    } else {
+        Err("Service FORTIQ indisponible".to_string())
+    }
+}
+
+#[tauri::command]
+async fn list_messages(ticket_id: String) -> Result<Vec<fortiq_core::ChatMessage>, String> {
+    if let Some(resp) =
+        send_ipc_request(&fortiq_core::ipc::IpcRequest::ListMessages { ticket_id }).await
+    {
+        match resp {
+            fortiq_core::ipc::IpcResponse::Messages(msgs) => Ok(msgs),
+            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
+            _ => Err("Réponse inattendue du démon".to_string()),
+        }
+    } else {
+        Err("Service FORTIQ indisponible".to_string())
+    }
+}
+
+#[tauri::command]
+async fn send_file(
+    ticket_id: String,
+    file_path: String,
+) -> Result<fortiq_core::AttachmentRecord, String> {
+    if let Some(resp) =
+        send_ipc_request(&fortiq_core::ipc::IpcRequest::SendFile { ticket_id, file_path }).await
+    {
+        match resp {
+            fortiq_core::ipc::IpcResponse::FileSent(att) => Ok(att),
+            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
+            _ => Err("Réponse inattendue du démon".to_string()),
+        }
+    } else {
+        Err("Service FORTIQ indisponible".to_string())
+    }
+}
+
+#[tauri::command]
+async fn list_attachments(
+    ticket_id: String,
+) -> Result<Vec<fortiq_core::AttachmentRecord>, String> {
+    if let Some(resp) =
+        send_ipc_request(&fortiq_core::ipc::IpcRequest::ListAttachments { ticket_id }).await
+    {
+        match resp {
+            fortiq_core::ipc::IpcResponse::Attachments(atts) => Ok(atts),
+            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
+            _ => Err("Réponse inattendue du démon".to_string()),
+        }
+    } else {
+        Err("Service FORTIQ indisponible".to_string())
+    }
+}
+
+#[tauri::command]
+async fn set_remote_access(
+    ticket_id: String,
+    enabled: bool,
+) -> Result<Option<fortiq_core::TicketRecord>, String> {
+    if let Some(resp) =
+        send_ipc_request(&fortiq_core::ipc::IpcRequest::SetRemoteAccess { ticket_id, enabled }).await
+    {
+        match resp {
+            fortiq_core::ipc::IpcResponse::TicketUpdated(rec) => Ok(rec),
+            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
+            _ => Err("Réponse inattendue du démon".to_string()),
+        }
+    } else {
+        Err("Service FORTIQ indisponible".to_string())
+    }
+}
+
+#[tauri::command]
+async fn update_ticket_status(
+    ticket_id: String,
+    state: String,
+) -> Result<Option<fortiq_core::TicketRecord>, String> {
+    let s = fortiq_core::TicketState::parse_str(&state.to_uppercase())
+        .ok_or_else(|| format!("Statut invalide: {state}"))?;
+    if let Some(resp) = send_ipc_request(&fortiq_core::ipc::IpcRequest::UpdateTicketStatus {
+        ticket_id,
+        state: s,
+    })
+    .await
+    {
+        match resp {
+            fortiq_core::ipc::IpcResponse::TicketUpdated(rec) => Ok(rec),
+            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
+            _ => Err("Réponse inattendue du démon".to_string()),
+        }
+    } else {
+        Err("Service FORTIQ indisponible".to_string())
+    }
+}
+
 /// A live terminal session: the frame sender plus the handles of the two tasks
 /// that own the IPC pipe. Both must be aborted to close the pipe, which is what
 /// makes the daemon drop the P2P stream and the remote host release its
@@ -278,6 +444,7 @@ async fn start_terminal_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, TerminalState>,
     peer: String,
+    ticket_id: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
@@ -321,6 +488,7 @@ async fn start_terminal_session(
 
     let init = fortiq_core::ipc::TerminalSessionInit {
         peer,
+        ticket_id,
         cols,
         rows,
         dial: None,
@@ -582,6 +750,15 @@ pub fn run() {
             open_ticket,
             close_ticket,
             list_peers,
+            list_tickets,
+            get_ticket,
+            create_ticket,
+            send_chat_message,
+            list_messages,
+            send_file,
+            list_attachments,
+            set_remote_access,
+            update_ticket_status,
             start_terminal_session,
             write_terminal_data,
             resize_terminal,
