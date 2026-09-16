@@ -12,6 +12,28 @@ use tokio_util::compat::FuturesAsyncReadCompatExt;
 
 pub const AUTHORIZED: u8 = 1;
 pub const DENIED: u8 = 0;
+/// The remote peer has no open ticket, so its user has not consented.
+pub const DENIED_NO_TICKET: u8 = 2;
+/// Another shell session is already running on the remote peer.
+pub const DENIED_BUSY: u8 = 3;
+
+/// How often the served session pings an idle operator.
+const KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+/// How long the served session waits for any frame before giving up on the
+/// operator. An operator that vanishes without closing the stream (a killed
+/// console, a dropped link) used to leave `serve` blocked forever, which held
+/// the single-session flag and made every later session impossible.
+const LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Explains a refused shell so the operator learns which gate closed instead of
+/// reading one ambiguous sentence.
+pub fn describe_denial(code: u8) -> &'static str {
+    match code {
+        DENIED_NO_TICKET => "no open ticket on the remote host: its user has not opened one",
+        DENIED_BUSY => "another shell session is already active on the remote host",
+        _ => "the remote host refused the terminal",
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellFrame {
@@ -197,9 +219,14 @@ pub async fn send_authorization<S>(stream: &mut S, allowed: bool) -> Result<()>
 where
     S: AsyncWrite + Unpin,
 {
-    stream
-        .write_all(&[if allowed { AUTHORIZED } else { DENIED }])
-        .await?;
+    send_authorization_code(stream, if allowed { AUTHORIZED } else { DENIED }).await
+}
+
+pub async fn send_authorization_code<S>(stream: &mut S, code: u8) -> Result<()>
+where
+    S: AsyncWrite + Unpin,
+{
+    stream.write_all(&[code]).await?;
     stream.flush().await?;
     Ok(())
 }
@@ -293,8 +320,11 @@ where
         }
     });
 
-    // Task 1: read bytes from PTY master and queue them for network transmission
-    let (pty_out_tx, mut pty_out_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+    // Task 1: read bytes from PTY master and queue them for network transmission.
+    // Keepalive pings and pongs share this channel so a single task owns the
+    // network writer.
+    let (pty_out_tx, mut pty_out_rx) = tokio::sync::mpsc::channel::<ShellFrame>(128);
+    let keepalive_tx = pty_out_tx.clone();
     let mut read_task = tokio::task::spawn_blocking(move || {
         use std::io::Read;
         let mut reader = master_reader;
@@ -308,7 +338,10 @@ where
                     if buf[..n].windows(4).any(|w| w == b"\x1b[6n") {
                         let _ = pty_in_tx_for_dsr.blocking_send(b"\x1b[1;1R".to_vec());
                     }
-                    if pty_out_tx.blocking_send(buf[..n].to_vec()).is_err() {
+                    if pty_out_tx
+                        .blocking_send(ShellFrame::Data(buf[..n].to_vec()))
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -319,12 +352,22 @@ where
 
     // Task 2: forward pty_out_rx to network_write
     let mut send_task = tokio::spawn(async move {
-        while let Some(bytes) = pty_out_rx.recv().await {
-            if ShellFrame::Data(bytes)
-                .write_to(&mut network_write)
-                .await
-                .is_err()
-            {
+        while let Some(frame) = pty_out_rx.recv().await {
+            if frame.write_to(&mut network_write).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Task 4: ping an idle operator so a session that is merely quiet is not
+    // mistaken for an abandoned one.
+    let ping_tx = keepalive_tx.clone();
+    let keepalive_task = tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(KEEPALIVE_INTERVAL);
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            if ping_tx.send(ShellFrame::Ping).await.is_err() {
                 break;
             }
         }
@@ -347,7 +390,24 @@ where
         }
         _ = async {
             loop {
-                match ShellFrame::read_from(&mut network_read).await {
+                // Any frame proves the operator is still there. Without this
+                // deadline an abandoned stream kept the session, and therefore
+                // the single-session flag, alive forever.
+                let frame = match tokio::time::timeout(
+                    LIVENESS_TIMEOUT,
+                    ShellFrame::read_from(&mut network_read),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => {
+                        tracing::warn!(
+                            "no frame from the operator within the liveness timeout; ending session"
+                        );
+                        break;
+                    }
+                };
+                match frame {
                     Ok(Some(ShellFrame::Data(bytes))) => {
                         if pty_in_tx.send(bytes).await.is_err() {
                             break;
@@ -367,7 +427,9 @@ where
                         })
                         .await;
                     }
-                    Ok(Some(ShellFrame::Ping)) => {}
+                    Ok(Some(ShellFrame::Ping)) => {
+                        let _ = keepalive_tx.send(ShellFrame::Pong).await;
+                    }
                     Ok(Some(ShellFrame::Pong)) => {}
                     Ok(None) => break, // EOF
                     Err(_) => break,
@@ -393,6 +455,7 @@ where
         send_task.abort();
     }
 
+    keepalive_task.abort();
     let _ = killer.kill();
     if !child_completed {
         let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut child_task).await;

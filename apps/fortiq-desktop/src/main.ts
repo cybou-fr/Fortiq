@@ -416,14 +416,6 @@ function initEventListeners() {
     });
   }
 
-  // Connect terminal action
-  const btnConnect = document.getElementById("btn-connect");
-  if (btnConnect) {
-    btnConnect.addEventListener("click", () => {
-      connectTerminalSession();
-    });
-  }
-
   // Clear terminal action
   const btnTermClear = document.getElementById("btn-term-clear");
   if (btnTermClear) {

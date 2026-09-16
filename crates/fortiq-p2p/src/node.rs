@@ -519,7 +519,11 @@ async fn event_loop(
                                             if auth[0] == fortiq_shell::AUTHORIZED {
                                                 Ok(stream)
                                             } else {
-                                                Err("L'hôte distant a refusé l'accès au terminal (ticket non ouvert ou session concurrente active)".to_string())
+                                                Err(match auth[0] {
+                                                    fortiq_shell::DENIED_NO_TICKET => "Aucun ticket ouvert sur le poste distant : son utilisateur doit l'ouvrir lui-même".to_string(),
+                                                    fortiq_shell::DENIED_BUSY => "Une session terminal est déjà active sur le poste distant".to_string(),
+                                                    _ => "Le poste distant a refusé l'accès au terminal (PeerId opérateur non autorisé)".to_string(),
+                                                })
                                             }
                                         }
                                         Err(e) => Err(format!("Échec de lecture de l'autorisation shell: {e}")),
@@ -538,12 +542,26 @@ async fn event_loop(
                     warn!(%error, "failed to check ticket state; denying shell");
                     false
                 });
-                let authorized = is_authorized_operator(remote_peer, &config) && ticket_open;
                 let mut stream = stream;
 
-                if !authorized {
-                    warn!(remote_peer_id = %remote_peer, "denied shell from unauthorized peer or closed ticket");
-                    let _ = fortiq_shell::send_authorization(&mut stream, false).await;
+                if !is_authorized_operator(remote_peer, &config) {
+                    warn!(remote_peer_id = %remote_peer, "denied shell from unauthorized peer");
+                    let _ = fortiq_shell::send_authorization_code(
+                        &mut stream,
+                        fortiq_shell::DENIED,
+                    )
+                    .await;
+                    drop(stream);
+                    continue;
+                }
+
+                if !ticket_open {
+                    warn!(remote_peer_id = %remote_peer, "denied shell: no open ticket");
+                    let _ = fortiq_shell::send_authorization_code(
+                        &mut stream,
+                        fortiq_shell::DENIED_NO_TICKET,
+                    )
+                    .await;
                     drop(stream);
                     continue;
                 }
@@ -553,7 +571,11 @@ async fn event_loop(
                     .is_err()
                 {
                     warn!(remote_peer_id = %remote_peer, "denied shell: another shell session is already active");
-                    let _ = fortiq_shell::send_authorization(&mut stream, false).await;
+                    let _ = fortiq_shell::send_authorization_code(
+                        &mut stream,
+                        fortiq_shell::DENIED_BUSY,
+                    )
+                    .await;
                     drop(stream);
                     continue;
                 }

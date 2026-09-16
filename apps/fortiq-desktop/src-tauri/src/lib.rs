@@ -294,8 +294,12 @@ async fn start_terminal_session(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<fortiq_shell::ShellFrame>(128);
 
     {
+        // Drop the previous session's sender first. Leaving it in place kept the
+        // old stream open, so the remote host still counted a session as active
+        // and refused every later one.
         let mut session_guard = state.0.lock().await;
-        *session_guard = Some(tx);
+        session_guard.take();
+        *session_guard = Some(tx.clone());
     }
 
     tokio::spawn(async move {
@@ -308,6 +312,7 @@ async fn start_terminal_session(
 
     let mut read_half = reader.into_inner();
     let app_clone = app.clone();
+    let pong_tx = tx;
     tokio::spawn(async move {
         loop {
             match fortiq_shell::ShellFrame::read_from(&mut read_half).await {
@@ -315,7 +320,17 @@ async fn start_terminal_session(
                     let text = String::from_utf8_lossy(&bytes).to_string();
                     let _ = app_clone.emit("terminal-output", text);
                 }
-                Ok(Some(fortiq_shell::ShellFrame::Ping)) => {}
+                Ok(Some(fortiq_shell::ShellFrame::Ping)) => {
+                    // Answer the host's keepalive, otherwise it treats this
+                    // console as gone and ends the session.
+                    if pong_tx
+                        .send(fortiq_shell::ShellFrame::Pong)
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
                 Ok(Some(fortiq_shell::ShellFrame::Pong)) => {}
                 Ok(Some(fortiq_shell::ShellFrame::Resize { .. })) => {}
                 Ok(None) => break,

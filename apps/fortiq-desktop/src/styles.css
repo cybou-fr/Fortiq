@@ -862,3 +862,10 @@ button:disabled, .btn:disabled {
   color: #7ee787;
   flex-shrink: 0;
 }
+
+.session-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted, #8b98a8);
+}
