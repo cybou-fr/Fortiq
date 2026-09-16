@@ -265,10 +265,18 @@ function renderPeerList(peers: DesktopPeer[], isOnline: boolean) {
     `;
 
     card.addEventListener("click", () => {
+      const switchedPeer = selectedPeerId !== peer.peerId;
       selectedPeerId = peer.peerId;
       document.querySelectorAll(".ticket-card").forEach((c) => c.classList.remove("active"));
       card.classList.add("active");
       updatePeerDetails(peer);
+
+      // Selecting a connected peer is the operator asking to work on it, so
+      // open the session straight away instead of requiring a second click.
+      // An already running session is left alone: reconnecting would kill it.
+      if (isPeerConnected(peer.status) && (switchedPeer || !isTerminalActive)) {
+        void connectTerminalSession(false);
+      }
     });
 
     container.appendChild(card);
@@ -537,7 +545,7 @@ function initTerminal() {
   });
 }
 
-async function connectTerminalSession() {
+async function connectTerminalSession(announceFailure = true) {
   if (!selectedPeerId) return;
   const container = document.getElementById("xterm-container");
   const placeholder = document.getElementById("terminal-placeholder");
@@ -585,7 +593,12 @@ async function connectTerminalSession() {
     if (term) {
       term.write(`\r\n\x1b[1;31m[ERREUR]\x1b[0m ${err}\r\n`);
     }
-    alert(`Échec de connexion au terminal : ${err}`);
+    // A session opened by selecting a peer must not raise a modal: the error
+    // already appears in the terminal, and the operator may simply be browsing
+    // the inventory.
+    if (announceFailure) {
+      alert(`Échec de connexion au terminal : ${err}`);
+    }
   } finally {
     if (btnConnect) {
       btnConnect.disabled = false;

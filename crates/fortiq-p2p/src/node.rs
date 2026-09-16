@@ -640,7 +640,7 @@ async fn event_loop(
                     ).await;
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::RendezvousClient(event)) => {
-                    handle_rendezvous_client(event, swarm, target_peer, &mut peer_registry);
+                    handle_rendezvous_client(event, swarm, target_peer, &config, &mut peer_registry);
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::RendezvousServer(event)) => {
                     handle_rendezvous_server(event);
@@ -720,6 +720,7 @@ fn handle_rendezvous_client(
     event: rendezvous::client::Event,
     swarm: &mut Swarm<Behaviour>,
     target_peer: Option<PeerId>,
+    config: &Config,
     peer_registry: &mut PeerRegistry,
 ) {
     match event {
@@ -756,6 +757,21 @@ fn handle_rendezvous_client(
                             warn!(address = %dial_address, %error, "failed to dial discovered address");
                         }
                     }
+                } else if config.mode() == fortiq_core::NodeMode::Operator
+                    && !swarm.is_connected(&peer_id)
+                {
+                    // An operator console lists the peers it supervises, so a
+                    // peer that is merely discovered is not yet usable: without
+                    // a connection there is no HELLO metadata and no shell.
+                    // Connecting costs nothing beyond a QUIC session and grants
+                    // no authority by itself.
+                    info!(%peer_id, "discovered peer; connecting to complete the inventory");
+                    dial_peer_candidates(
+                        swarm,
+                        peer_id,
+                        peer_registry,
+                        config.network.relay_peer.as_deref(),
+                    );
                 }
             }
             info!(%rendezvous_node, "rendezvous discovery completed");
