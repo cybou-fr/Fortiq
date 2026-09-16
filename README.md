@@ -1,4 +1,32 @@
-# FORTIQ
+<p align="center">
+  <img src="docs/assets/logo.png" alt="FORTIQ" width="120">
+</p>
+
+<h1 align="center">FORTIQ</h1>
+
+<p align="center"><em>Sovereign peer-to-peer remote administration and supervision</em></p>
+
+---
+
+## Who this is for
+
+FORTIQ is built for the clients of our managed support service. It is
+distributed and operated by us, for them.
+
+**The source is published for analysis, review, control and teaching** — so that
+anyone can audit what runs on a supervised machine, and so that the protocol and
+its authorization model can be studied. That is the purpose of this repository.
+
+**Do not use it as a finished product if you are not our client.** Private or
+third-party use requires modification: the code assumes our relay and rendezvous
+infrastructure, our operator identity, and our operating procedures. Nothing
+here ships as a turn-key remote administration suite, there is no public support
+channel, and no fitness for any particular deployment is claimed.
+
+If you want FORTIQ running for your own organization, talk to us about becoming
+a client, or fork it and take ownership of the changes.
+
+---
 
 FORTIQ is a minimal peer-to-peer remote administration system in Rust. Every machine runs the same `fortiq-service`; milestones 0–13 provide persistent identity, configuration-derived operator/managed mode, direct and Circuit Relay v2 connectivity with DCUtR upgrade attempts, rendezvous discovery, HELLO metadata exchange, operator PeerId authorization, persistent support tickets, native Windows ConPTY and Linux PTY terminal streaming with xterm.js, local IPC, and background system service packaging (Windows Service / systemd).
 
@@ -70,6 +98,18 @@ cargo run -p fortiq-service -- --config operator.toml ticket close \
 ```
 
 If an active shell session is currently open, `ticket close` is rejected. The workflow is `exit shell -> ticket close -> CLOSED`. After closure, new shell streams are rejected. By default, the ticket is stored beside the identity as `<identity-name>.ticket.json`; `[ticket] path = "..."` overrides that location.
+
+A node whose own config sets `[ticket] auto_open = true` opens its ticket when
+the service starts, surviving restarts and reboots. It is intended for lab and
+infrastructure nodes, defaults to `false`, and is ignored on operator nodes,
+which hold no ticket. No remote peer can set it: on a client machine the ticket
+stays the user's own consent gesture.
+
+```toml
+[ticket]
+path = "/var/lib/fortiq/ticket.json"
+auto_open = true
+```
 
 FORTIQ utilizes native pseudoterminal allocation (`portable-pty` with ConPTY on Windows, openpty on Linux) with binary framing (`ShellFrame`) for interactive terminal sessions, supporting dynamic resizing and full-screen terminal applications.
 
@@ -198,5 +238,21 @@ When end peers establish a relayed connection, DCUtR automatically attempts a di
 For WSL/VPS instructions, see [docs/milestones.md](docs/milestones.md).
 
 ## Security scope
+
+The ticket is the supervised user's consent gesture. Only that user, on their own
+machine, can open one; the operator can never open a ticket remotely. A shell is
+accepted only while a ticket is open and only from the exactly configured
+operator PeerId, authenticated by libp2p. Closing a ticket is the operator's
+action, so a client cannot interrupt an operation in progress.
+
+`[ticket] auto_open = true` lets a machine open its own ticket at service start.
+It is meant for lab and infrastructure nodes that must stay reachable across
+restarts, it is set only in that machine's own local config, and no remote peer
+can turn it on. A real client machine leaves it off.
+
+Transport is authenticated and encrypted: QUIC for direct links, Noise + Yamux
+for relay circuits, so a relay never sees plaintext. There is no separate
+per-session key for a ticket, chat or shell today, so sessions are not
+cryptographically isolated from one another beyond the transport.
 
 Identity files contain private keys and are ignored by Git. On Unix they are created with mode `0600`. Never copy an identity file between machines or expose its contents.
