@@ -1038,7 +1038,7 @@ body {
 }
 
 /* ==========================================================================
-   Proprietary Tech & Terminal Box
+   Proprietary Tech & P2P Engine
    ========================================================================== */
 
 .tech-grid {
@@ -1073,108 +1073,7 @@ body {
   color: var(--text-secondary);
 }
 
-.tech-terminal-box {
-  background: #090d14;
-  border: 1px solid #232d3d;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-}
 
-.terminal-bar {
-  background: #111822;
-  padding: 10px 18px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid #1f2a3a;
-}
-
-.terminal-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: var(--accent-green);
-}
-
-.terminal-label {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.terminal-code {
-  padding: 24px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.7;
-  overflow-x: auto;
-  color: #c9d1d9;
-}
-
-.c-comment { color: #57606a; }
-.c-cyan { color: var(--accent-cyan); font-weight: 600; }
-.c-green { color: #7ee787; font-weight: 600; }
-
-/* ==========================================================================
-   Architecture Section
-   ========================================================================== */
-
-.arch-flow {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.arch-box {
-  width: 100%;
-  padding: 24px 30px;
-  border-radius: var(--radius-md);
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  position: relative;
-  text-align: center;
-}
-
-.box-tag {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  color: var(--accent-cyan);
-  margin-bottom: 6px;
-}
-
-.arch-box h4 {
-  font-size: 18px;
-  font-weight: 700;
-  margin-bottom: 6px;
-}
-
-.arch-box p {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.arch-arrow {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 16px 0;
-  color: var(--accent-cyan);
-}
-
-.arrow-label {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-
-.arrow-sym {
-  font-size: 20px;
-}
 
 /* ==========================================================================
    Comparison Table
