@@ -51,24 +51,26 @@ journalctl -u fortiq -n 20 --no-pager
 
 On the managed client machine (where remote support is requested):
 
-### Option A: Install via Release Bundle
+### Install the complete Client product
 
-```powershell
-# 4. Extract release archive
-Expand-Archive -Path FORTIQ-0.1.0-Windows-x64.zip -DestinationPath C:\Temp\FortiqInstall
+Download and run:
 
-# 5. Run automated installer as Administrator
-powershell -ExecutionPolicy Bypass -File C:\Temp\FortiqInstall\install.ps1
+```text
+FORTIQ-Client-Setup-<version>-x64.exe
 ```
 
-The installer:
+The wizard requires the Operator PeerId and refuses to install when it is
+missing or invalid. It uses the Windows computer name by default.
+
+The complete installer:
 - Copies binaries to `C:\Program Files\FORTIQ\`
 - Adds `C:\Program Files\FORTIQ` to system `PATH`
-- Initializes configuration at `C:\ProgramData\FORTIQ\fortiq.toml` with the pre-configured OVH relay
+- Writes an explicit Client configuration with the supplied `operator_peer_id`
 - Installs and starts the background Windows Service (`FortiqService`)
-- Creates Start Menu shortcuts and launches the `fortiq-desktop` GUI in the system tray
+- Creates Start Menu shortcuts
+- Registers `fortiq-desktop.exe` for automatic start at interactive user logon
 
-### Option B: Check Identity and Open Support Ticket
+### Check Identity and Open Support Ticket
 
 Open PowerShell or Command Prompt:
 
@@ -90,7 +92,13 @@ fortiq ticket status
 
 ## 3. Operator Machine Setup & Remote Administration
 
-On the operator/admin machine (Windows or Linux):
+On Windows, first install:
+
+```text
+FORTIQ-Operator-Setup-<version>-x64.exe
+```
+
+The Operator package never writes an `operator_peer_id`. After installation:
 
 ```powershell
 # 9. Verify operator daemon is running and check its status
@@ -156,12 +164,16 @@ fortiq shell <MANAGED_PEER_ID>
 When testing is complete on the Windows managed machine:
 
 ```powershell
-# 17. Run uninstaller as Administrator
-powershell -ExecutionPolicy Bypass -File "C:\Program Files\FORTIQ\uninstall.ps1"
+# 17. Use Windows Installed Apps, or run as Administrator
+& "C:\Program Files\FORTIQ\Uninstall FORTIQ.exe"
 
-# 18. Verify service has been stopped and removed
+# 18. Verify service and desktop autostart have been removed
 Get-Service FortiqService -ErrorAction SilentlyContinue
+Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "FORTIQ Desktop" -ErrorAction SilentlyContinue
 ```
+
+Identity and configuration remain in `C:\ProgramData\FORTIQ` by default.
+Removing them requires a separate explicit `uninstall.ps1 -RemoveData` confirmation.
 
 ---
 

@@ -50,24 +50,20 @@ async fn run_terminal_ipc(state: Arc<IpcState>) -> Result<()> {
 
 #[cfg(windows)]
 async fn run_windows_pipe(state: Arc<IpcState>) -> Result<()> {
-    use tokio::net::windows::named_pipe::ServerOptions;
-
     let pipe_name = state.config.ipc_endpoint();
     tracing::info!("Starting Windows Named Pipe IPC server at {}", pipe_name);
 
-    let mut server = ServerOptions::new()
-        .first_pipe_instance(true)
-        .create(&pipe_name)?;
+    let mut server = create_windows_pipe(&pipe_name, true)?;
 
     loop {
         if let Err(err) = server.connect().await {
             tracing::warn!("Named pipe connection failed: {err}");
-            server = ServerOptions::new().create(&pipe_name)?;
+            server = create_windows_pipe(&pipe_name, false)?;
             continue;
         }
 
         let client = server;
-        server = ServerOptions::new().create(&pipe_name)?;
+        server = create_windows_pipe(&pipe_name, false)?;
 
         let state_clone = Arc::clone(&state);
         tokio::spawn(async move {
@@ -80,24 +76,20 @@ async fn run_windows_pipe(state: Arc<IpcState>) -> Result<()> {
 
 #[cfg(windows)]
 async fn run_windows_terminal_pipe(state: Arc<IpcState>) -> Result<()> {
-    use tokio::net::windows::named_pipe::ServerOptions;
-
     let pipe_name = state.config.terminal_ipc_endpoint();
     tracing::info!("Starting Windows Terminal Named Pipe at {}", pipe_name);
 
-    let mut server = ServerOptions::new()
-        .first_pipe_instance(true)
-        .create(&pipe_name)?;
+    let mut server = create_windows_pipe(&pipe_name, true)?;
 
     loop {
         if let Err(err) = server.connect().await {
             tracing::warn!("Terminal named pipe connection failed: {err}");
-            server = ServerOptions::new().create(&pipe_name)?;
+            server = create_windows_pipe(&pipe_name, false)?;
             continue;
         }
 
         let client = server;
-        server = ServerOptions::new().create(&pipe_name)?;
+        server = create_windows_pipe(&pipe_name, false)?;
 
         let state_clone = Arc::clone(&state);
         tokio::spawn(async move {
@@ -106,6 +98,72 @@ async fn run_windows_terminal_pipe(state: Arc<IpcState>) -> Result<()> {
             }
         });
     }
+}
+
+/// Creates a local-only pipe that a desktop application can open even though the
+/// service itself runs as LocalSystem. Windows' default pipe DACL otherwise only
+/// grants access to the service account, making every non-elevated GUI look offline.
+#[cfg(windows)]
+fn create_windows_pipe(
+    pipe_name: &str,
+    first_instance: bool,
+) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+    use std::{ffi::c_void, iter, ptr};
+    use tokio::net::windows::named_pipe::ServerOptions;
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{
+            Authorization::{
+                ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+            },
+            SECURITY_ATTRIBUTES,
+        },
+    };
+
+    // LocalSystem and administrators retain full control. Interactive desktop
+    // users receive only the read/write access needed by the CLI and GUI.
+    let sddl: Vec<u16> = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
+        .encode_utf16()
+        .chain(iter::once(0))
+        .collect();
+    let mut descriptor: *mut c_void = ptr::null_mut();
+
+    // SAFETY: `sddl` is NUL-terminated and remains alive for the duration of the
+    // conversion. Windows allocates `descriptor`, which is released with LocalFree.
+    let converted = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            ptr::null_mut(),
+        )
+    };
+    if converted == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    let mut security_attributes = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor,
+        bInheritHandle: 0,
+    };
+    let mut options = ServerOptions::new();
+    options
+        .first_pipe_instance(first_instance)
+        .reject_remote_clients(true);
+
+    // SAFETY: `security_attributes` and its descriptor stay valid throughout the
+    // synchronous CreateNamedPipe call. Tokio does not retain either pointer.
+    let attributes_ptr = (&mut security_attributes as *mut SECURITY_ATTRIBUTES).cast::<c_void>();
+    let result = unsafe { options.create_with_security_attributes_raw(pipe_name, attributes_ptr) };
+
+    // SAFETY: the descriptor was allocated by the conversion call above and is
+    // no longer needed after CreateNamedPipe has returned.
+    unsafe {
+        LocalFree(descriptor);
+    }
+
+    result
 }
 
 #[cfg(unix)]

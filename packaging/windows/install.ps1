@@ -1,159 +1,162 @@
 <#
 .SYNOPSIS
-    Installs FORTIQ Sovereign Remote Administration on Windows.
-    Deploys fortiq-service, fortiq (CLI), and fortiq-desktop (GUI),
-    registers the Windows Service, and sets up configuration.
+    Installs the complete FORTIQ Windows product.
+.DESCRIPTION
+    Shared engine for the role-specific Setup executables. The role is explicit,
+    and Client installation is rejected without a valid Operator PeerId.
 #>
-
 [CmdletBinding()]
 param (
-    [switch]$Force
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("Operator", "Client")]
+    [string]$Role,
+    [string]$OperatorPeerId,
+    [string]$NodeName = $env:COMPUTERNAME,
+    [switch]$ForceRoleChange
 )
 
 $ErrorActionPreference = "Stop"
-
-# Ensure Administrator Privileges
-$CurrentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $CurrentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "Elevating privileges to Administrator..." -ForegroundColor Yellow
-    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
-    exit
-}
-
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "   FORTIQ Windows Production Installer     " -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
-
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$ServiceName = "FortiqService"
 $InstallDir = "C:\Program Files\FORTIQ"
 $DataDir = "C:\ProgramData\FORTIQ"
+$ConfigFile = Join-Path $DataDir "fortiq.toml"
+$RunKeyPath = "Software\Microsoft\Windows\CurrentVersion\Run"
+$RunValueName = "FORTIQ Desktop"
 
-# 1. Stop existing service if running
-Write-Host "--> Checking existing services..." -ForegroundColor Cyan
-if (Get-Service -Name "FortiqService" -ErrorAction SilentlyContinue) {
-    Write-Host "Stopping and removing existing FortiqService..." -ForegroundColor Yellow
-    Stop-Service -Name "FortiqService" -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
-    if (Test-Path "$InstallDir\fortiq-service.exe") {
-        & "$InstallDir\fortiq-service.exe" service uninstall | Out-Null
+function Test-Administrator {
+    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Test-OperatorPeerId([string]$PeerId) {
+    if ([string]::IsNullOrWhiteSpace($PeerId)) { return $false }
+    return $PeerId -match '^12D3KooW[1-9A-HJ-NP-Za-km-z]{40,60}$'
+}
+
+function Get-InstalledRole([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    if ((Get-Content -Raw -LiteralPath $Path) -match '(?m)^\s*operator_peer_id\s*=') { return "Client" }
+    return "Operator"
+}
+
+if (-not (Test-Administrator)) {
+    throw "FORTIQ installation requires Administrator privileges. Run the role-specific Setup executable."
+}
+if ([string]::IsNullOrWhiteSpace($NodeName) -or $NodeName.IndexOfAny([char[]]"`"`r`n") -ge 0) {
+    throw "NodeName is empty or contains unsupported characters."
+}
+if ($Role -eq "Client" -and -not (Test-OperatorPeerId $OperatorPeerId)) {
+    throw "Client installation requires a valid Operator PeerId (12D3KooW...)."
+}
+
+$existingRole = Get-InstalledRole $ConfigFile
+if ($existingRole -and $existingRole -ne $Role -and -not $ForceRoleChange) {
+    throw "Existing role is $existingRole. Refusing to change to $Role without -ForceRoleChange."
+}
+
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$requiredFiles = @("fortiq-service.exe", "fortiq.exe", "fortiq-desktop.exe", "uninstall.ps1")
+foreach ($file in $requiredFiles) {
+    if (-not (Test-Path -LiteralPath (Join-Path $scriptDir $file))) {
+        throw "Incomplete FORTIQ package: required file '$file' is missing."
     }
 }
 
-# Stop any running desktop client
-Get-Process -Name "fortiq-desktop", "FORTIQ" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Write-Host "Installing FORTIQ $Role on $NodeName..." -ForegroundColor Cyan
+if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath (Join-Path $InstallDir "fortiq-service.exe")) {
+        & (Join-Path $InstallDir "fortiq-service.exe") service uninstall | Out-Null
+    }
+}
+Get-Process -Name "fortiq-desktop", "FORTIQ" -ErrorAction SilentlyContinue |
+    Stop-Process -Force -ErrorAction SilentlyContinue
 
-# 2. Create Target Directories
-Write-Host "--> Creating target directories..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
-
-# 3. Copy Binaries
-Write-Host "--> Deploying binaries to $InstallDir..." -ForegroundColor Cyan
-
-$Binaries = @("fortiq-service.exe", "fortiq.exe", "fortiq-desktop.exe")
-foreach ($bin in $Binaries) {
-    $src = Join-Path $ScriptDir $bin
-    if (-not (Test-Path $src)) {
-        # Check target/release or current directory
-        $fallback = Join-Path (Join-Path $ScriptDir "..\..\target\release") $bin
-        if (Test-Path $fallback) {
-            $src = $fallback
+foreach ($file in $requiredFiles + @("install.ps1")) {
+    $source = Join-Path $scriptDir $file
+    if (Test-Path -LiteralPath $source) {
+        $destination = Join-Path $InstallDir $file
+        if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($destination)) {
+            Copy-Item -LiteralPath $source -Destination $destination -Force
         }
-    }
-
-    if (Test-Path $src) {
-        Copy-Item -Path $src -Destination "$InstallDir\$bin" -Force
-        Write-Host "  [OK] Installed $bin" -ForegroundColor Green
-    } elseif ($bin -eq "fortiq-desktop.exe") {
-        Write-Host "  [INFO] $bin not found in package; skipping desktop GUI" -ForegroundColor Gray
-    } else {
-        Write-Error "Required binary $bin not found in $ScriptDir"
-        exit 1
     }
 }
 
-# 4. Initialize Configuration
-Write-Host "--> Initializing configuration in $DataDir..." -ForegroundColor Cyan
-$ConfigFile = "$DataDir\fortiq.toml"
-if (-not (Test-Path $ConfigFile)) {
-    $Template = Join-Path $ScriptDir "fortiq.toml.example"
-    if (Test-Path $Template) {
-        Copy-Item -Path $Template -Destination $ConfigFile -Force
-    } else {
-        @"
-# FORTIQ Node Configuration
+$authorization = if ($Role -eq "Client") {
+    "[authorization]`r`noperator_peer_id = `"$OperatorPeerId`"`r`n"
+} else {
+    "# Operator role: operator_peer_id is intentionally absent.`r`n[authorization]`r`n"
+}
+$config = @"
+# Generated by FORTIQ $Role Setup. Role changes require explicit confirmation.
 [node]
-name = "$env:COMPUTERNAME"
+name = "$NodeName"
 
 [identity]
 path = "C:/ProgramData/FORTIQ/identity.key"
 
+$authorization
 [network]
 listen_quic = "0.0.0.0:4001"
 relay_peer = "/ip4/51.255.46.58/udp/4001/quic-v1/p2p/12D3KooWRFrWVx2CANXcjXvTNaqkh6APgAecsW94CLwNEg5wsqLy"
 
 [ticket]
 path = "C:/ProgramData/FORTIQ/ticket.json"
-"@ | Set-Content -Path $ConfigFile -Encoding utf8
-    }
-    Write-Host "  [OK] Created default configuration: $ConfigFile" -ForegroundColor Green
-} else {
-    Write-Host "  [INFO] Preserving existing configuration: $ConfigFile" -ForegroundColor Yellow
+"@
+Set-Content -LiteralPath $ConfigFile -Value $config -Encoding utf8
+
+$machinePath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
+$pathEntries = @($machinePath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+if ($pathEntries -notcontains $InstallDir) {
+    [Environment]::SetEnvironmentVariable("Path", (($pathEntries + $InstallDir) -join ';'), [EnvironmentVariableTarget]::Machine)
 }
+$env:Path = "$env:Path;$InstallDir"
 
-# 5. Add to System PATH
-Write-Host "--> Updating System Environment PATH..." -ForegroundColor Cyan
-$MachinePath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
-if ($MachinePath -notmatch [regex]::Escape($InstallDir)) {
-    $NewPath = "$MachinePath;$InstallDir"
-    [Environment]::SetEnvironmentVariable("Path", $NewPath, [EnvironmentVariableTarget]::Machine)
-    $env:Path = "$env:Path;$InstallDir"
-    Write-Host "  [OK] Added $InstallDir to system PATH" -ForegroundColor Green
-} else {
-    Write-Host "  [INFO] $InstallDir already present in PATH" -ForegroundColor Gray
+& (Join-Path $InstallDir "fortiq-service.exe") service install --config $ConfigFile
+& (Join-Path $InstallDir "fortiq-service.exe") service start
+
+# Use the 64-bit registry view explicitly: the NSIS bootstrapper is 32-bit and
+# otherwise redirects this value to WOW6432Node, which Windows does not use for
+# normal desktop logon startup.
+$registryBase = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+    [Microsoft.Win32.RegistryHive]::LocalMachine,
+    [Microsoft.Win32.RegistryView]::Registry64
+)
+$runKey = $registryBase.CreateSubKey($RunKeyPath)
+try {
+    $runKey.SetValue($RunValueName, ('"{0}"' -f (Join-Path $InstallDir "fortiq-desktop.exe")), [Microsoft.Win32.RegistryValueKind]::String)
+} finally {
+    $runKey.Dispose()
+    $registryBase.Dispose()
 }
-
-# 6. Install and Start FortiqService
-Write-Host "--> Registering FortiqService..." -ForegroundColor Cyan
-& "$InstallDir\fortiq-service.exe" service install --config $ConfigFile
-Start-Sleep -Seconds 1
-
-Write-Host "--> Starting FortiqService..." -ForegroundColor Cyan
-& "$InstallDir\fortiq-service.exe" service start
-Start-Sleep -Seconds 2
-
-# 7. Create Start Menu Shortcuts
-$StartMenuDir = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\FORTIQ"
-New-Item -ItemType Directory -Path $StartMenuDir -Force | Out-Null
-$WshShell = New-Object -ComObject WScript.Shell
-
-if (Test-Path "$InstallDir\fortiq-desktop.exe") {
-    $Shortcut = $WshShell.CreateShortcut("$StartMenuDir\FORTIQ Desktop.lnk")
-    $Shortcut.TargetPath = "$InstallDir\fortiq-desktop.exe"
-    $Shortcut.WorkingDirectory = $InstallDir
-    $Shortcut.Description = "FORTIQ Sovereign Remote Administration Desktop"
-    $Shortcut.Save()
-    Write-Host "  [OK] Created Start Menu shortcut for Desktop" -ForegroundColor Green
-
-    # Launch Desktop Client in user session
-    Start-Process -FilePath "$InstallDir\fortiq-desktop.exe"
-    Write-Host "  [OK] Launched FORTIQ Desktop (Tray active)" -ForegroundColor Green
+# Remove the incorrectly redirected value left by pre-fix installers.
+$legacyRegistryBase = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+    [Microsoft.Win32.RegistryHive]::LocalMachine,
+    [Microsoft.Win32.RegistryView]::Registry32
+)
+$legacyRunKey = $legacyRegistryBase.OpenSubKey($RunKeyPath, $true)
+if ($legacyRunKey) {
+    try { $legacyRunKey.DeleteValue($RunValueName, $false) } finally { $legacyRunKey.Dispose() }
 }
+$legacyRegistryBase.Dispose()
 
-$CliShortcut = $WshShell.CreateShortcut("$StartMenuDir\FORTIQ Shell.lnk")
-$CliShortcut.TargetPath = "powershell.exe"
-$CliShortcut.Arguments = "-NoExit -Command `"Write-Host 'Type fortiq --help to get started' -ForegroundColor Cyan; fortiq status`""
-$CliShortcut.Description = "FORTIQ Command Line"
-$CliShortcut.Save()
+$startMenuDir = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\FORTIQ"
+New-Item -ItemType Directory -Path $startMenuDir -Force | Out-Null
+$shell = New-Object -ComObject WScript.Shell
+$desktopShortcut = $shell.CreateShortcut((Join-Path $startMenuDir "FORTIQ.lnk"))
+$desktopShortcut.TargetPath = Join-Path $InstallDir "fortiq-desktop.exe"
+$desktopShortcut.WorkingDirectory = $InstallDir
+$desktopShortcut.Description = "FORTIQ $Role"
+$desktopShortcut.Save()
+$cliShortcut = $shell.CreateShortcut((Join-Path $startMenuDir "FORTIQ CLI.lnk"))
+$cliShortcut.TargetPath = "powershell.exe"
+$cliShortcut.Arguments = '-NoExit -Command "fortiq status"'
+$cliShortcut.WorkingDirectory = $InstallDir
+$cliShortcut.Description = "FORTIQ command line"
+$cliShortcut.Save()
 
-Write-Host "`n==========================================" -ForegroundColor Green
-Write-Host "  FORTIQ Installation Complete!           " -ForegroundColor Green
-Write-Host "==========================================" -ForegroundColor Green
-Write-Host "Service:   FortiqService (RUNNING)"
-Write-Host "CLI:       fortiq status"
-Write-Host "Config:    $ConfigFile"
-Write-Host "Binaries:  $InstallDir"
-Write-Host "==========================================" -ForegroundColor Green
-
-# Verify Status
-& "$InstallDir\fortiq.exe" status
+Write-Host "FORTIQ $Role installation completed." -ForegroundColor Green
+Write-Host "Service starts at boot; desktop starts at interactive user logon."
+& (Join-Path $InstallDir "fortiq.exe") status

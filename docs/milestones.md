@@ -17,6 +17,7 @@
 - Milestone 12: Windows ConPTY and Unix PTY terminal integration (`portable-pty`) with binary framing (`ShellFrame`), dedicated terminal IPC pipe/socket forwarding, and frontend `@xterm/xterm` stream handling in Tauri.
 - Milestone 13: System service installation/packaging (`systemd` unit on Linux, Windows Service Control Manager wrapper via `windows-service`) and end-to-end multi-platform automated validation tests (`e2e_two_nodes`).
 - Milestone 14: Productization & Testable Product (dedicated lightweight `fortiq` CLI binary with raw-mode terminal and thin IPC forwarding; complete Windows installer packaging with `install.ps1`, `uninstall.ps1`, and service automation; Debian package builder including both `fortiq-service` and `fortiq` CLI; live OVH VPS relay integration; standalone distribution bundling in `scripts/build_windows_dist.ps1`; and step-by-step verification guide in `docs/manual-test.md`).
+- Milestone 15 (implementation complete, clean-machine proof pending): Windows productization with separate Operator and Client NSIS installers; complete service + CLI + desktop payloads; mandatory Client Operator PeerId; COMPUTERNAME provisioning; role-change protection; service boot startup; desktop user-logon startup; safe uninstall with identity/config preservation; and unified release artifacts.
 
 ## WSL to VPS smoke test
 
@@ -29,6 +30,8 @@
 
 ## Planned Next
 
+- Validate the two M15 installers on clean Windows Operator and Client machines.
+- Add production Authenticode signing for binaries and Setup executables before external beta distribution.
 - Staging deployment and validation across real cloud VPS instances and bare-metal environments.
 
 ## Explicitly deferred

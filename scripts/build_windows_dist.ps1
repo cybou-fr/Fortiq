@@ -1,87 +1,114 @@
 <#
 .SYNOPSIS
-    Builds the complete FORTIQ Windows Distribution package (Service + CLI + Desktop).
-    Outputs to target/dist/windows/ and creates a ready-to-use zip bundle.
+    Builds complete FORTIQ Operator and Client Windows distributions.
 #>
-
 [CmdletBinding()]
 param (
     [string]$Version = "0.1.0",
-    [switch]$SkipDesktop
+    [string]$Target = "x86_64-pc-windows-msvc",
+    [switch]$SkipBuild,
+    [string]$MakeNsisPath
 )
 
 $ErrorActionPreference = "Stop"
+$rootDir = Split-Path -Parent $PSScriptRoot
+$cargoCommand = Get-Command cargo -ErrorAction SilentlyContinue
+$cargoPath = if ($cargoCommand) { $cargoCommand.Source } else { Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe" }
+if (-not (Test-Path -LiteralPath $cargoPath)) { throw "cargo.exe was not found." }
+$desktopDir = Join-Path $rootDir "apps\fortiq-desktop"
+$targetReleaseDir = Join-Path $rootDir "target\$Target\release"
+$tauriTargetReleaseDir = Join-Path $desktopDir "src-tauri\target\$Target\release"
+$distRoot = Join-Path $rootDir "target\dist"
+$payloadDir = Join-Path $distRoot "windows-payload"
+$installerDir = Join-Path $distRoot "installers"
 
-$RootDir = Split-Path -Parent $PSScriptRoot
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "   FORTIQ Windows Distribution Builder     " -ForegroundColor Cyan
-Write-Host "   Version: $Version                       " -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
-
-# 1. Build Backend Binaries (fortiq-service and fortiq CLI)
-Write-Host "`n--> Building fortiq-service and fortiq-cli (Release)..." -ForegroundColor Yellow
-$CargoPath = "$env:USERPROFILE\.cargo\bin\cargo.exe"
-if (-not (Test-Path $CargoPath)) { $CargoPath = "cargo" }
-
-& $CargoPath build --release -p fortiq-service -p fortiq-cli
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to build backend binaries"
-    exit 1
-}
-
-# 2. Build Desktop GUI if not skipped
-if (-not $SkipDesktop) {
-    Write-Host "`n--> Building FORTIQ Desktop Frontend & Tauri..." -ForegroundColor Yellow
-    $DesktopDir = Join-Path $RootDir "apps\fortiq-desktop"
-    Push-Location $DesktopDir
+if (-not $SkipBuild) {
+    & $cargoPath build --release --target $Target -p fortiq-service -p fortiq-cli
+    if ($LASTEXITCODE -ne 0) { throw "Backend build failed." }
+    Push-Location $desktopDir
     try {
         npm.cmd run build
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to build frontend"
-            exit 1
-        }
-        & $CargoPath build --release --manifest-path src-tauri/Cargo.toml
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Failed to compile Tauri desktop backend"
-            exit 1
-        }
+        if ($LASTEXITCODE -ne 0) { throw "Desktop frontend build failed." }
+        & $cargoPath build --release --target $Target --manifest-path src-tauri/Cargo.toml
+        if ($LASTEXITCODE -ne 0) { throw "Desktop executable build failed." }
     } finally {
         Pop-Location
     }
 }
 
-# 3. Prepare Distribution Directory
-$DistDir = Join-Path $RootDir "target\dist\windows"
-if (Test-Path $DistDir) {
-    Remove-Item -Recurse -Force $DistDir
+if (Test-Path -LiteralPath $payloadDir) { Remove-Item -LiteralPath $payloadDir -Recurse -Force }
+New-Item -ItemType Directory -Path $payloadDir -Force | Out-Null
+New-Item -ItemType Directory -Path $installerDir -Force | Out-Null
+
+$desktopCandidates = @(
+    (Join-Path $targetReleaseDir "fortiq-desktop.exe"),
+    (Join-Path $tauriTargetReleaseDir "fortiq-desktop.exe"),
+    (Join-Path $rootDir "target\release\fortiq-desktop.exe"),
+    (Join-Path $desktopDir "src-tauri\target\release\fortiq-desktop.exe")
+)
+$desktopExe = $desktopCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+$serviceExe = @((Join-Path $targetReleaseDir "fortiq-service.exe"), (Join-Path $rootDir "target\release\fortiq-service.exe")) |
+    Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+$cliExe = @((Join-Path $targetReleaseDir "fortiq.exe"), (Join-Path $rootDir "target\release\fortiq.exe")) |
+    Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+$artifacts = @{
+    "fortiq-service.exe" = $serviceExe
+    "fortiq.exe" = $cliExe
+    "fortiq-desktop.exe" = $desktopExe
+    "install.ps1" = Join-Path $rootDir "packaging\windows\install.ps1"
+    "uninstall.ps1" = Join-Path $rootDir "packaging\windows\uninstall.ps1"
 }
-New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
-
-Write-Host "`n--> Collecting distribution files into $DistDir..." -ForegroundColor Yellow
-Copy-Item (Join-Path $RootDir "target\release\fortiq-service.exe") -Destination $DistDir -Force
-Copy-Item (Join-Path $RootDir "target\release\fortiq.exe") -Destination $DistDir -Force
-
-$DesktopExe = Join-Path $RootDir "target\release\fortiq-desktop.exe"
-if (-not (Test-Path $DesktopExe)) {
-    $DesktopExe = Join-Path $RootDir "apps\fortiq-desktop\src-tauri\target\release\fortiq-desktop.exe"
-}
-if (Test-Path $DesktopExe) {
-    Copy-Item $DesktopExe -Destination $DistDir -Force
-    Write-Host "  [OK] Included fortiq-desktop.exe" -ForegroundColor Green
+foreach ($entry in $artifacts.GetEnumerator()) {
+    if ([string]::IsNullOrWhiteSpace($entry.Value) -or -not (Test-Path -LiteralPath $entry.Value)) {
+        throw "Complete Windows product cannot be built: '$($entry.Key)' is missing."
+    }
+    Copy-Item -LiteralPath $entry.Value -Destination (Join-Path $payloadDir $entry.Key) -Force
 }
 
-Copy-Item (Join-Path $RootDir "packaging\windows\install.ps1") -Destination $DistDir -Force
-Copy-Item (Join-Path $RootDir "packaging\windows\uninstall.ps1") -Destination $DistDir -Force
-Copy-Item (Join-Path $RootDir "packaging\windows\fortiq.toml.example") -Destination $DistDir -Force
+foreach ($role in @("Operator", "Client")) {
+    $zipStage = Join-Path $distRoot "FORTIQ-$role-$Version-Windows-x64"
+    if (Test-Path -LiteralPath $zipStage) { Remove-Item -LiteralPath $zipStage -Recurse -Force }
+    Copy-Item -LiteralPath $payloadDir -Destination $zipStage -Recurse
+    $zipPath = "$zipStage.zip"
+    if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+    Compress-Archive -Path (Join-Path $zipStage "*") -DestinationPath $zipPath -Force
+    Remove-Item -LiteralPath $zipStage -Recurse -Force
+}
 
-# 4. Create Zip Archive
-$ZipPath = Join-Path $RootDir "target\dist\FORTIQ-$Version-Windows-x64.zip"
-Write-Host "`n--> Creating standalone ZIP bundle: $ZipPath..." -ForegroundColor Yellow
-if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
-Compress-Archive -Path "$DistDir\*" -DestinationPath $ZipPath -Force
+if (-not $MakeNsisPath) {
+    $nsisCandidates = @(
+        "$env:ProgramFiles\NSIS\makensis.exe",
+        "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+    )
+    $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
+    if ($command) { $MakeNsisPath = $command.Source }
+    if (-not $MakeNsisPath) {
+        $MakeNsisPath = $nsisCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    }
+}
+if (-not $MakeNsisPath -or -not (Test-Path -LiteralPath $MakeNsisPath)) {
+    throw "NSIS makensis.exe is required to build the two Setup executables."
+}
 
-Write-Host "`n==========================================" -ForegroundColor Green
-Write-Host "  Build Completed Successfully!            " -ForegroundColor Green
-Write-Host "  Dist Directory: $DistDir                 " -ForegroundColor Green
-Write-Host "  Zip Bundle:     $ZipPath                 " -ForegroundColor Green
-Write-Host "==========================================" -ForegroundColor Green
+$numericParts = @([regex]::Matches($Version, '\d+') | ForEach-Object { $_.Value })
+while ($numericParts.Count -lt 4) { $numericParts += "0" }
+$versionNum = ($numericParts | Select-Object -First 4) -join '.'
+$nsiScript = Join-Path $rootDir "packaging\windows\fortiq-product.nsi"
+Push-Location $installerDir
+try {
+    foreach ($role in @("Operator", "Client")) {
+        & $MakeNsisPath "/DVERSION=$Version" "/DVERSION_NUM=$versionNum" "/DPACKAGE_ROLE=$role" "/DDISTDIR=$payloadDir" "/DOUTDIR=$installerDir" $nsiScript
+        if ($LASTEXITCODE -ne 0) { throw "NSIS failed for role $role." }
+    }
+} finally {
+    Pop-Location
+}
+
+$expected = @(
+    (Join-Path $installerDir "FORTIQ-Operator-Setup-$Version-x64.exe"),
+    (Join-Path $installerDir "FORTIQ-Client-Setup-$Version-x64.exe")
+)
+foreach ($file in $expected) {
+    if (-not (Test-Path -LiteralPath $file)) { throw "Expected installer was not produced: $file" }
+}
+Write-Host "Built complete Operator and Client installers in $installerDir" -ForegroundColor Green

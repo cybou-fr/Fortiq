@@ -1,99 +1,119 @@
 name: Release
-
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
+permissions:
+  contents: write
 
 jobs:
-  build-service:
-    name: Build fortiq-service (${{ matrix.target }})
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            bin_name: fortiq-service
-            asset_name: fortiq-service-linux-x86_64.tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            bin_name: fortiq-service.exe
-            asset_name: fortiq-service-windows-x86_64.zip
-    runs-on: ${{ matrix.os }}
+  windows-products:
+    name: Build complete Windows products
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
-
-      - name: Build Release Binary
-        run: cargo build --release --target ${{ matrix.target }} -p fortiq-service -p fortiq-cli
-
-      - name: Package Binary (Linux)
-        if: runner.os == 'Linux'
+          targets: x86_64-pc-windows-msvc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/fortiq-desktop/package-lock.json
+      - name: Install desktop dependencies
+        working-directory: apps/fortiq-desktop
+        run: npm ci
+      - name: Install NSIS
+        run: choco install nsis --yes --no-progress
+      - name: Build Operator and Client installers
+        shell: pwsh
         run: |
-          tar -czf ${{ matrix.asset_name }} -C target/${{ matrix.target }}/release fortiq-service fortiq
-          chmod +x packaging/linux/build_deb.sh
-          VERSION="${GITHUB_REF_NAME#v}"
-          ./packaging/linux/build_deb.sh "${VERSION}" "${{ matrix.target }}"
-
-      - name: Package Binary (Windows)
-        if: runner.os == 'Windows'
+          $version = '${{ github.ref_name }}' -replace '^v', ''
+          ./scripts/build_windows_dist.ps1 -Version $version
+      - name: Verify Windows release contents
+        shell: pwsh
         run: |
-          Compress-Archive -Path target\${{ matrix.target }}\release\fortiq-service.exe, target\${{ matrix.target }}\release\fortiq.exe, packaging\windows\install.ps1, packaging\windows\uninstall.ps1, packaging\windows\fortiq.toml.example -DestinationPath ${{ matrix.asset_name }}
-
-      - name: Upload Service Release Assets
+          $version = '${{ github.ref_name }}' -replace '^v', ''
+          $required = @(
+            "target/dist/installers/FORTIQ-Operator-Setup-$version-x64.exe",
+            "target/dist/installers/FORTIQ-Client-Setup-$version-x64.exe",
+            "target/dist/FORTIQ-Operator-$version-Windows-x64.zip",
+            "target/dist/FORTIQ-Client-$version-Windows-x64.zip"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "Missing release artifact: $path" }
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          foreach ($zip in $required | Where-Object { $_ -like '*.zip' }) {
+            $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
+            try {
+              $names = $archive.Entries.Name
+              foreach ($name in @('fortiq-service.exe','fortiq.exe','fortiq-desktop.exe','install.ps1','uninstall.ps1')) {
+                if ($names -notcontains $name) { throw "$zip is incomplete: missing $name" }
+              }
+            } finally {
+              $archive.Dispose()
+            }
+          }
+      - name: Upload Windows release assets
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: true
           files: |
-            ${{ matrix.asset_name }}
-            target/debian/*.deb
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            target/dist/installers/*.exe
+            target/dist/FORTIQ-*-Windows-x64.zip
 
-  build-desktop:
-    name: Build fortiq-desktop (${{ matrix.platform }})
-    needs: build-service
+  linux-service:
+    name: Build Linux service and CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Build binaries
+        run: cargo build --release --target x86_64-unknown-linux-gnu -p fortiq-service -p fortiq-cli
+      - name: Package Linux artifacts
+        run: |
+          tar -czf fortiq-linux-x86_64.tar.gz -C target/x86_64-unknown-linux-gnu/release fortiq-service fortiq
+          chmod +x packaging/linux/build_deb.sh
+          VERSION="\${GITHUB_REF_NAME#v}"
+          ./packaging/linux/build_deb.sh "$VERSION" x86_64-unknown-linux-gnu
+      - uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          files: |
+            fortiq-linux-x86_64.tar.gz
+            target/debian/*.deb
+
+  desktop-unix:
+    name: Build desktop (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: "macos-latest"
-            os: macos-latest
-          - platform: "ubuntu-22.04"
-            os: ubuntu-22.04
-          - platform: "windows-latest"
-            os: windows-latest
+        os: [macos-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-
       - uses: dtolnay/rust-toolchain@stable
-
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Install Frontend Dependencies
+      - name: Install frontend dependencies
         working-directory: apps/fortiq-desktop
         run: npm ci
-
-      - name: Build Desktop Application Bundle
+      - name: Build desktop bundle
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: "apps/fortiq-desktop"
+          projectPath: apps/fortiq-desktop
           tagName: ${{ github.ref_name }}
-          releaseName: "FORTIQ v__VERSION__"
-          releaseBody: "See release notes and commit history for details."
+          releaseName: FORTIQ v__VERSION__
+          releaseBody: Complete role-specific Windows installers and platform artifacts.
           releaseDraft: false
-          prerelease: false
-
+          prerelease: true

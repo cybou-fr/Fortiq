@@ -126,7 +126,27 @@ sudo systemctl start fortiq
 sudo systemctl status fortiq
 ```
 
-### Windows & Multi-Platform Desktop Bundles
+### Windows Product Installers
+
+The Windows release produces two complete, role-specific products. Both contain
+the service, IPC CLI, and desktop/tray application:
+
+```text
+FORTIQ-Operator-Setup-<version>-x64.exe
+FORTIQ-Client-Setup-<version>-x64.exe
+```
+
+Client Setup requires an Operator PeerId and cannot silently fall back to the
+Operator role. Both installers use the Windows computer name, install the
+service for boot startup, and register the desktop application for user logon.
+
+Build both installers locally with NSIS installed:
+
+```powershell
+./scripts/build_windows_dist.ps1 -Version 0.1.0-beta
+```
+
+### Multi-Platform Desktop Bundles
 
 The desktop GUI and background service are bundled for production via Tauri:
 
@@ -135,7 +155,7 @@ cd apps/fortiq-desktop
 npm run tauri build
 ```
 
-- **Windows**: Produces signed/unsigned `.msi` (WiX) and `.exe` (NSIS) installers under `target/release/bundle/`.
+- **Windows**: Use the role-specific complete product installers above; the standalone Tauri bundle is not a complete FORTIQ installation.
 - **Linux**: Produces `.deb` and `.AppImage` bundles under `target/release/bundle/`.
 - **GitHub Actions**: Tagging a commit (`git tag v0.1.0 && git push origin v0.1.0`) triggers `.github/workflows/release.yml`, automatically building and attaching all Linux `.deb`, Windows `.zip`, and desktop installer artifacts to the GitHub Release.
 
