@@ -185,3 +185,38 @@ Removing them requires a separate explicit `uninstall.ps1 -RemoveData` confirmat
 | `Cannot connect to FORTIQ daemon` | `fortiq-service` not running | Run `Get-Service FortiqService` or `Start-Service FortiqService` |
 | Peer not showing in `fortiq peers` | Rendezvous not connected | Check firewall for UDP 4001 outgoing, check `fortiq status` |
 | `Access denied: ticket is CLOSED` | Support ticket closed | Run `fortiq ticket open` on the managed node |
+
+---
+
+## 6. Single-Windows-machine lab
+
+The lab starts two ordinary user processes: one Operator and one managed Client.
+Each has its own identity, ticket storage, QUIC port, and named pipes. Neither
+installs a Windows service, and both can run alongside the installed
+`FortiqService` without conflicting with it.
+
+```powershell
+# Start the isolated managed node; its lab ticket opens automatically.
+.\scripts\lab_windows.ps1 start
+
+# Launch separate Operator and Client Desktop windows.
+.\scripts\lab_windows.ps1 launch
+
+# Execute a real operator -> managed-node shell smoke test.
+.\scripts\lab_windows.ps1 test
+
+# Inspect or stop the lab node.
+.\scripts\lab_windows.ps1 status
+.\scripts\lab_windows.ps1 stop
+```
+
+Use `start -NoAutoOpen` when testing the manual client consent flow. In that
+mode, open the ticket from the second Desktop window or run:
+
+```powershell
+.\scripts\lab_windows.ps1 open
+```
+
+Lab state is isolated under `target/lab/windows`, with independent identities,
+ports, ticket storage, and named pipes for both roles. It is ignored by Git and
+does not modify the installed Windows service.

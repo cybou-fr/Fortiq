@@ -578,6 +578,23 @@ async fn event_loop(
                                     .build();
                                 match swarm.dial(opts) {
                                     Ok(()) => info!(remote_peer_id = %peer, "dialing peer for pending shell stream"),
+                                    Err(libp2p::swarm::DialError::DialPeerConditionFalse(_)) => {
+                                        // Discovery may already be dialing this peer, or the
+                                        // connection can become established between the check
+                                        // above and `dial`. Keep the requests queued: the normal
+                                        // ConnectionEstablished event will open their streams.
+                                        // If the peer won the race and is connected already,
+                                        // drain the queue immediately.
+                                        if swarm.is_connected(&peer) {
+                                            if let Some(pending) = pending_shell_opens.remove(&peer) {
+                                                for reply in pending {
+                                                    spawn_open_shell_stream(peer, shell_control.clone(), reply);
+                                                }
+                                            }
+                                        } else {
+                                            info!(remote_peer_id = %peer, "shell request joined an existing dial attempt");
+                                        }
+                                    }
                                     Err(error) => {
                                         warn!(remote_peer_id = %peer, %error, "dial attempt failed for shell stream");
                                         if let Some(pending) = pending_shell_opens.remove(&peer) {

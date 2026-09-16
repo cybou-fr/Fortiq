@@ -210,8 +210,15 @@ fn detect_windows_shell_with(mut exists: impl FnMut(&str) -> bool) -> Option<She
 
 #[cfg(target_os = "windows")]
 fn executable_in_path(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|directory| directory.join(program).is_file())
+    resolve_executable_in_path(program).is_some()
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_executable_in_path(program: &str) -> Option<std::path::PathBuf> {
+    std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|directory| directory.join(program))
+            .find(|candidate| candidate.is_file())
     })
 }
 
@@ -261,7 +268,12 @@ where
     #[cfg(target_os = "windows")]
     let (shell, cmd) = {
         let shell = detect_windows_shell()?;
-        let mut cmd = portable_pty::CommandBuilder::new(shell.program());
+        // ConPTY/CreateProcess does not reliably search PATH when invoked from
+        // a background service. Pass the exact executable already discovered
+        // by shell selection instead of only `pwsh.exe`/`powershell.exe`.
+        let program = resolve_executable_in_path(shell.program())
+            .unwrap_or_else(|| std::path::PathBuf::from(shell.program()));
+        let mut cmd = portable_pty::CommandBuilder::new(program);
         for arg in shell.arguments() {
             cmd.arg(arg);
         }
@@ -271,7 +283,14 @@ where
     #[cfg(target_os = "linux")]
     let (shell, cmd) = {
         let shell = detect_linux_shell()?;
-        let cmd = portable_pty::CommandBuilder::new(shell.path());
+        let mut cmd = portable_pty::CommandBuilder::new(shell.path());
+        // systemd services commonly start without HOME. Interactive shells then
+        // expand "$HOME/.cargo/env" as "/.cargo/env" and other profile scripts
+        // also behave incorrectly. FORTIQ's Linux package runs as root today,
+        // so use root's real home only when the inherited value is absent.
+        if std::env::var_os("HOME").is_none() && Path::new("/root").is_dir() {
+            cmd.env("HOME", "/root");
+        }
         (shell, cmd)
     };
 
