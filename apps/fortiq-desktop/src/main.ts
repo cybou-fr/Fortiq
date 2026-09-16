@@ -21,6 +21,10 @@ interface DesktopPeer {
   os: string;
   transport: string;
   status: string;
+  mode?: string | null;
+  authorizedOperator?: string | null;
+  relay: boolean;
+  rendezvous: boolean;
 }
 
 let selectedPeerId: string | null = null;
@@ -358,7 +362,12 @@ async function refresh() {
       } else {
         try {
           const peers = await invoke<DesktopPeer[]>("list_peers");
-          renderPeerList(peers, true);
+          const supervisedPeers = peers.filter((peer) =>
+            peer.mode === "MANAGED" &&
+            peer.authorizedOperator === status.peerId &&
+            !peer.relay
+          );
+          renderPeerList(supervisedPeers, true);
           renderNetworkPeers(peers, true);
         } catch (err) {
           console.warn("Failed to fetch peers:", err);

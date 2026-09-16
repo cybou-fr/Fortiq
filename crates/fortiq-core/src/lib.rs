@@ -346,6 +346,12 @@ pub struct NodeInfo {
     pub os: String,
     pub arch: String,
     pub version: String,
+    #[serde(default)]
+    pub authorized_operator: Option<String>,
+    #[serde(default)]
+    pub relay: bool,
+    #[serde(default)]
+    pub rendezvous: bool,
 }
 
 impl NodeInfo {
@@ -357,6 +363,9 @@ impl NodeInfo {
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
+            authorized_operator: None,
+            relay: false,
+            rendezvous: false,
         }
     }
 }

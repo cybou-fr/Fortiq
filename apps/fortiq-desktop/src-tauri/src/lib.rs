@@ -60,6 +60,10 @@ pub struct DesktopPeer {
     pub os: String,
     pub transport: String,
     pub status: String,
+    pub mode: Option<String>,
+    pub authorized_operator: Option<String>,
+    pub relay: bool,
+    pub rendezvous: bool,
 }
 
 impl From<fortiq_core::ipc::PeerSummary> for DesktopPeer {
@@ -70,6 +74,10 @@ impl From<fortiq_core::ipc::PeerSummary> for DesktopPeer {
             os: p.os,
             transport: p.transport,
             status: p.status,
+            mode: p.mode.map(|mode| mode.to_string()),
+            authorized_operator: p.authorized_operator,
+            relay: p.relay,
+            rendezvous: p.rendezvous,
         }
     }
 }

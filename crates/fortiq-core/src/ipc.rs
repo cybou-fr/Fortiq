@@ -87,4 +87,8 @@ pub struct PeerSummary {
     pub os: String,
     pub transport: String,
     pub status: String,
+    pub mode: Option<NodeMode>,
+    pub authorized_operator: Option<String>,
+    pub relay: bool,
+    pub rendezvous: bool,
 }

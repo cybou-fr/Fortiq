@@ -142,7 +142,10 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
     maybe_auto_open_ticket(&config, &ticket_store, mode).await;
 
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
-    let local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
+    let mut local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
+    local_info.authorized_operator = config.authorization.operator_peer_id.clone();
+    local_info.relay = config.capabilities.relay;
+    local_info.rendezvous = config.capabilities.rendezvous;
 
     let (p2p_cmd_tx, p2p_cmd_rx) = tokio::sync::mpsc::channel(32);
 
@@ -253,7 +256,10 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
     }
 
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
-    let local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
+    let mut local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
+    local_info.authorized_operator = config.authorization.operator_peer_id.clone();
+    local_info.relay = config.capabilities.relay;
+    local_info.rendezvous = config.capabilities.rendezvous;
 
     let (p2p_cmd_tx, p2p_cmd_rx) = tokio::sync::mpsc::channel(32);
 

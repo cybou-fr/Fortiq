@@ -58,6 +58,9 @@ pub struct DiscoveredPeer {
     pub arch: Option<String>,
     pub version: Option<String>,
     pub mode: Option<fortiq_core::NodeMode>,
+    pub authorized_operator: Option<String>,
+    pub relay: bool,
+    pub rendezvous: bool,
     pub addresses: Vec<Multiaddr>,
     pub transport: String,
     pub connected: bool,
@@ -97,6 +100,9 @@ impl PeerRegistry {
             arch: None,
             version: None,
             mode: None,
+            authorized_operator: None,
+            relay: false,
+            rendezvous: false,
             addresses: Vec::new(),
             transport: transport.clone(),
             connected: true,
@@ -127,6 +133,9 @@ impl PeerRegistry {
             arch: Some(info.arch.clone()),
             version: Some(info.version.clone()),
             mode: Some(info.mode),
+            authorized_operator: info.authorized_operator.clone(),
+            relay: info.relay,
+            rendezvous: info.rendezvous,
             addresses: Vec::new(),
             transport: "P2P".to_string(),
             connected: true,
@@ -137,6 +146,9 @@ impl PeerRegistry {
         entry.arch = Some(info.arch.clone());
         entry.version = Some(info.version.clone());
         entry.mode = Some(info.mode);
+        entry.authorized_operator = info.authorized_operator.clone();
+        entry.relay = info.relay;
+        entry.rendezvous = info.rendezvous;
         entry.last_seen = std::time::Instant::now();
     }
 
@@ -148,6 +160,9 @@ impl PeerRegistry {
             arch: None,
             version: Some(info.protocol_version.clone()),
             mode: None,
+            authorized_operator: None,
+            relay: false,
+            rendezvous: false,
             addresses: Vec::new(),
             transport: "P2P".to_string(),
             connected: true,
@@ -168,6 +183,9 @@ impl PeerRegistry {
             arch: None,
             version: None,
             mode: None,
+            authorized_operator: None,
+            relay: false,
+            rendezvous: false,
             addresses: Vec::new(),
             transport: "P2P".to_string(),
             connected: false,
@@ -202,6 +220,10 @@ impl PeerRegistry {
                     os,
                     transport: p.transport.clone(),
                     status,
+                    mode: p.mode,
+                    authorized_operator: p.authorized_operator.clone(),
+                    relay: p.relay,
+                    rendezvous: p.rendezvous,
                 }
             })
             .collect();
@@ -212,9 +234,10 @@ impl PeerRegistry {
 
 /// Builds the ordered list of addresses to dial when reaching `peer`.
 ///
-/// Direct addresses recorded from rendezvous or identify come first, then the
-/// relay circuit address, so a peer behind NAT stays reachable when every
-/// direct path fails. Addresses that already carry a `/p2p/<id>` component are
+/// The configured relay circuit comes first because rendezvous can retain a
+/// stale public/NAT address. Direct addresses remain fallback candidates and
+/// DCUtR can still upgrade an established relay connection. Addresses that
+/// already carry a `/p2p/<id>` component are
 /// used as-is: appending a second one produces a multiaddr libp2p rejects.
 fn dial_candidates(
     peer: PeerId,
@@ -222,6 +245,13 @@ fn dial_candidates(
     relay_peer: Option<&str>,
 ) -> Vec<Multiaddr> {
     let mut candidates: Vec<Multiaddr> = Vec::new();
+
+    if let Some(relay) = relay_peer.and_then(|value| value.parse::<Multiaddr>().ok()) {
+        let mut circuit = relay;
+        circuit.push(libp2p::multiaddr::Protocol::P2pCircuit);
+        circuit.push(libp2p::multiaddr::Protocol::P2p(peer));
+        candidates.push(circuit);
+    }
 
     if let Some(known) = registry.peers.get(&peer) {
         for addr in &known.addresses {
@@ -242,15 +272,6 @@ fn dial_candidates(
         }
     }
 
-    if let Some(relay) = relay_peer.and_then(|value| value.parse::<Multiaddr>().ok()) {
-        let mut circuit = relay;
-        circuit.push(libp2p::multiaddr::Protocol::P2pCircuit);
-        circuit.push(libp2p::multiaddr::Protocol::P2p(peer));
-        if !candidates.contains(&circuit) {
-            candidates.push(circuit);
-        }
-    }
-
     candidates
 }
 
@@ -263,11 +284,22 @@ fn dial_peer_candidates(
     registry: &PeerRegistry,
     relay_peer: Option<&str>,
 ) {
-    for address in dial_candidates(peer, registry, relay_peer) {
-        match swarm.dial(address.clone()) {
-            Ok(()) => info!(%address, remote_peer_id = %peer, "dialing peer"),
-            Err(error) => warn!(%address, remote_peer_id = %peer, %error, "dial attempt failed"),
+    use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
+    let addresses = dial_candidates(peer, registry, relay_peer);
+    if addresses.is_empty() {
+        warn!(remote_peer_id = %peer, "no address available for peer dial");
+        return;
+    }
+    let opts = DialOpts::peer_id(peer)
+        .addresses(addresses)
+        .condition(PeerCondition::DisconnectedAndNotDialing)
+        .build();
+    match swarm.dial(opts) {
+        Ok(()) => info!(remote_peer_id = %peer, "dialing peer candidates"),
+        Err(libp2p::swarm::DialError::DialPeerConditionFalse(_)) => {
+            // Discovery may refresh while the same peer is already connecting.
         }
+        Err(error) => warn!(remote_peer_id = %peer, %error, "dial attempt failed"),
     }
 }
 
@@ -1222,11 +1254,11 @@ mod tests {
         assert_eq!(candidates.len(), 2);
         assert_eq!(
             candidates[0].to_string(),
-            format!("/ip4/10.0.0.5/udp/4001/quic-v1/p2p/{peer_id}")
+            format!("{relay}/p2p-circuit/p2p/{peer_id}")
         );
         assert_eq!(
             candidates[1].to_string(),
-            format!("{relay}/p2p-circuit/p2p/{peer_id}")
+            format!("/ip4/10.0.0.5/udp/4001/quic-v1/p2p/{peer_id}")
         );
     }
 
