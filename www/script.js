@@ -118,7 +118,7 @@ document.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       const submitBtn = contactForm.querySelector("button[type='submit']");
       if (submitBtn) {
-        submitBtn.textContent = "Sending Request...";
+        submitBtn.textContent = "Submitting Audit Request...";
         submitBtn.disabled = true;
       }
 
