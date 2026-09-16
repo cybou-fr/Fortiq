@@ -19,6 +19,14 @@ pub struct IpcState {
 }
 
 pub async fn run_ipc_server(state: Arc<IpcState>) -> Result<()> {
+    tokio::try_join!(
+        run_command_ipc(Arc::clone(&state)),
+        run_terminal_ipc(Arc::clone(&state)),
+    )?;
+    Ok(())
+}
+
+async fn run_command_ipc(state: Arc<IpcState>) -> Result<()> {
     #[cfg(windows)]
     {
         run_windows_pipe(state).await
@@ -26,6 +34,17 @@ pub async fn run_ipc_server(state: Arc<IpcState>) -> Result<()> {
     #[cfg(unix)]
     {
         run_unix_socket(state).await
+    }
+}
+
+async fn run_terminal_ipc(state: Arc<IpcState>) -> Result<()> {
+    #[cfg(windows)]
+    {
+        run_windows_terminal_pipe(state).await
+    }
+    #[cfg(unix)]
+    {
+        run_unix_terminal_socket(state).await
     }
 }
 
@@ -54,6 +73,36 @@ async fn run_windows_pipe(state: Arc<IpcState>) -> Result<()> {
         tokio::spawn(async move {
             if let Err(e) = handle_client(client, state_clone).await {
                 tracing::debug!("IPC client disconnected: {e}");
+            }
+        });
+    }
+}
+
+#[cfg(windows)]
+async fn run_windows_terminal_pipe(state: Arc<IpcState>) -> Result<()> {
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    let pipe_name = fortiq_core::ipc::DEFAULT_WINDOWS_TERMINAL_PIPE_NAME;
+    tracing::info!("Starting Windows Terminal Named Pipe at {}", pipe_name);
+
+    let mut server = ServerOptions::new()
+        .first_pipe_instance(true)
+        .create(pipe_name)?;
+
+    loop {
+        if let Err(err) = server.connect().await {
+            tracing::warn!("Terminal named pipe connection failed: {err}");
+            server = ServerOptions::new().create(pipe_name)?;
+            continue;
+        }
+
+        let client = server;
+        server = ServerOptions::new().create(pipe_name)?;
+
+        let state_clone = Arc::clone(&state);
+        tokio::spawn(async move {
+            if let Err(e) = handle_terminal_client(client, state_clone).await {
+                tracing::debug!("Terminal client disconnected: {e}");
             }
         });
     }
@@ -89,6 +138,41 @@ async fn run_unix_socket(state: Arc<IpcState>) -> Result<()> {
             }
             Err(e) => {
                 tracing::warn!("Unix socket accept error: {e}");
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn run_unix_terminal_socket(state: Arc<IpcState>) -> Result<()> {
+    use tokio::net::UnixListener;
+
+    let path = fortiq_core::ipc::DEFAULT_UNIX_TERMINAL_SOCKET_PATH;
+    let _ = tokio::fs::remove_file(&path).await;
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    let listener = UnixListener::bind(&path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o660)).await;
+    }
+    tracing::info!("Starting Unix Terminal Socket at {}", path);
+
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                let state_clone = Arc::clone(&state);
+                tokio::spawn(async move {
+                    if let Err(e) = handle_terminal_client(stream, state_clone).await {
+                        tracing::debug!("Terminal client disconnected: {e}");
+                    }
+                });
+            }
+            Err(e) => {
+                tracing::warn!("Terminal unix socket accept error: {e}");
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
         }
@@ -238,4 +322,124 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             }
         }
     }
+}
+
+async fn handle_terminal_client<S>(stream: S, state: Arc<IpcState>) -> Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let (ipc_read_half, mut ipc_write) = tokio::io::split(stream);
+
+    let mut reader = BufReader::new(ipc_read_half);
+    let mut init_line = String::new();
+    let n = reader.read_line(&mut init_line).await?;
+    if n == 0 {
+        return Ok(());
+    }
+
+    let mut ipc_read = reader.into_inner();
+
+    let init: fortiq_core::ipc::TerminalSessionInit = match serde_json::from_str(init_line.trim()) {
+        Ok(val) => val,
+        Err(err) => {
+            let err_msg = format!(
+                "{{\"status\":\"error\",\"message\":\"JSON handshake invalide: {err}\"}}\n"
+            );
+            ipc_write.write_all(err_msg.as_bytes()).await?;
+            ipc_write.flush().await?;
+            return Ok(());
+        }
+    };
+
+    let target_peer: PeerId = match init.peer.parse() {
+        Ok(p) => p,
+        Err(err) => {
+            let err_msg =
+                format!("{{\"status\":\"error\",\"message\":\"PeerId invalide: {err}\"}}\n");
+            ipc_write.write_all(err_msg.as_bytes()).await?;
+            ipc_write.flush().await?;
+            return Ok(());
+        }
+    };
+
+    let dial_addr: Option<libp2p::Multiaddr> = init.dial.and_then(|d| d.parse().ok());
+
+    let p2p_sender = match &state.p2p_sender {
+        Some(s) => s.clone(),
+        None => {
+            let err_msg = "{\"status\":\"error\",\"message\":\"Sous-système P2P indisponible\"}\n";
+            ipc_write.write_all(err_msg.as_bytes()).await?;
+            ipc_write.flush().await?;
+            return Ok(());
+        }
+    };
+
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    if p2p_sender
+        .send(fortiq_p2p::P2pCommand::OpenShellStream {
+            peer: target_peer,
+            dial: dial_addr,
+            reply: reply_tx,
+        })
+        .await
+        .is_err()
+    {
+        let err_msg = "{\"status\":\"error\",\"message\":\"Canal de commande P2P fermé\"}\n";
+        ipc_write.write_all(err_msg.as_bytes()).await?;
+        ipc_write.flush().await?;
+        return Ok(());
+    }
+
+    let p2p_stream = match reply_rx.await {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(err)) => {
+            let err_msg = format!("{{\"status\":\"error\",\"message\":\"{err}\"}}\n");
+            ipc_write.write_all(err_msg.as_bytes()).await?;
+            ipc_write.flush().await?;
+            return Ok(());
+        }
+        Err(_) => {
+            let err_msg =
+                "{\"status\":\"error\",\"message\":\"Délai dépassé ou canal P2P abandonné\"}\n";
+            ipc_write.write_all(err_msg.as_bytes()).await?;
+            ipc_write.flush().await?;
+            return Ok(());
+        }
+    };
+
+    ipc_write.write_all(b"{\"status\":\"ok\"}\n").await?;
+    ipc_write.flush().await?;
+
+    let (mut p2p_read, mut p2p_write) = tokio::io::split(
+        tokio_util::compat::FuturesAsyncReadCompatExt::compat(p2p_stream),
+    );
+
+    let initial_resize = fortiq_shell::ShellFrame::Resize {
+        cols: init.cols,
+        rows: init.rows,
+    };
+    let _ = initial_resize.write_to(&mut p2p_write).await;
+
+    let forward_in = tokio::spawn(async move {
+        while let Ok(Some(frame)) = fortiq_shell::ShellFrame::read_from(&mut ipc_read).await {
+            if frame.write_to(&mut p2p_write).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let forward_out = tokio::spawn(async move {
+        while let Ok(Some(frame)) = fortiq_shell::ShellFrame::read_from(&mut p2p_read).await {
+            if frame.write_to(&mut ipc_write).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    tokio::select! {
+        _ = forward_in => {}
+        _ = forward_out => {}
+    }
+
+    Ok(())
 }

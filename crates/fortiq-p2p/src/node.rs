@@ -41,6 +41,11 @@ pub enum P2pCommand {
         dial: Option<Multiaddr>,
         reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
+    OpenShellStream {
+        peer: PeerId,
+        dial: Option<Multiaddr>,
+        reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -415,6 +420,49 @@ async fn event_loop(
                             TicketRequest::Close,
                         );
                         pending_close_tickets.insert(request_id, reply);
+                    }
+                    P2pCommand::OpenShellStream { peer, dial, reply } => {
+                        if let Some(addr) = dial {
+                            if let Err(error) = swarm.dial(addr.clone()) {
+                                warn!(%addr, %error, "failed to dial target for shell stream");
+                            }
+                        } else if !swarm.is_connected(&peer) {
+                            if let Some(known_peer) = peer_registry.peers.get(&peer) {
+                                for addr in &known_peer.addresses {
+                                    let mut full = addr.clone();
+                                    full.push(libp2p::multiaddr::Protocol::P2p(peer));
+                                    let _ = swarm.dial(full);
+                                }
+                            }
+                        }
+
+                        let mut control = shell_control.clone();
+                        tokio::spawn(async move {
+                            use futures::AsyncReadExt;
+                            let res = match tokio::time::timeout(
+                                std::time::Duration::from_secs(12),
+                                control.open_stream(peer, SHELL_PROTOCOL),
+                            )
+                            .await
+                            {
+                                Ok(Ok(mut stream)) => {
+                                    let mut auth = [0u8; 1];
+                                    match stream.read_exact(&mut auth).await {
+                                        Ok(()) => {
+                                            if auth[0] == fortiq_shell::AUTHORIZED {
+                                                Ok(stream)
+                                            } else {
+                                                Err("L'hôte distant a refusé l'accès au terminal (ticket non ouvert ou session concurrente active)".to_string())
+                                            }
+                                        }
+                                        Err(e) => Err(format!("Échec de lecture de l'autorisation shell: {e}")),
+                                    }
+                                }
+                                Ok(Err(err)) => Err(format!("Échec d'ouverture du flux shell: {err}")),
+                                Err(_) => Err("Délai d'attente dépassé lors de l'établissement du flux shell".to_string()),
+                            };
+                            let _ = reply.send(res);
+                        });
                     }
                 }
             }

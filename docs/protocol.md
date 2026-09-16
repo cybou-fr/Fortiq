@@ -25,7 +25,13 @@ Protocol ID: `/fortiq/shell/1.0`
 
 The receiving peer obtains the remote PeerId from the authenticated libp2p connection and compares it with `authorization.operator_peer_id`. It sends a one-byte allow/deny result before any shell data. A denial closes the stream without launching a process. Only one concurrent shell session is permitted per managed peer; any secondary shell connection attempts while an active session exists are denied.
 
-On an authorized peer with an open ticket and no active shell session, FORTIQ selects the platform shell. Linux uses `/bin/bash` then `/bin/sh`; Windows uses `pwsh.exe`, `powershell.exe`, then `cmd.exe`. It sends session metadata, then bridges stream input to child stdin and child stdout/stderr back to the stream. Closing the connection closes stdin, terminates the child when necessary, waits for it, and releases the stream. Milestone 7 uses ordinary pipes without PTY/ConPTY support.
+On an authorized peer with an open ticket and no active shell session, FORTIQ selects the platform shell. Linux uses `/bin/bash` then `/bin/sh`; Windows uses `pwsh.exe`, `powershell.exe`, then `cmd.exe`.
+In Milestone 12, native pseudoterminal allocation is performed via `portable-pty` (ConPTY on Windows, openpty on Unix). The `/fortiq/shell/1.0` stream is framed using binary `ShellFrame` packets:
+- `0x01` (`Data`): standard terminal byte streams with a 24-bit length prefix (up to 16 MiB payload).
+- `0x02` (`Resize`): dynamic window geometry updates (`cols: u16`, `rows: u16`) propagated to the ConPTY master buffer.
+- `0x03` (`Ping`) and `0x04` (`Pong`): keepalive telemetry.
+
+Closing the connection drops the PTY master, terminates the child process tree when necessary, and cleans up the session.
 
 ## Ticket administration
 

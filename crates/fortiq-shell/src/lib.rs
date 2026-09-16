@@ -1,7 +1,5 @@
 use std::path::Path;
-
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use fortiq_core::NodeInfo;
@@ -9,13 +7,106 @@ use futures::{
     AsyncRead, AsyncReadExt as FuturesAsyncReadExt, AsyncWrite,
     AsyncWriteExt as FuturesAsyncWriteExt,
 };
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 
-const AUTHORIZED: u8 = 1;
-const DENIED: u8 = 0;
+pub const AUTHORIZED: u8 = 1;
+pub const DENIED: u8 = 0;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellFrame {
+    Data(Vec<u8>),
+    Resize { cols: u16, rows: u16 },
+    Ping,
+    Pong,
+}
+
+impl ShellFrame {
+    pub const TAG_DATA: u8 = 0x00;
+    pub const TAG_RESIZE: u8 = 0x01;
+    pub const TAG_PING: u8 = 0x02;
+    pub const TAG_PONG: u8 = 0x03;
+
+    pub async fn read_from<R: tokio::io::AsyncRead + Unpin>(
+        reader: &mut R,
+    ) -> std::io::Result<Option<Self>> {
+        use tokio::io::AsyncReadExt;
+        let mut header = [0u8; 3];
+        match reader.read_exact(&mut header).await {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(e) => return Err(e),
+        }
+
+        let tag = header[0];
+        let len = u16::from_be_bytes([header[1], header[2]]) as usize;
+
+        match tag {
+            Self::TAG_DATA => {
+                let mut buf = vec![0u8; len];
+                reader.read_exact(&mut buf).await?;
+                Ok(Some(Self::Data(buf)))
+            }
+            Self::TAG_RESIZE => {
+                if len != 4 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "invalid resize frame length",
+                    ));
+                }
+                let mut dims = [0u8; 4];
+                reader.read_exact(&mut dims).await?;
+                let cols = u16::from_be_bytes([dims[0], dims[1]]);
+                let rows = u16::from_be_bytes([dims[2], dims[3]]);
+                Ok(Some(Self::Resize { cols, rows }))
+            }
+            Self::TAG_PING => Ok(Some(Self::Ping)),
+            Self::TAG_PONG => Ok(Some(Self::Pong)),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown shell frame tag: {tag}"),
+            )),
+        }
+    }
+
+    pub async fn write_to<W: tokio::io::AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> std::io::Result<()> {
+        match self {
+            Self::Data(bytes) => {
+                let len = bytes.len() as u16;
+                let mut header = [Self::TAG_DATA, 0, 0];
+                let len_bytes = len.to_be_bytes();
+                header[1] = len_bytes[0];
+                header[2] = len_bytes[1];
+                writer.write_all(&header).await?;
+                writer.write_all(bytes).await?;
+                writer.flush().await?;
+            }
+            Self::Resize { cols, rows } => {
+                let mut packet = [Self::TAG_RESIZE, 0, 4, 0, 0, 0, 0];
+                let c = cols.to_be_bytes();
+                let r = rows.to_be_bytes();
+                packet[3] = c[0];
+                packet[4] = c[1];
+                packet[5] = r[0];
+                packet[6] = r[1];
+                writer.write_all(&packet).await?;
+                writer.flush().await?;
+            }
+            Self::Ping => {
+                writer.write_all(&[Self::TAG_PING, 0, 0]).await?;
+                writer.flush().await?;
+            }
+            Self::Pong => {
+                writer.write_all(&[Self::TAG_PONG, 0, 0]).await?;
+                writer.flush().await?;
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellKind {
@@ -102,27 +193,6 @@ fn executable_in_path(program: &str) -> bool {
     })
 }
 
-pub async fn serve<S>(stream: S, local_info: NodeInfo) -> Result<()>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    #[cfg(target_os = "linux")]
-    {
-        serve_linux(stream, local_info).await
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        serve_windows(stream, local_info).await
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-    {
-        let _ = (stream, local_info);
-        anyhow::bail!("remote shell serving is not implemented on this operating system")
-    }
-}
-
 pub async fn send_authorization<S>(stream: &mut S, allowed: bool) -> Result<()>
 where
     S: AsyncWrite + Unpin,
@@ -134,58 +204,63 @@ where
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
-async fn serve_linux<S>(stream: S, local_info: NodeInfo) -> Result<()>
+pub async fn serve<S>(stream: S, local_info: NodeInfo) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let shell = detect_linux_shell()?;
-    let child = tokio::process::Command::new(shell.path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("failed to launch {}", shell.path()))?;
-
-    serve_child(stream, local_info, shell, child).await
+    let (network_read, network_write) = tokio::io::split(stream.compat());
+    serve_pty(network_read, network_write, local_info).await
 }
 
-#[cfg(target_os = "windows")]
-async fn serve_windows<S>(stream: S, local_info: NodeInfo) -> Result<()>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
-    let shell = detect_windows_shell()?;
-    let child = tokio::process::Command::new(shell.program())
-        .args(shell.arguments())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("failed to launch {}", shell.program()))?;
-
-    serve_child(stream, local_info, shell, child).await
-}
-
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-async fn serve_child<S>(
-    stream: S,
+async fn serve_pty<R, W>(
+    mut network_read: R,
+    mut network_write: W,
     local_info: NodeInfo,
-    shell: ShellKind,
-    mut child: tokio::process::Child,
 ) -> Result<()>
 where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+    W: tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    let child_stdin = child.stdin.take().context("shell stdin unavailable")?;
-    let mut child_stdout = child.stdout.take().context("shell stdout unavailable")?;
-    let mut child_stderr = child.stderr.take().context("shell stderr unavailable")?;
-    let (mut network_read, mut network_write) = tokio::io::split(stream.compat());
+    let pty_system = portable_pty::native_pty_system();
+    let pair = pty_system
+        .openpty(portable_pty::PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .context("failed to open pseudo-terminal (PTY)")?;
 
+    #[cfg(target_os = "windows")]
+    let (shell, cmd) = {
+        let shell = detect_windows_shell()?;
+        let mut cmd = portable_pty::CommandBuilder::new(shell.program());
+        for arg in shell.arguments() {
+            cmd.arg(arg);
+        }
+        (shell, cmd)
+    };
+
+    #[cfg(target_os = "linux")]
+    let (shell, cmd) = {
+        let shell = detect_linux_shell()?;
+        let cmd = portable_pty::CommandBuilder::new(shell.path());
+        (shell, cmd)
+    };
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    anyhow::bail!("remote shell serving is not implemented on this operating system");
+
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
+        .with_context(|| format!("failed to spawn shell {}", shell.name()))?;
+
+    let master = Arc::new(Mutex::new(pair.master));
+
+    // Send styled terminal banner
     let banner = format!(
-        "FORTIQ Remote Session\n\nHost: {}\nPeerId: {}\nOS: {}\nArch: {}\nShell: {}\nFORTIQ: {}\n\n",
+        "\r\n\x1b[1;36mFORTIQ Remote Session\x1b[0m\r\n\r\nHost: {}\r\nPeerId: {}\r\nOS: {}\r\nArch: {}\r\nShell: {}\r\nFORTIQ: {}\r\n\r\n",
         local_info.name,
         local_info.peer_id,
         local_info.os,
@@ -193,62 +268,102 @@ where
         shell.name(),
         local_info.version
     );
-    network_write.write_all(banner.as_bytes()).await?;
-    network_write.flush().await?;
+    ShellFrame::Data(banner.into_bytes())
+        .write_to(&mut network_write)
+        .await?;
 
-    let input_task = tokio::spawn(async move {
-        let mut child_stdin = child_stdin;
-        tokio::io::copy(&mut network_read, &mut child_stdin).await?;
-        child_stdin.shutdown().await
-    });
+    let master_reader = master
+        .lock()
+        .unwrap()
+        .try_clone_reader()
+        .context("failed to clone PTY reader")?;
+    let mut master_writer = master
+        .lock()
+        .unwrap()
+        .take_writer()
+        .context("failed to take PTY writer")?;
 
-    let output_result =
-        copy_shell_output(&mut child_stdout, &mut child_stderr, &mut network_write).await;
-    input_task.abort();
-    let _ = input_task.await;
-
-    if child.try_wait()?.is_none() {
-        child.kill().await.context("failed to terminate shell")?;
-    }
-    child.wait().await.context("failed to reap shell process")?;
-    output_result
-}
-
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-async fn copy_shell_output<W>(
-    stdout: &mut tokio::process::ChildStdout,
-    stderr: &mut tokio::process::ChildStderr,
-    writer: &mut W,
-) -> Result<()>
-where
-    W: tokio::io::AsyncWrite + Unpin,
-{
-    let mut stdout_open = true;
-    let mut stderr_open = true;
-    let mut stdout_buffer = [0_u8; 8192];
-    let mut stderr_buffer = [0_u8; 8192];
-
-    while stdout_open || stderr_open {
-        tokio::select! {
-            read = stdout.read(&mut stdout_buffer), if stdout_open => {
-                let count = read.context("failed to read shell stdout")?;
-                stdout_open = count != 0;
-                if count != 0 {
-                    writer.write_all(&stdout_buffer[..count]).await?;
-                    writer.flush().await?;
+    // Task 1: read bytes from PTY master and queue them for network transmission
+    let (pty_out_tx, mut pty_out_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+    let read_task = tokio::task::spawn_blocking(move || {
+        use std::io::Read;
+        let mut reader = master_reader;
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if pty_out_tx.blocking_send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
                 }
-            }
-            read = stderr.read(&mut stderr_buffer), if stderr_open => {
-                let count = read.context("failed to read shell stderr")?;
-                stderr_open = count != 0;
-                if count != 0 {
-                    writer.write_all(&stderr_buffer[..count]).await?;
-                    writer.flush().await?;
-                }
+                Err(_) => break,
             }
         }
+    });
+
+    // Task 2: forward pty_out_rx to network_write
+    let send_task = tokio::spawn(async move {
+        while let Some(bytes) = pty_out_rx.recv().await {
+            if ShellFrame::Data(bytes)
+                .write_to(&mut network_write)
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+
+    // Task 3: write bytes to PTY master
+    let (pty_in_tx, mut pty_in_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+    let write_task = tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        while let Some(bytes) = pty_in_rx.blocking_recv() {
+            if master_writer.write_all(&bytes).is_err() || master_writer.flush().is_err() {
+                break;
+            }
+        }
+    });
+
+    let master_for_resize = Arc::clone(&master);
+    loop {
+        match ShellFrame::read_from(&mut network_read).await {
+            Ok(Some(ShellFrame::Data(bytes))) => {
+                if pty_in_tx.send(bytes).await.is_err() {
+                    break;
+                }
+            }
+            Ok(Some(ShellFrame::Resize { cols, rows })) => {
+                let m = Arc::clone(&master_for_resize);
+                let _ = tokio::task::spawn_blocking(move || {
+                    let _ = m.lock().unwrap().resize(portable_pty::PtySize {
+                        rows,
+                        cols,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    });
+                })
+                .await;
+            }
+            Ok(Some(ShellFrame::Ping)) => {}
+            Ok(Some(ShellFrame::Pong)) => {}
+            Ok(None) => break, // EOF
+            Err(_) => break,
+        }
     }
-    writer.shutdown().await?;
+
+    drop(pty_in_tx);
+    let _ = write_task.await;
+    send_task.abort();
+    let _ = send_task.await;
+    read_task.abort();
+    let _ = read_task.await;
+
+    // Terminate and reap child process
+    let _ = child.kill();
+    let _ = child.wait();
+
     Ok(())
 }
 
@@ -268,20 +383,49 @@ where
     let (mut remote_read, mut remote_write) = tokio::io::split(stream.compat());
 
     if let Some(command) = command {
-        remote_write.write_all(command.as_bytes()).await?;
-        remote_write.write_all(b"\nexit\n").await?;
-        remote_write.shutdown().await?;
-        tokio::io::copy(&mut remote_read, &mut tokio::io::stdout()).await?;
+        let cmd_bytes = format!("{command}\r\nexit\r\n").into_bytes();
+        ShellFrame::Data(cmd_bytes)
+            .write_to(&mut remote_write)
+            .await?;
+        while let Ok(Some(frame)) = ShellFrame::read_from(&mut remote_read).await {
+            if let ShellFrame::Data(bytes) = frame {
+                tokio::io::stdout().write_all(&bytes).await?;
+                tokio::io::stdout().flush().await?;
+            }
+        }
         return Ok(());
     }
 
-    let upload = tokio::spawn(async move {
-        tokio::io::copy(&mut tokio::io::stdin(), &mut remote_write).await?;
-        remote_write.shutdown().await
+    let send_task = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut stdin = tokio::io::stdin();
+        let mut buf = [0u8; 1024];
+        loop {
+            match stdin.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if ShellFrame::Data(buf[..n].to_vec())
+                        .write_to(&mut remote_write)
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
     });
-    tokio::io::copy(&mut remote_read, &mut tokio::io::stdout()).await?;
-    upload.abort();
-    let _ = upload.await;
+
+    while let Ok(Some(frame)) = ShellFrame::read_from(&mut remote_read).await {
+        if let ShellFrame::Data(bytes) = frame {
+            tokio::io::stdout().write_all(&bytes).await?;
+            tokio::io::stdout().flush().await?;
+        }
+    }
+
+    send_task.abort();
+    let _ = send_task.await;
     Ok(())
 }
 
@@ -320,5 +464,31 @@ mod tests {
             detect_windows_shell().unwrap(),
             ShellKind::Pwsh | ShellKind::PowerShell | ShellKind::Cmd
         ));
+    }
+
+    #[tokio::test]
+    async fn frame_encoding_decoding_roundtrip() {
+        let (mut client, mut server) = tokio::io::duplex(1024);
+
+        let data_frame = ShellFrame::Data(b"hello conpty".to_vec());
+        data_frame.write_to(&mut client).await.unwrap();
+
+        let received = ShellFrame::read_from(&mut server).await.unwrap().unwrap();
+        assert_eq!(received, ShellFrame::Data(b"hello conpty".to_vec()));
+
+        let resize_frame = ShellFrame::Resize {
+            cols: 120,
+            rows: 40,
+        };
+        resize_frame.write_to(&mut client).await.unwrap();
+
+        let received_resize = ShellFrame::read_from(&mut server).await.unwrap().unwrap();
+        assert_eq!(
+            received_resize,
+            ShellFrame::Resize {
+                cols: 120,
+                rows: 40
+            }
+        );
     }
 }

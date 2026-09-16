@@ -1,4 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 
 interface DesktopStatus {
   product: string;
@@ -20,6 +24,9 @@ interface DesktopPeer {
 }
 
 let selectedPeerId: string | null = null;
+let term: Terminal | null = null;
+let fitAddon: FitAddon | null = null;
+let isTerminalActive = false;
 
 function escapeHtml(text: string): string {
   const div = document.createElement("div");
@@ -338,26 +345,33 @@ function initEventListeners() {
 
   // Connect terminal action
   const btnConnect = document.getElementById("btn-connect");
-  const terminalView = document.getElementById("terminal-view");
-  if (btnConnect && terminalView) {
+  if (btnConnect) {
     btnConnect.addEventListener("click", () => {
-      if (!selectedPeerId) return;
-      const line = document.createElement("div");
-      line.className = "terminal-line banner";
-      line.textContent = `[${new Date().toLocaleTimeString()}] Session P2P authentifiée avec ${selectedPeerId}. Flux ConPTY/xterm prévu pour le Milestone 12.`;
-      terminalView.appendChild(line);
-      terminalView.scrollTop = terminalView.scrollHeight;
+      connectTerminalSession();
     });
   }
 
   // Clear terminal action
   const btnTermClear = document.getElementById("btn-term-clear");
-  if (btnTermClear && terminalView) {
+  if (btnTermClear) {
     btnTermClear.addEventListener("click", () => {
-      terminalView.innerHTML = `
-        <div class="terminal-line banner">Terminal P2P — En attente de session (M12 ConPTY/xterm)</div>
-        <div class="terminal-line prompt">FORTIQ&gt; <span class="cursor">_</span></div>
-      `;
+      if (term) {
+        term.clear();
+      }
+    });
+  }
+
+  // Fullscreen terminal toggle
+  const btnTermFullscreen = document.getElementById("btn-term-fullscreen");
+  const panelTerminal = document.querySelector(".panel-terminal");
+  if (btnTermFullscreen && panelTerminal) {
+    btnTermFullscreen.addEventListener("click", () => {
+      panelTerminal.classList.toggle("fullscreen");
+      setTimeout(() => {
+        if (fitAddon) {
+          fitAddon.fit();
+        }
+      }, 100);
     });
   }
 
@@ -371,7 +385,148 @@ function initEventListeners() {
   });
 }
 
+function initTerminal() {
+  const container = document.getElementById("xterm-container");
+  if (!container) return;
+
+  term = new Terminal({
+    cursorBlink: true,
+    fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
+    fontSize: 13,
+    lineHeight: 1.2,
+    theme: {
+      background: "#070a10",
+      foreground: "#e6edf3",
+      cursor: "#00d2ff",
+      selectionBackground: "rgba(0, 132, 255, 0.3)",
+      black: "#070a10",
+      brightBlack: "#5e6b7d",
+      red: "#f85149",
+      brightRed: "#ff7b72",
+      green: "#2ea043",
+      brightGreen: "#7ee787",
+      yellow: "#e3b341",
+      brightYellow: "#f2cc60",
+      blue: "#0084ff",
+      brightBlue: "#58a6ff",
+      magenta: "#bc8cff",
+      brightMagenta: "#d2a8ff",
+      cyan: "#00d2ff",
+      brightCyan: "#56d4dd",
+      white: "#b1bac4",
+      brightWhite: "#ffffff",
+    },
+    convertEol: true,
+  });
+
+  fitAddon = new FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(container);
+
+  term.onData((data) => {
+    if (isTerminalActive) {
+      invoke("write_terminal_data", { data }).catch((err) => {
+        console.error("write_terminal_data error:", err);
+      });
+    }
+  });
+
+  term.onResize(({ cols, rows }) => {
+    if (isTerminalActive) {
+      invoke("resize_terminal", { cols, rows }).catch((err) => {
+        console.error("resize_terminal error:", err);
+      });
+    }
+  });
+
+  const ro = new ResizeObserver(() => {
+    if (container.style.display !== "none" && fitAddon) {
+      try {
+        fitAddon.fit();
+      } catch (e) {
+        // ignore during initial layout
+      }
+    }
+  });
+  ro.observe(container);
+
+  listen<string>("terminal-output", (event) => {
+    if (term) {
+      term.write(event.payload);
+    }
+  });
+
+  listen("terminal-closed", () => {
+    isTerminalActive = false;
+    const termDot = document.getElementById("terminal-dot");
+    const termTitle = document.getElementById("terminal-title-text");
+    if (termDot) termDot.className = "status-dot";
+    if (termTitle) termTitle.textContent = "Terminal P2P — Session terminée";
+    if (term) {
+      term.write("\r\n\x1b[33m[FORTIQ] Session terminal fermée par l'hôte distant.\x1b[0m\r\n");
+    }
+  });
+}
+
+async function connectTerminalSession() {
+  if (!selectedPeerId) return;
+  const container = document.getElementById("xterm-container");
+  const placeholder = document.getElementById("terminal-placeholder");
+  const btnConnect = document.getElementById("btn-connect") as HTMLButtonElement | null;
+  const termDot = document.getElementById("terminal-dot");
+  const termTitle = document.getElementById("terminal-title-text");
+
+  if (placeholder) placeholder.style.display = "none";
+  if (container) container.style.display = "block";
+
+  if (fitAddon) {
+    try {
+      fitAddon.fit();
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  const cols = term?.cols || 80;
+  const rows = term?.rows || 24;
+
+  if (term) {
+    term.reset();
+    term.write(
+      `\x1b[1;36m[FORTIQ]\x1b[0m Établissement de la liaison P2P sécurisée vers ${selectedPeerId}...\r\n`
+    );
+  }
+
+  if (btnConnect) {
+    btnConnect.disabled = true;
+    btnConnect.innerHTML = `<i class="ph ph-spinner"></i><span>Connexion...</span>`;
+  }
+
+  try {
+    await invoke("start_terminal_session", {
+      peer: selectedPeerId,
+      cols,
+      rows,
+    });
+    isTerminalActive = true;
+    if (termDot) termDot.className = "status-dot online";
+    if (termTitle) termTitle.textContent = `Terminal actif — ${selectedPeerId.substring(0, 14)}`;
+  } catch (err) {
+    isTerminalActive = false;
+    if (term) {
+      term.write(`\r\n\x1b[1;31m[ERREUR]\x1b[0m ${err}\r\n`);
+    }
+    alert(`Échec de connexion au terminal : ${err}`);
+  } finally {
+    if (btnConnect) {
+      btnConnect.disabled = false;
+      btnConnect.innerHTML = `<i class="ph ph-terminal-window"></i><span>Ouvrir Terminal d'Assistance</span>`;
+    }
+  }
+}
+
 window.addEventListener("DOMContentLoaded", () => {
+  initTerminal();
   initEventListeners();
   refresh();
   // Poll daemon state every 3 seconds

@@ -5,6 +5,28 @@ use crate::{NodeMode, Ticket};
 pub const DEFAULT_WINDOWS_PIPE_NAME: &str = r"\\.\pipe\fortiq-ipc";
 pub const DEFAULT_UNIX_SOCKET_PATH: &str = "/run/fortiq.sock";
 
+pub const DEFAULT_WINDOWS_TERMINAL_PIPE_NAME: &str = r"\\.\pipe\fortiq-terminal";
+pub const DEFAULT_UNIX_TERMINAL_SOCKET_PATH: &str = "/run/fortiq-terminal.sock";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TerminalSessionInit {
+    pub peer: String,
+    #[serde(default = "default_terminal_cols")]
+    pub cols: u16,
+    #[serde(default = "default_terminal_rows")]
+    pub rows: u16,
+    #[serde(default)]
+    pub dial: Option<String>,
+}
+
+fn default_terminal_cols() -> u16 {
+    80
+}
+
+fn default_terminal_rows() -> u16 {
+    24
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "payload")]
 pub enum IpcRequest {

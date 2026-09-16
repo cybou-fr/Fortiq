@@ -9,6 +9,7 @@ rust-version.workspace = true
 anyhow.workspace = true
 fortiq-core = { path = "../fortiq-core" }
 futures.workspace = true
+portable-pty.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 

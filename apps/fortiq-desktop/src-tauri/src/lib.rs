@@ -184,6 +184,157 @@ async fn list_peers() -> Result<Vec<DesktopPeer>, String> {
     }
 }
 
+pub struct TerminalState(
+    pub tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<fortiq_shell::ShellFrame>>>,
+);
+
+#[tauri::command]
+async fn start_terminal_session(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, TerminalState>,
+    peer: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    #[cfg(windows)]
+    let stream = {
+        use tokio::net::windows::named_pipe::ClientOptions;
+        let pipe_name = fortiq_core::ipc::DEFAULT_WINDOWS_TERMINAL_PIPE_NAME;
+        ClientOptions::new().open(pipe_name).map_err(|e| {
+            format!("Impossible de se connecter au pipe terminal ({pipe_name}): {e}")
+        })?
+    };
+
+    #[cfg(unix)]
+    let stream = {
+        use tokio::net::UnixStream;
+        let path = fortiq_core::ipc::DEFAULT_UNIX_TERMINAL_SOCKET_PATH;
+        UnixStream::connect(path)
+            .await
+            .map_err(|e| format!("Impossible de se connecter au socket terminal ({path}): {e}"))?
+    };
+
+    #[cfg(not(any(windows, unix)))]
+    return Err("Plateforme non supportée".to_string());
+
+    let (read_half, mut write_half) = tokio::io::split(stream);
+
+    let init = fortiq_core::ipc::TerminalSessionInit {
+        peer,
+        cols,
+        rows,
+        dial: None,
+    };
+    let mut init_bytes = serde_json::to_vec(&init).map_err(|e| e.to_string())?;
+    init_bytes.push(b'\n');
+    write_half
+        .write_all(&init_bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    write_half.flush().await.map_err(|e| e.to_string())?;
+
+    let mut reader = BufReader::new(read_half);
+    let mut status_line = String::new();
+    reader
+        .read_line(&mut status_line)
+        .await
+        .map_err(|e| format!("Échec de lecture du handshake: {e}"))?;
+
+    #[derive(serde::Deserialize)]
+    struct HandshakeResp {
+        status: String,
+        message: Option<String>,
+    }
+
+    let resp: HandshakeResp = serde_json::from_str(status_line.trim())
+        .map_err(|e| format!("Réponse handshake invalide: {e}"))?;
+
+    if resp.status != "ok" {
+        return Err(resp
+            .message
+            .unwrap_or_else(|| "Connexion terminal refusée par le démon".to_string()));
+    }
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<fortiq_shell::ShellFrame>(128);
+
+    {
+        let mut session_guard = state.0.lock().await;
+        *session_guard = Some(tx);
+    }
+
+    tokio::spawn(async move {
+        while let Some(frame) = rx.recv().await {
+            if frame.write_to(&mut write_half).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut read_half = reader.into_inner();
+    let app_clone = app.clone();
+    tokio::spawn(async move {
+        loop {
+            match fortiq_shell::ShellFrame::read_from(&mut read_half).await {
+                Ok(Some(fortiq_shell::ShellFrame::Data(bytes))) => {
+                    let text = String::from_utf8_lossy(&bytes).to_string();
+                    let _ = app_clone.emit("terminal-output", text);
+                }
+                Ok(Some(fortiq_shell::ShellFrame::Ping)) => {}
+                Ok(Some(fortiq_shell::ShellFrame::Pong)) => {}
+                Ok(Some(fortiq_shell::ShellFrame::Resize { .. })) => {}
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+        let _ = app_clone.emit("terminal-closed", ());
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn write_terminal_data(
+    state: tauri::State<'_, TerminalState>,
+    data: String,
+) -> Result<(), String> {
+    let guard = state.0.lock().await;
+    if let Some(tx) = guard.as_ref() {
+        tx.send(fortiq_shell::ShellFrame::Data(data.into_bytes()))
+            .await
+            .map_err(|e| format!("Échec d'envoi des données terminal: {e}"))?;
+        Ok(())
+    } else {
+        Err("Aucune session terminal active".to_string())
+    }
+}
+
+#[tauri::command]
+async fn resize_terminal(
+    state: tauri::State<'_, TerminalState>,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let guard = state.0.lock().await;
+    if let Some(tx) = guard.as_ref() {
+        tx.send(fortiq_shell::ShellFrame::Resize { cols, rows })
+            .await
+            .map_err(|e| format!("Échec d'envoi du redimensionnement: {e}"))?;
+        Ok(())
+    } else {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+async fn close_terminal_session(state: tauri::State<'_, TerminalState>) -> Result<(), String> {
+    let mut guard = state.0.lock().await;
+    *guard = None;
+    Ok(())
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -195,6 +346,7 @@ fn show_main_window(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(TerminalState(tokio::sync::Mutex::new(None)))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Ouvrir FORTIQ", true, None::<&str>)?;
@@ -243,7 +395,11 @@ pub fn run() {
             desktop_status,
             open_ticket,
             close_ticket,
-            list_peers
+            list_peers,
+            start_terminal_session,
+            write_terminal_data,
+            resize_terminal,
+            close_terminal_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running FORTIQ desktop");

@@ -507,12 +507,24 @@ button:disabled, .btn:disabled {
   border: 1px solid rgba(0, 180, 255, 0.25);
 }
 
-/* Panel 3: Terminal View */
 .panel-terminal {
   background-color: rgba(9, 13, 20, 0.75);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-right: none;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.panel-terminal.fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1000;
 }
 
 .terminal-header {
@@ -554,12 +566,35 @@ button:disabled, .btn:disabled {
 
 .terminal-body {
   flex: 1;
-  padding: 20px;
+  padding: 8px 10px;
   font-family: var(--font-mono);
   font-size: 13px;
-  line-height: 1.6;
-  overflow-y: auto;
+  line-height: 1.4;
+  overflow: hidden;
   color: #c9d1d9;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background-color: var(--bg-darkest);
+}
+
+.xterm-container {
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  display: none;
+}
+
+.xterm-container .xterm {
+  height: 100%;
+  padding: 4px;
+}
+
+.terminal-placeholder {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .terminal-line.banner {
