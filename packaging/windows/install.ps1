@@ -175,15 +175,32 @@ New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 Get-ChildItem -LiteralPath $InstallDir -Filter "*.old-*" -File -ErrorAction SilentlyContinue |
     Remove-Item -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
-# Harden data directory ACL: restrict to SYSTEM (*S-1-5-18) and Administrators (*S-1-5-32-544),
-# stripping inherited unprivileged user read permissions from ProgramData.
-# Fail-closed: halts installation if ACL cannot be secured.
-Invoke-NativeCommand -FailureMessage "Harden ProgramData ACL" -Command {
-    & icacls.exe $DataDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"
-}
+# Harden ProgramData ACL exclusively to SYSTEM (S-1-5-18) and Administrators (S-1-5-32-544).
+# Disables inheritance without copying inherited rules, and purges any non-admin ACEs.
+$acl = New-Object System.Security.AccessControl.DirectorySecurity
+$acl.SetAccessRuleProtection($true, $false)
+$systemSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
+$adminSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
+$inherit = [System.Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit"
+$prop = [System.Security.AccessControl.PropagationFlags]::None
+$allow = [System.Security.AccessControl.AccessControlType]::Allow
+$fullControl = [System.Security.AccessControl.FileSystemRights]::FullControl
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($systemSid, $fullControl, $inherit, $prop, $allow)))
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($adminSid, $fullControl, $inherit, $prop, $allow)))
+Set-Acl -LiteralPath $DataDir -AclObject $acl
+
+# Verify exclusive ACL: fail-closed if inheritance is enabled or unauthorized SIDs are present.
 $securedAcl = Get-Acl -LiteralPath $DataDir
 if (-not $securedAcl.AreAccessRulesProtected) {
     throw "Security verification failed: ProgramData ACL inheritance is not disabled on $DataDir."
+}
+$allowedSids = @("S-1-5-18", "S-1-5-32-544")
+$activeRules = $securedAcl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])
+foreach ($rule in $activeRules) {
+    $sid = $rule.IdentityReference.Value
+    if ($allowedSids -notcontains $sid) {
+        throw "Security verification failed: ProgramData ACL contains unauthorized entry for SID $sid on $DataDir."
+    }
 }
 foreach ($file in $requiredFiles + @("install.ps1")) {
     $source = Join-Path $scriptDir $file

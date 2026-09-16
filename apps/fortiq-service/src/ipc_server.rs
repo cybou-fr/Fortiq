@@ -51,19 +51,20 @@ async fn run_terminal_ipc(state: Arc<IpcState>) -> Result<()> {
 #[cfg(windows)]
 async fn run_windows_pipe(state: Arc<IpcState>) -> Result<()> {
     let pipe_name = state.config.ipc_endpoint();
+    let mode = state.config.mode();
     tracing::info!("Starting Windows Named Pipe IPC server at {}", pipe_name);
 
-    let mut server = create_windows_pipe(&pipe_name, true)?;
+    let mut server = create_windows_pipe(&pipe_name, true, false, mode)?;
 
     loop {
         if let Err(err) = server.connect().await {
             tracing::warn!("Named pipe connection failed: {err}");
-            server = create_windows_pipe(&pipe_name, false)?;
+            server = create_windows_pipe(&pipe_name, false, false, mode)?;
             continue;
         }
 
         let client = server;
-        server = create_windows_pipe(&pipe_name, false)?;
+        server = create_windows_pipe(&pipe_name, false, false, mode)?;
 
         let state_clone = Arc::clone(&state);
         tokio::spawn(async move {
@@ -77,19 +78,20 @@ async fn run_windows_pipe(state: Arc<IpcState>) -> Result<()> {
 #[cfg(windows)]
 async fn run_windows_terminal_pipe(state: Arc<IpcState>) -> Result<()> {
     let pipe_name = state.config.terminal_ipc_endpoint();
+    let mode = state.config.mode();
     tracing::info!("Starting Windows Terminal Named Pipe at {}", pipe_name);
 
-    let mut server = create_windows_pipe(&pipe_name, true)?;
+    let mut server = create_windows_pipe(&pipe_name, true, true, mode)?;
 
     loop {
         if let Err(err) = server.connect().await {
             tracing::warn!("Terminal named pipe connection failed: {err}");
-            server = create_windows_pipe(&pipe_name, false)?;
+            server = create_windows_pipe(&pipe_name, false, true, mode)?;
             continue;
         }
 
         let client = server;
-        server = create_windows_pipe(&pipe_name, false)?;
+        server = create_windows_pipe(&pipe_name, false, true, mode)?;
 
         let state_clone = Arc::clone(&state);
         tokio::spawn(async move {
@@ -100,13 +102,18 @@ async fn run_windows_terminal_pipe(state: Arc<IpcState>) -> Result<()> {
     }
 }
 
-/// Creates a local-only pipe that a desktop application can open even though the
-/// service itself runs as LocalSystem. Windows' default pipe DACL otherwise only
-/// grants access to the service account, making every non-elevated GUI look offline.
+/// Creates a local-only named pipe with explicit security descriptors.
+/// - Operator node (command & terminal pipes) or Terminal pipe: strictly restricted to
+///   LocalSystem (SY) and Builtin Administrators (BA). Unprivileged local users (IU) are
+///   denied access so they cannot command the operator or initiate terminal sessions.
+/// - Managed node command pipe: grants read/write to Interactive Users (IU) so non-elevated
+///   desktop and CLI users can open support tickets and inspect status.
 #[cfg(windows)]
 fn create_windows_pipe(
     pipe_name: &str,
     first_instance: bool,
+    is_terminal: bool,
+    mode: NodeMode,
 ) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
     use std::{ffi::c_void, iter, ptr};
     use tokio::net::windows::named_pipe::ServerOptions;
@@ -120,12 +127,13 @@ fn create_windows_pipe(
         },
     };
 
-    // LocalSystem and administrators retain full control. Interactive desktop
-    // users receive only the read/write access needed by the CLI and GUI.
-    let sddl: Vec<u16> = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
-        .encode_utf16()
-        .chain(iter::once(0))
-        .collect();
+    let sddl_str = if is_terminal || mode == NodeMode::Operator {
+        "D:P(A;;GA;;;SY)(A;;GA;;;BA)"
+    } else {
+        "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
+    };
+
+    let sddl: Vec<u16> = sddl_str.encode_utf16().chain(iter::once(0)).collect();
     let mut descriptor: *mut c_void = ptr::null_mut();
 
     // SAFETY: `sddl` is NUL-terminated and remains alive for the duration of the
@@ -179,7 +187,12 @@ async fn run_unix_socket(state: Arc<IpcState>) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).await;
+        let mode = if state.config.mode() == NodeMode::Operator {
+            0o600
+        } else {
+            0o666
+        };
+        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).await;
     }
     tracing::info!("Starting Unix Domain Socket IPC server at {}", path);
 
@@ -214,7 +227,7 @@ async fn run_unix_terminal_socket(state: Arc<IpcState>) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).await;
+        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).await;
     }
     tracing::info!("Starting Unix Terminal Socket at {}", path);
 
@@ -387,6 +400,14 @@ where
 {
     let (ipc_read_half, mut ipc_write) = tokio::io::split(stream);
 
+    if state.config.mode() != NodeMode::Operator {
+        let err_msg =
+            "{\"status\":\"error\",\"message\":\"Terminal IPC is only permitted in Operator mode\"}\n";
+        ipc_write.write_all(err_msg.as_bytes()).await?;
+        ipc_write.flush().await?;
+        return Ok(());
+    }
+
     let mut reader = BufReader::new(ipc_read_half);
     let mut init_line = String::new();
     let n = reader.read_line(&mut init_line).await?;
@@ -507,4 +528,51 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_terminal_client_rejected_on_managed_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config {
+            node: fortiq_core::NodeConfig {
+                name: "test-client".to_string(),
+            },
+            identity: fortiq_core::IdentityConfig {
+                path: dir.path().join("id.key"),
+            },
+            authorization: fortiq_core::AuthorizationConfig {
+                operator_peer_id: Some(
+                    "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN".to_string(),
+                ),
+            },
+            network: fortiq_core::NetworkConfig::default(),
+            capabilities: fortiq_core::CapabilitiesConfig::default(),
+            ticket: fortiq_core::TicketConfig::default(),
+            ipc: fortiq_core::IpcConfig::default(),
+        };
+        assert_eq!(config.mode(), NodeMode::Managed);
+        let ticket_path = dir.path().join("ticket.json");
+        let state = Arc::new(IpcState {
+            config,
+            peer_id: PeerId::random(),
+            listen_addresses: vec![],
+            ticket_store: TicketStore::new(ticket_path),
+            p2p_sender: None,
+        });
+
+        let (client_io, server_io) = tokio::io::duplex(1024);
+        let handle = tokio::spawn(async move { handle_terminal_client(server_io, state).await });
+
+        let mut reader = BufReader::new(client_io);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        assert!(line.contains("Terminal IPC is only permitted in Operator mode"));
+
+        let res = handle.await.unwrap();
+        assert!(res.is_ok());
+    }
 }

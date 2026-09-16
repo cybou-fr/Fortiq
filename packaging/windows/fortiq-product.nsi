@@ -59,8 +59,10 @@ Var ConfigDialog
 Page custom ConfigPageCreate ConfigPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 
-!define MUI_FINISHPAGE_RUN "$INSTDIR\fortiq-desktop.exe"
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_NOTCHECKED
 !define MUI_FINISHPAGE_RUN_TEXT "Lancer FORTIQ maintenant"
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchDesktopUnelevated
 !define MUI_FINISHPAGE_LINK "Visiter le site officiel fortiq.fr"
 !define MUI_FINISHPAGE_LINK_LOCATION "https://fortiq.fr"
 !insertmacro MUI_PAGE_FINISH
@@ -68,6 +70,10 @@ Page custom ConfigPageCreate ConfigPageLeave
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "French"
+
+Function LaunchDesktopUnelevated
+  ExecShell "open" "$INSTDIR\fortiq-desktop.exe"
+FunctionEnd
 
 Function .onInit
   ReadEnvStr $NodeName "COMPUTERNAME"

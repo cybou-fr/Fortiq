@@ -53,22 +53,32 @@ FORTIQ permits exactly one service node and one Desktop application per operatin
 system. Run the operator and managed client on separate machines or virtual
 machines.
 
+Both operator and managed peers connect to the sovereign public relay/rendezvous
+infrastructure for NAT traversal and peer discovery:
+
+```toml
+[network]
+relay_peer = "/ip4/51.255.46.58/udp/4001/quic-v1/p2p/12D3KooWRFrWVx2CANXcjXvTNaqkh6APgAecsW94CLwNEg5wsqLy"
+```
+
+Template configurations are provided in `examples/operator.toml`, `examples/managed.toml`, and `examples/relay.toml`.
+
 ### 1. Start the Operator Daemon
 
 On the operator machine, start the background service daemon:
 
 ```bash
-cargo run -p fortiq-service -- --config operator.toml
+cargo run -p fortiq-service -- --config examples/operator.toml
 ```
 
 Note the printed `Local PeerId` (e.g. `12D3KooW_OPERATOR_PEER_ID`).
 
 ### 2. Start the Managed Client Daemon
 
-On the managed machine, set `authorization.operator_peer_id = "12D3KooW_OPERATOR_PEER_ID"` in `managed.toml`, then start the client daemon:
+On the managed machine, set `authorization.operator_peer_id = "12D3KooW_OPERATOR_PEER_ID"` in `examples/managed.toml`, then start the client daemon:
 
 ```bash
-cargo run -p fortiq-service -- --config managed.toml
+cargo run -p fortiq-service -- --config examples/managed.toml
 ```
 
 The managed peer connects to the public relay/rendezvous point and advertises its availability.

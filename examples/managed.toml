@@ -9,6 +9,8 @@ operator_peer_id = "REPLACE_WITH_OPERATOR_PEER_ID"
 
 [network]
 listen_quic = "0.0.0.0:4002"
+# Public VPS relay node for NAT traversal and rendezvous discovery
+relay_peer = "/ip4/51.255.46.58/udp/4001/quic-v1/p2p/12D3KooWRFrWVx2CANXcjXvTNaqkh6APgAecsW94CLwNEg5wsqLy"
 
 [capabilities]
 rendezvous = false
