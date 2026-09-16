@@ -77,9 +77,7 @@ async fn e2e_managed_operator_quic_interaction() {
     let managed_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{managed_port}/quic-v1")
         .parse()
         .unwrap();
-    let operator_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{operator_port}/quic-v1")
-        .parse()
-        .unwrap();
+    let operator_listen_addr: Multiaddr = "/ip4/127.0.0.1/udp/0/quic-v1".parse().unwrap();
 
     let managed_info = NodeInfo::local(
         managed_peer_id,
@@ -118,11 +116,16 @@ async fn e2e_managed_operator_quic_interaction() {
     };
 
     let managed_handle = tokio::spawn(async move {
-        let _ = fortiq_p2p::run(managed_keypair, managed_info, managed_options).await;
+        if let Err(e) = fortiq_p2p::run(managed_keypair, managed_info, managed_options).await {
+            eprintln!("Managed node failed: {e:?}");
+        }
     });
+    tokio::time::sleep(Duration::from_millis(150)).await;
 
     let operator_handle = tokio::spawn(async move {
-        let _ = fortiq_p2p::run(operator_keypair, operator_info, operator_options).await;
+        if let Err(e) = fortiq_p2p::run(operator_keypair, operator_info, operator_options).await {
+            eprintln!("Operator node failed: {e:?}");
+        }
     });
 
     // Give peers time to dial and perform HELLO handshake
@@ -136,10 +139,9 @@ async fn e2e_managed_operator_quic_interaction() {
             .is_ok()
         {
             if let Ok(peers) = rx.await {
-                if let Some(peer) = peers
-                    .iter()
-                    .find(|p| p.peer_id == managed_peer_id.to_string())
-                {
+                if let Some(peer) = peers.iter().find(|p| {
+                    p.peer_id == managed_peer_id.to_string() && p.hostname == "managed-node"
+                }) {
                     assert_eq!(peer.hostname, "managed-node");
                     discovered = true;
                     break;
@@ -258,9 +260,7 @@ async fn e2e_unauthorized_operator_rejected_on_ticket_close() {
     let managed_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{managed_port}/quic-v1")
         .parse()
         .unwrap();
-    let intruder_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{intruder_port}/quic-v1")
-        .parse()
-        .unwrap();
+    let intruder_listen_addr: Multiaddr = "/ip4/127.0.0.1/udp/0/quic-v1".parse().unwrap();
 
     let managed_info = NodeInfo::local(
         managed_peer_id,
@@ -303,6 +303,7 @@ async fn e2e_unauthorized_operator_rejected_on_ticket_close() {
             eprintln!("Managed node failed: {e:?}");
         }
     });
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     let intruder_handle = tokio::spawn(async move {
         if let Err(e) = fortiq_p2p::run(intruder_keypair, intruder_info, intruder_options).await {

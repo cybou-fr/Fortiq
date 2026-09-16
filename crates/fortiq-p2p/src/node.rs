@@ -425,6 +425,7 @@ pub async fn run(
     let rendezvous_enabled = config.capabilities.rendezvous;
     let relay_enabled = config.capabilities.relay;
     let dcutr_enabled = config.capabilities.dcutr;
+    let relay_rate_limit_enabled = config.capabilities.relay_rate_limit;
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
         .with_quic()
@@ -448,7 +449,7 @@ pub async fn run(
             relay_client,
             relay_server: relay_enabled
                 .then(|| {
-                    let relay_config = relay::Config {
+                    let mut relay_config = relay::Config {
                         max_reservations: 256,
                         max_reservations_per_peer: 16,
                         reservation_duration: Duration::from_secs(3600),
@@ -459,6 +460,15 @@ pub async fn run(
                         max_circuit_bytes: 1024 * 1024 * 1024,
                         circuit_src_rate_limiters: Vec::new(),
                     };
+                    if relay_rate_limit_enabled {
+                        let limit_peer = std::num::NonZeroU32::new(60).expect("60 > 0");
+                        let limit_ip = std::num::NonZeroU32::new(120).expect("120 > 0");
+                        relay_config = relay_config
+                            .reservation_rate_per_peer(limit_peer, Duration::from_secs(10))
+                            .reservation_rate_per_ip(limit_ip, Duration::from_secs(5))
+                            .circuit_src_per_peer(limit_peer, Duration::from_secs(2))
+                            .circuit_src_per_ip(limit_ip, Duration::from_secs(1));
+                    }
                     relay::Behaviour::new(local_peer_id, relay_config)
                 })
                 .into(),
@@ -1107,8 +1117,7 @@ async fn handle_ticket(
                     } else {
                         let _ = reply.send(Err(response.message.clone()));
                     }
-                }
-                if response.success {
+                } else if response.success {
                     println!("{}", response.message);
                     let _ = completion.send(Ok(())).await;
                 } else {
@@ -1126,12 +1135,13 @@ async fn handle_ticket(
         } => {
             if let Some(reply) = pending_close_tickets.remove(&request_id) {
                 let _ = reply.send(Err(format!("ticket request to {peer} failed: {error}")));
+            } else {
+                let _ = completion
+                    .send(Err(anyhow::anyhow!(
+                        "ticket request to {peer} failed: {error}"
+                    )))
+                    .await;
             }
-            let _ = completion
-                .send(Err(anyhow::anyhow!(
-                    "ticket request to {peer} failed: {error}"
-                )))
-                .await;
         }
         request_response::Event::InboundFailure { peer, error, .. } => {
             warn!(remote_peer_id = %peer, %error, "ticket request failed");

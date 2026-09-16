@@ -47,36 +47,49 @@ cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-## Run an operator and a managed peer
+## Quickstart: Operator and Managed Peer
 
 FORTIQ permits exactly one service node and one Desktop application per operating
 system. Run the operator and managed client on separate machines or virtual
-machines. Using alternate configuration files, ports, or IPC names does not bypass
-this isolation rule.
+machines.
 
-On the operator machine, copy `examples/operator.toml` to `operator.toml`, then start it:
+### 1. Start the Operator Daemon
+
+On the operator machine, start the background service daemon:
 
 ```bash
 cargo run -p fortiq-service -- --config operator.toml
 ```
 
-On the managed machine or VM, copy the printed operator PeerId into
-`authorization.operator_peer_id` in a copy of `examples/managed.toml`, then start
-the managed peer:
+Note the printed `Local PeerId` (e.g. `12D3KooW_OPERATOR_PEER_ID`).
+
+### 2. Start the Managed Client Daemon
+
+On the managed machine, set `authorization.operator_peer_id = "12D3KooW_OPERATOR_PEER_ID"` in `managed.toml`, then start the client daemon:
 
 ```bash
 cargo run -p fortiq-service -- --config managed.toml
 ```
 
-Copy the managed peer's printed reachable listen address and dial it from the
-operator (a restart preserves both identities):
+The managed peer connects to the public relay/rendezvous point and advertises its availability.
+
+### 3. Manage via Thin-Client CLI (`fortiq`)
+
+From another shell on the operator machine, use the `fortiq` CLI (which connects via local IPC to the running `fortiq-service`):
 
 ```bash
-cargo run -p fortiq-service -- --config operator.toml \
-  --dial /ip4/MANAGED_VM_IP/udp/4002/quic-v1/p2p/12D3KooW_REPLACE_ME
+# Verify local operator service status
+cargo run -p fortiq -- status
+
+# Discover available managed peers registered on the relay/rendezvous
+cargo run -p fortiq -- peers
+
+# Open an interactive remote shell session to the managed peer
+cargo run -p fortiq -- shell 12D3KooW_MANAGED_PEER_ID
 ```
 
-The peers authenticate through libp2p, negotiate `/fortiq/hello/1.0`, and print the remote PeerId and metadata. Press Ctrl+C for clean shutdown.
+The peers authenticate through mutual libp2p cryptographic handshake (`/fortiq/hello/1.0`), and the interactive ConPTY/PTY shell stream connects over the secure P2P transport.
+
 
 ## Architecture Overview
 

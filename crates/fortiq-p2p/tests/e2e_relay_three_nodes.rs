@@ -58,6 +58,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
             rendezvous: true,
             relay: true,
             dcutr: false,
+            relay_rate_limit: false,
         },
         ticket: TicketConfig::default(),
         ipc: fortiq_core::IpcConfig::default(),
@@ -319,6 +320,18 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     let stream2 = stream_res2.unwrap();
     let (mut read_half2, mut write_half2) = tokio::io::split(stream2.compat());
 
+    // Drain initial banner so shell process is fully initialized to accept stdin
+    for _ in 0..30 {
+        if let Ok(Ok(Some(ShellFrame::Data(_)))) = tokio::time::timeout(
+            Duration::from_millis(100),
+            ShellFrame::read_from(&mut read_half2),
+        )
+        .await
+        {
+            break;
+        }
+    }
+
     // Send exit\r\n and wait for EOF/clean exit before CloseTicket to respect server contract
     ShellFrame::Data(b"exit\r\n".to_vec())
         .write_to(&mut write_half2)
@@ -339,7 +352,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     }
     drop(read_half2);
     drop(write_half2);
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Step D: Remote ticket close via Relay once second shell exits
     let mut close_ok = false;

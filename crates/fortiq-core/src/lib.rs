@@ -222,6 +222,8 @@ pub struct CapabilitiesConfig {
     pub relay: bool,
     #[serde(default = "default_true")]
     pub dcutr: bool,
+    #[serde(default = "default_true")]
+    pub relay_rate_limit: bool,
 }
 
 impl Default for CapabilitiesConfig {
@@ -230,6 +232,7 @@ impl Default for CapabilitiesConfig {
             rendezvous: false,
             relay: false,
             dcutr: true,
+            relay_rate_limit: true,
         }
     }
 }

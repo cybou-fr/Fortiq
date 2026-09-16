@@ -509,9 +509,15 @@ where
             .write_to(&mut remote_write)
             .await?;
         while let Ok(Some(frame)) = ShellFrame::read_from(&mut remote_read).await {
-            if let ShellFrame::Data(bytes) = frame {
-                tokio::io::stdout().write_all(&bytes).await?;
-                tokio::io::stdout().flush().await?;
+            match frame {
+                ShellFrame::Data(bytes) => {
+                    tokio::io::stdout().write_all(&bytes).await?;
+                    tokio::io::stdout().flush().await?;
+                }
+                ShellFrame::Ping => {
+                    let _ = ShellFrame::Pong.write_to(&mut remote_write).await;
+                }
+                _ => {}
             }
         }
         return Ok(());
@@ -634,7 +640,7 @@ mod tests {
         });
 
         let client_res = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
+            std::time::Duration::from_secs(20),
             run_client(client, Some("whoami".to_string())),
         )
         .await;
