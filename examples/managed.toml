@@ -1,0 +1,16 @@
+[node]
+name = "managed-peer"
+
+[identity]
+path = "./managed.identity"
+
+[authorization]
+operator_peer_id = "REPLACE_WITH_OPERATOR_PEER_ID"
+
+[network]
+listen_quic = "0.0.0.0:4002"
+
+[capabilities]
+rendezvous = false
+relay = false
+

@@ -1,0 +1,13 @@
+[node]
+name = "my-operator"
+
+[identity]
+path = "./operator.identity"
+
+[network]
+listen_quic = "0.0.0.0:4001"
+
+[capabilities]
+rendezvous = false
+relay = false
+
