@@ -17,6 +17,7 @@ param (
 
 $ErrorActionPreference = "Stop"
 $ServiceName = "FortiqService"
+$LegacyServiceName = "Fortiq"
 $InstallDir = "C:\Program Files\FORTIQ"
 $DataDir = "C:\ProgramData\FORTIQ"
 $ConfigFile = Join-Path $DataDir "fortiq.toml"
@@ -69,8 +70,22 @@ if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
         & (Join-Path $InstallDir "fortiq-service.exe") service uninstall | Out-Null
     }
 }
-Get-Process -Name "fortiq-desktop", "FORTIQ" -ErrorAction SilentlyContinue |
+
+# Remove every previous FORTIQ Windows generation before laying down the new
+# atomic product bundle. ProgramData is intentionally preserved so upgrades keep
+# the node identity, role, tickets, and operator authorization.
+if (Get-Service -Name $LegacyServiceName -ErrorAction SilentlyContinue) {
+    Stop-Service -Name $LegacyServiceName -Force -ErrorAction SilentlyContinue
+    & sc.exe delete $LegacyServiceName | Out-Null
+}
+Get-Process -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.Path -and $_.Path.StartsWith($InstallDir, [StringComparison]::OrdinalIgnoreCase)
+    } |
     Stop-Process -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $InstallDir) {
+    Remove-Item -LiteralPath $InstallDir -Recurse -Force
+}
 
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
