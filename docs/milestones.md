@@ -23,6 +23,12 @@
 5. Confirm both processes report the authenticated remote PeerId and HELLO metadata.
 6. Restart each peer and confirm its PeerId does not change.
 
+## Planned Next
+
+- Milestone 11: Local daemon IPC server (Windows Named Pipes, Linux Unix Domain Sockets) and dual-mode Tauri desktop client (`fortiq-desktop`) presenting the 3-panel Operator Console and Managed support card.
+- Milestone 12: Windows ConPTY and Unix PTY terminal integration with frontend `xterm.js` stream handling.
+
 ## Explicitly deferred
 
-The initial connectivity roadmap through Milestone 10 is implemented. PTY/ConPTY and later product features remain deferred.
+- Helpdesk bloat: in-app chat, file attachments, ticket categorization/queues, and operator profiles are deferred from the MVP scope.
+- PKI, enterprise RBAC, and post-quantum cryptography.
