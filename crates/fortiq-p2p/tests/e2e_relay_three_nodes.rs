@@ -241,6 +241,18 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     let stream = stream_res.unwrap();
     let (mut read_half, mut write_half) = tokio::io::split(stream.compat());
 
+    // Drain initial banner so shell process is fully initialized to accept stdin
+    for _ in 0..30 {
+        if let Ok(Ok(Some(ShellFrame::Data(_)))) = tokio::time::timeout(
+            Duration::from_millis(100),
+            ShellFrame::read_from(&mut read_half),
+        )
+        .await
+        {
+            break;
+        }
+    }
+
     // Send a command to the remote shell
     let echo_cmd = b"echo P2P_RELAY_OK\r\nexit\r\n".to_vec();
     ShellFrame::Data(echo_cmd)
@@ -259,14 +271,14 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         {
             Ok(Ok(Some(ShellFrame::Data(bytes)))) => {
                 let s = String::from_utf8_lossy(&bytes);
-                if s.contains("P2P_RELAY_OK") || s.contains("FORTIQ") {
+                if s.contains("P2P_RELAY_OK") {
                     got_output = true;
                     break;
                 }
             }
             Ok(Ok(Some(_))) => {}
             Ok(Ok(None)) => break,
-            Ok(Err(_)) => break,
+            Ok(Err(err)) => panic!("shell stream 1 read error: {err}"),
             Err(_) => {}
         }
     }
@@ -284,10 +296,11 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         )
         .await
         {
-            Ok(Ok(None)) | Ok(Err(_)) => {
+            Ok(Ok(None)) => {
                 saw_eof1 = true;
                 break;
             }
+            Ok(Err(err)) => panic!("shell stream 1 failed before clean EOF: {err}"),
             _ => {}
         }
     }
@@ -350,10 +363,11 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         )
         .await
         {
-            Ok(Ok(None)) | Ok(Err(_)) => {
+            Ok(Ok(None)) => {
                 saw_eof2 = true;
                 break;
             }
+            Ok(Err(err)) => panic!("shell stream 2 failed before clean EOF: {err}"),
             _ => {}
         }
     }
@@ -581,6 +595,7 @@ async fn e2e_relay_production_rate_limiting_smoke() {
 
     // Step A: Operator discovers Managed node via Rendezvous
     let mut discovered = false;
+    let mut discovered_peer = None;
     for _ in 0..50 {
         tokio::time::sleep(Duration::from_millis(200)).await;
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
@@ -590,10 +605,11 @@ async fn e2e_relay_production_rate_limiting_smoke() {
             .is_ok()
         {
             if let Ok(peers) = reply_rx.await {
-                if peers.iter().any(|p| {
+                if let Some(peer) = peers.iter().find(|p| {
                     p.peer_id == managed_peer_id.to_string() && p.hostname == "managed-prod-smoke"
                 }) {
                     discovered = true;
+                    discovered_peer = Some(peer.clone());
                     break;
                 }
             }
@@ -602,6 +618,11 @@ async fn e2e_relay_production_rate_limiting_smoke() {
     assert!(
         discovered,
         "Operator did not discover Managed node under production rate limits"
+    );
+    let peer_summary = discovered_peer.expect("Managed peer summary must exist");
+    assert_eq!(
+        peer_summary.transport, "RELAY CIRCUIT",
+        "Transport must be strictly RELAY CIRCUIT without loopback fallback"
     );
 
     // Step B: Open shell stream through rate-limited relay
@@ -629,6 +650,18 @@ async fn e2e_relay_production_rate_limiting_smoke() {
     let stream = stream_res.unwrap();
     let (mut read_half, mut write_half) = tokio::io::split(stream.compat());
 
+    // Drain initial banner so shell process is fully initialized to accept stdin
+    for _ in 0..30 {
+        if let Ok(Ok(Some(ShellFrame::Data(_)))) = tokio::time::timeout(
+            Duration::from_millis(100),
+            ShellFrame::read_from(&mut read_half),
+        )
+        .await
+        {
+            break;
+        }
+    }
+
     // Send a command to the remote shell
     let echo_cmd = b"echo SMOKE_RATE_LIMIT_OK\r\nexit\r\n".to_vec();
     ShellFrame::Data(echo_cmd)
@@ -647,14 +680,14 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         {
             Ok(Ok(Some(ShellFrame::Data(bytes)))) => {
                 let s = String::from_utf8_lossy(&bytes);
-                if s.contains("SMOKE_RATE_LIMIT_OK") || s.contains("FORTIQ") {
+                if s.contains("SMOKE_RATE_LIMIT_OK") {
                     got_output = true;
                     break;
                 }
             }
             Ok(Ok(Some(_))) => {}
             Ok(Ok(None)) => break,
-            Ok(Err(_)) => break,
+            Ok(Err(err)) => panic!("shell stream read error: {err}"),
             Err(_) => {}
         }
     }
@@ -672,10 +705,11 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         )
         .await
         {
-            Ok(Ok(None)) | Ok(Err(_)) => {
+            Ok(Ok(None)) => {
                 saw_eof = true;
                 break;
             }
+            Ok(Err(err)) => panic!("shell stream failed before clean EOF: {err}"),
             _ => {}
         }
     }

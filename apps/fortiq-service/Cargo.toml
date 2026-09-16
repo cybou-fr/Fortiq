@@ -32,5 +32,6 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [target.'cfg(not(windows))'.dependencies]
+libc = "0.2"
 rustix = { version = "0.38", features = ["process"] }
 

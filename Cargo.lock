@@ -902,6 +902,7 @@ dependencies = [
  "fortiq-p2p",
  "fortiq-shell",
  "fs2",
+ "libc",
  "libp2p",
  "rustix 0.38.44",
  "serde",

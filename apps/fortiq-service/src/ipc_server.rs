@@ -102,10 +102,82 @@ async fn run_windows_terminal_pipe(state: Arc<IpcState>) -> Result<()> {
     }
 }
 
+#[cfg(windows)]
+fn lookup_group_sid(name: &str) -> Option<String> {
+    use std::{ffi::OsStr, iter, os::windows::ffi::OsStrExt, ptr};
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{Authorization::ConvertSidToStringSidW, LookupAccountNameW, SID_NAME_USE},
+    };
+
+    let wide: Vec<u16> = OsStr::new(name)
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect();
+    let mut sid_len = 0u32;
+    let mut domain_len = 0u32;
+    let mut sid_use: SID_NAME_USE = 0;
+
+    unsafe {
+        LookupAccountNameW(
+            ptr::null(),
+            wide.as_ptr(),
+            ptr::null_mut(),
+            &mut sid_len,
+            ptr::null_mut(),
+            &mut domain_len,
+            &mut sid_use,
+        );
+    }
+
+    if sid_len == 0 {
+        return None;
+    }
+
+    let mut sid_buf = vec![0u8; sid_len as usize];
+    let mut domain_buf = vec![0u16; domain_len as usize];
+
+    let ok = unsafe {
+        LookupAccountNameW(
+            ptr::null(),
+            wide.as_ptr(),
+            sid_buf.as_mut_ptr().cast(),
+            &mut sid_len,
+            domain_buf.as_mut_ptr(),
+            &mut domain_len,
+            &mut sid_use,
+        )
+    };
+
+    if ok == 0 {
+        return None;
+    }
+
+    let mut string_sid: *mut u16 = ptr::null_mut();
+    let converted = unsafe { ConvertSidToStringSidW(sid_buf.as_mut_ptr().cast(), &mut string_sid) };
+
+    if converted == 0 || string_sid.is_null() {
+        return None;
+    }
+
+    let mut len = 0;
+    unsafe {
+        while *string_sid.add(len) != 0 {
+            len += 1;
+        }
+        let slice = std::slice::from_raw_parts(string_sid, len);
+        let result = String::from_utf16(slice).ok();
+        LocalFree(string_sid.cast());
+        result
+    }
+}
+
 /// Creates a local-only named pipe with explicit security descriptors.
-/// - Operator node (command & terminal pipes) or Terminal pipe: strictly restricted to
-///   LocalSystem (SY) and Builtin Administrators (BA). Unprivileged local users (IU) are
-///   denied access so they cannot command the operator or initiate terminal sessions.
+/// - Operator node (command & terminal pipes) or Terminal pipe:
+///   Grants Full Control to LocalSystem (SY) and Builtin Administrators (BA).
+///   Grants Read/Write to members of the local OS group 'FORTIQ Operators' (or 'FORTIQ-Operators'),
+///   which is not filtered by Windows UAC and allows standard non-elevated desktop sessions to
+///   interact with the service. Unprivileged users outside this group are denied.
 /// - Managed node command pipe: grants read/write to Interactive Users (IU) so non-elevated
 ///   desktop and CLI users can open support tickets and inspect status.
 #[cfg(windows)]
@@ -128,9 +200,18 @@ fn create_windows_pipe(
     };
 
     let sddl_str = if is_terminal || mode == NodeMode::Operator {
-        "D:P(A;;GA;;;SY)(A;;GA;;;BA)"
+        if let Some(op_sid) =
+            lookup_group_sid("FORTIQ Operators").or_else(|| lookup_group_sid("FORTIQ-Operators"))
+        {
+            format!("D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;{})", op_sid)
+        } else {
+            tracing::warn!(
+                "Local operator group 'FORTIQ Operators' not found; pipe restricted to SYSTEM and Administrators"
+            );
+            "D:P(A;;GA;;;SY)(A;;GA;;;BA)".to_string()
+        }
     } else {
-        "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
+        "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)".to_string()
     };
 
     let sddl: Vec<u16> = sddl_str.encode_utf16().chain(iter::once(0)).collect();
@@ -175,6 +256,25 @@ fn create_windows_pipe(
 }
 
 #[cfg(unix)]
+fn setup_unix_socket_permissions_and_group(path: &str, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+
+    // If system group 'fortiq' exists, assign the socket to that group (preserving owner uid)
+    if let Ok(c_name) = std::ffi::CString::new("fortiq") {
+        unsafe {
+            let grp = libc::getgrnam(c_name.as_ptr());
+            if !grp.is_null() {
+                let gid = (*grp).gr_gid;
+                if let Ok(c_path) = std::ffi::CString::new(path) {
+                    let _ = libc::chown(c_path.as_ptr(), u32::MAX, gid);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
 async fn run_unix_socket(state: Arc<IpcState>) -> Result<()> {
     use tokio::net::UnixListener;
 
@@ -182,17 +282,25 @@ async fn run_unix_socket(state: Arc<IpcState>) -> Result<()> {
     let _ = tokio::fs::remove_file(&path).await;
     if let Some(parent) = std::path::Path::new(&path).parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
+        #[cfg(unix)]
+        if let Some(p_str) = parent.to_str() {
+            let parent_mode = if state.config.mode() == NodeMode::Operator {
+                0o770
+            } else {
+                0o755
+            };
+            setup_unix_socket_permissions_and_group(p_str, parent_mode);
+        }
     }
     let listener = UnixListener::bind(&path)?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = if state.config.mode() == NodeMode::Operator {
-            0o600
+        let socket_mode = if state.config.mode() == NodeMode::Operator {
+            0o660
         } else {
             0o666
         };
-        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).await;
+        setup_unix_socket_permissions_and_group(&path, socket_mode);
     }
     tracing::info!("Starting Unix Domain Socket IPC server at {}", path);
 
@@ -222,12 +330,15 @@ async fn run_unix_terminal_socket(state: Arc<IpcState>) -> Result<()> {
     let _ = tokio::fs::remove_file(&path).await;
     if let Some(parent) = std::path::Path::new(&path).parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
+        #[cfg(unix)]
+        if let Some(p_str) = parent.to_str() {
+            setup_unix_socket_permissions_and_group(p_str, 0o770);
+        }
     }
     let listener = UnixListener::bind(&path)?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).await;
+        setup_unix_socket_permissions_and_group(&path, 0o660);
     }
     tracing::info!("Starting Unix Terminal Socket at {}", path);
 

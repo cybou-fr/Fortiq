@@ -72,7 +72,7 @@ Page custom ConfigPageCreate ConfigPageLeave
 !insertmacro MUI_LANGUAGE "French"
 
 Function LaunchDesktopUnelevated
-  ExecShell "open" "$INSTDIR\fortiq-desktop.exe"
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\fortiq-desktop.exe"'
 FunctionEnd
 
 Function .onInit
@@ -150,7 +150,7 @@ Section "FORTIQ ${PACKAGE_ROLE}" SecMain
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\FORTIQ" "UninstallString" '"$INSTDIR\Uninstall FORTIQ.exe"'
   RMDir /r "$TEMP\FORTIQ-${PACKAGE_ROLE}-Setup"
   IfSilent 0 +2
-  ExecShell "open" "$INSTDIR\fortiq-desktop.exe"
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\fortiq-desktop.exe"'
 SectionEnd
 
 Section "Uninstall"

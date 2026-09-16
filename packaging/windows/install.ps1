@@ -215,6 +215,29 @@ foreach ($file in $requiredFiles + @("install.ps1")) {
 $authorization = if ($Role -eq "Client") {
     "[authorization]`r`noperator_peer_id = `"$OperatorPeerId`"`r`n"
 } else {
+    # Operator role: manage local operator security group for non-elevated desktop/CLI access
+    $operatorGroup = "FORTIQ Operators"
+    $existingGroup = Get-LocalGroup -Name $operatorGroup -ErrorAction SilentlyContinue
+    if (-not $existingGroup) {
+        $existingGroup = Get-LocalGroup -Name "FORTIQ-Operators" -ErrorAction SilentlyContinue
+    }
+    if (-not $existingGroup) {
+        try {
+            New-LocalGroup -Name $operatorGroup -Description "Authorized operators for FORTIQ service and terminal sessions" | Out-Null
+            Write-Host "Created local group '$operatorGroup'." -ForegroundColor Cyan
+        } catch {
+            Write-Host "Warning: Could not create local group '$operatorGroup': $_" -ForegroundColor Yellow
+        }
+    }
+    $targetGroup = if (Get-LocalGroup -Name $operatorGroup -ErrorAction SilentlyContinue) { $operatorGroup } else { "FORTIQ-Operators" }
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    try {
+        Add-LocalGroupMember -Group $targetGroup -Member $currentUser -ErrorAction SilentlyContinue
+    } catch { }
+    try {
+        Add-LocalGroupMember -Group $targetGroup -Member "BUILTIN\Administrators" -ErrorAction SilentlyContinue
+    } catch { }
+
     "# Operator role: operator_peer_id is intentionally absent.`r`n[authorization]`r`n"
 }
 $config = @"

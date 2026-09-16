@@ -55,7 +55,7 @@ if [[ -f "${CLI_PATH}" ]]; then
     chmod 0755 "${STAGE_DIR}/usr/bin/fortiq"
 fi
 
-cp -f "${SCRIPT_DIR}/fortiq.service" "${STAGE_DIR}/lib/systemd/system/fortiq.service"
+sed -e 's|/usr/local/bin/fortiq-service|/usr/bin/fortiq-service|g' "${SCRIPT_DIR}/fortiq.service" > "${STAGE_DIR}/lib/systemd/system/fortiq.service"
 chmod 0644 "${STAGE_DIR}/lib/systemd/system/fortiq.service"
 
 cp -f "${SCRIPT_DIR}/fortiq.toml.example" "${STAGE_DIR}/etc/fortiq/fortiq.toml.example"
@@ -82,6 +82,16 @@ cat <<'EOF' > "${STAGE_DIR}/DEBIAN/postinst"
 set -e
 
 if [ "$1" = "configure" ]; then
+    # Create fortiq system group if not present
+    if ! getent group fortiq >/dev/null 2>&1; then
+        groupadd -r fortiq
+    fi
+
+    # If installed via sudo, add the calling user to the fortiq group
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        usermod -aG fortiq "$SUDO_USER" || true
+    fi
+
     # Reload systemd to recognize new unit
     if command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload || true

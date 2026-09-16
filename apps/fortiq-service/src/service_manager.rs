@@ -317,7 +317,9 @@ Restart=always\n\
 RestartSec=5s\n\
 LimitNOFILE=65536\n\
 StandardOutput=journal\n\
-StandardError=journal\n\n\
+StandardError=journal\n\
+RuntimeDirectory=fortiq\n\
+RuntimeDirectoryMode=0770\n\n\
 [Install]\n\
 WantedBy=multi-user.target\n",
             exe_path.display(),
