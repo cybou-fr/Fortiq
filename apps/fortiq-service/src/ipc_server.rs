@@ -121,7 +121,7 @@ async fn run_unix_socket(state: Arc<IpcState>) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o660)).await;
+        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).await;
     }
     tracing::info!("Starting Unix Domain Socket IPC server at {}", path);
 
@@ -156,7 +156,7 @@ async fn run_unix_terminal_socket(state: Arc<IpcState>) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o660)).await;
+        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).await;
     }
     tracing::info!("Starting Unix Terminal Socket at {}", path);
 
