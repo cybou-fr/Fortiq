@@ -8,12 +8,14 @@ use libp2p::{multiaddr::Protocol, Multiaddr};
 use tracing_subscriber::EnvFilter;
 
 mod ipc_server;
+pub mod service_manager;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "FORTIQ peer service")]
 struct Args {
-    #[arg(long, default_value = "fortiq.toml")]
-    config: PathBuf,
+    /// Path to configuration file. If omitted, uses standard resolution.
+    #[arg(long)]
+    config: Option<PathBuf>,
 
     /// Explicit QUIC multiaddress to dial. Include /p2p/<PeerId>.
     #[arg(long)]
@@ -27,6 +29,10 @@ struct Args {
     #[arg(long = "command", requires = "shell")]
     shell_command: Option<String>,
 
+    /// Internal flag used when invoked as a background system service.
+    #[arg(long = "service-run", hide = true)]
+    service_run: bool,
+
     #[command(subcommand)]
     action: Option<Action>,
 }
@@ -37,6 +43,11 @@ enum Action {
     Ticket {
         #[command(subcommand)]
         action: TicketAction,
+    },
+    /// Manage the FORTIQ system service (Windows Service / systemd).
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
     },
 }
 
@@ -55,8 +66,25 @@ enum TicketAction {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+#[derive(Debug, Subcommand)]
+pub enum ServiceAction {
+    /// Install FORTIQ as a system service.
+    Install {
+        /// Optional path to configuration file for the service.
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    /// Uninstall the FORTIQ system service.
+    Uninstall,
+    /// Start the FORTIQ system service.
+    Start,
+    /// Stop the FORTIQ system service.
+    Stop,
+    /// Display status of the FORTIQ system service.
+    Status,
+}
+
+fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("fortiq=info")),
@@ -65,7 +93,84 @@ async fn main() -> Result<()> {
         .init();
 
     let args = Args::parse();
-    let config = Config::load(&args.config).await?;
+    let config_path = args
+        .config
+        .clone()
+        .unwrap_or_else(Config::resolve_default_path);
+
+    if args.service_run {
+        #[cfg(windows)]
+        return service_manager::windows::run_service_dispatcher(config_path);
+
+        #[cfg(not(windows))]
+        {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .context("Failed to build Tokio runtime")?;
+            return rt.block_on(run_daemon(config_path));
+        }
+    }
+
+    if let Some(Action::Service { action }) = &args.action {
+        return match action {
+            ServiceAction::Install { config } => service_manager::install(config.clone()),
+            ServiceAction::Uninstall => service_manager::uninstall(),
+            ServiceAction::Start => service_manager::start(),
+            ServiceAction::Stop => service_manager::stop(),
+            ServiceAction::Status => service_manager::status(),
+        };
+    }
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("Failed to build Tokio runtime")?;
+
+    rt.block_on(async_main(args, config_path))
+}
+
+pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
+    let config = Config::load(&config_path).await?;
+    let mode = config.mode();
+    let ticket_store = TicketStore::new(config.ticket_path());
+    let (keypair, _) = load_or_create_identity(&config.identity.path).await?;
+    let peer_id = keypair.public().to_peer_id();
+
+    tracing::info!("FORTIQ Service starting: mode={mode}, peer_id={peer_id}");
+
+    let listen_address = listen_multiaddr(&config.network.listen_quic)?;
+    let local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
+
+    let (p2p_cmd_tx, p2p_cmd_rx) = tokio::sync::mpsc::channel(32);
+
+    let ipc_state = Arc::new(ipc_server::IpcState {
+        config: config.clone(),
+        peer_id,
+        listen_addresses: vec![listen_address.to_string()],
+        ticket_store,
+        p2p_sender: Some(p2p_cmd_tx),
+    });
+    tokio::spawn(async move {
+        if let Err(e) = ipc_server::run_ipc_server(ipc_state).await {
+            tracing::warn!("Local IPC server finished with: {e}");
+        }
+    });
+
+    let options = RunOptions {
+        config,
+        listen_address,
+        dial_address: None,
+        shell_peer: None,
+        shell_command: None,
+        close_ticket_peer: None,
+        command_receiver: Some(p2p_cmd_rx),
+    };
+    fortiq_p2p::run(keypair, local_info, options).await
+}
+
+async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
+    let config = Config::load(&config_path).await?;
     let mode = config.mode();
     let ticket_store = TicketStore::new(config.ticket_path());
     let mut dial = args.dial;

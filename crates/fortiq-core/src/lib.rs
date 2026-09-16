@@ -67,6 +67,65 @@ impl Config {
             .clone()
             .unwrap_or_else(|| self.identity.path.with_extension("ticket.json"))
     }
+
+    /// Resolves the default configuration file path:
+    /// 1. `FORTIQ_CONFIG` environment variable if set.
+    /// 2. `./fortiq.toml` if it exists in the current working directory.
+    /// 3. OS system service location:
+    ///    - Windows: `%ProgramData%\FORTIQ\fortiq.toml` (if exists)
+    ///    - Unix: `/etc/fortiq/fortiq.toml` (if exists)
+    /// 4. Fallback: `fortiq.toml`
+    pub fn resolve_default_path() -> PathBuf {
+        if let Ok(env_path) = std::env::var("FORTIQ_CONFIG") {
+            if !env_path.trim().is_empty() {
+                return PathBuf::from(env_path);
+            }
+        }
+
+        let local_path = PathBuf::from("fortiq.toml");
+        if local_path.exists() {
+            return local_path;
+        }
+
+        #[cfg(windows)]
+        {
+            if let Some(program_data) = std::env::var_os("ProgramData") {
+                let system_path = PathBuf::from(program_data)
+                    .join("FORTIQ")
+                    .join("fortiq.toml");
+                if system_path.exists() {
+                    return system_path;
+                }
+            }
+        }
+
+        #[cfg(unix)]
+        {
+            let system_path = PathBuf::from("/etc/fortiq/fortiq.toml");
+            if system_path.exists() {
+                return system_path;
+            }
+        }
+
+        local_path
+    }
+
+    /// Standard system service configuration location for service installation:
+    /// - Windows: `%ProgramData%\FORTIQ\fortiq.toml`
+    /// - Unix: `/etc/fortiq/fortiq.toml`
+    pub fn system_service_default_path() -> PathBuf {
+        #[cfg(windows)]
+        {
+            let base = std::env::var_os("ProgramData")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+            base.join("FORTIQ").join("fortiq.toml")
+        }
+        #[cfg(not(windows))]
+        {
+            PathBuf::from("/etc/fortiq/fortiq.toml")
+        }
+    }
 }
 
 /// Returns true only when `remote_peer` is the operator explicitly configured
@@ -342,5 +401,15 @@ mod tests {
         let mut cfg = config(None);
         cfg.network.public_addr = Some("not-a-multiaddr".to_owned());
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn resolves_config_path_from_env() {
+        std::env::set_var("FORTIQ_CONFIG", "custom_path.toml");
+        assert_eq!(
+            Config::resolve_default_path(),
+            PathBuf::from("custom_path.toml")
+        );
+        std::env::remove_var("FORTIQ_CONFIG");
     }
 }

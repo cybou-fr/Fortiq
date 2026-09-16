@@ -15,6 +15,7 @@
 - Milestone 10: automatic DCUtR direct-upgrade attempts on relayed connections with explicit, non-disruptive relay fallback.
 - Milestone 11: Local daemon IPC server (Windows Named Pipes, Unix Domain Sockets) and dual-mode Tauri desktop client (`fortiq-desktop`) with strict Thin Client / Fat Daemon separation, live P2P swarm commands, honest UI states, and real remote ticket closure.
 - Milestone 12: Windows ConPTY and Unix PTY terminal integration (`portable-pty`) with binary framing (`ShellFrame`), dedicated terminal IPC pipe/socket forwarding, and frontend `@xterm/xterm` stream handling in Tauri.
+- Milestone 13: System service installation/packaging (`systemd` unit on Linux, Windows Service Control Manager wrapper via `windows-service`) and end-to-end multi-platform automated validation tests (`e2e_two_nodes`).
 
 ## WSL to VPS smoke test
 
@@ -27,7 +28,7 @@
 
 ## Planned Next
 
-- Milestone 13: System service installation/packaging (`systemd` unit on Linux, Windows Service wrapper) and end-to-end multi-platform automated validation.
+- Production packaging (.msi / .deb installers) and automated CI/CD staging validation across cloud VPS and WSL instances.
 
 ## Explicitly deferred
 
