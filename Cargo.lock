@@ -838,6 +838,7 @@ dependencies = [
  "portable-pty",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]

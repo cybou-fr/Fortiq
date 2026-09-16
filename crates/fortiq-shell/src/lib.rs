@@ -256,7 +256,16 @@ where
         .spawn_command(cmd)
         .with_context(|| format!("failed to spawn shell {}", shell.name()))?;
 
-    let master = Arc::new(Mutex::new(pair.master));
+    let master_reader = pair
+        .master
+        .try_clone_reader()
+        .context("failed to clone PTY reader")?;
+    let mut master_writer = pair
+        .master
+        .take_writer()
+        .context("failed to take PTY writer")?;
+
+    let master = Arc::new(Mutex::new(Some(pair.master)));
 
     // Send styled terminal banner
     let banner = format!(
@@ -272,20 +281,21 @@ where
         .write_to(&mut network_write)
         .await?;
 
-    let master_reader = master
-        .lock()
-        .unwrap()
-        .try_clone_reader()
-        .context("failed to clone PTY reader")?;
-    let mut master_writer = master
-        .lock()
-        .unwrap()
-        .take_writer()
-        .context("failed to take PTY writer")?;
+    // Task 3: write bytes to PTY master
+    let (pty_in_tx, mut pty_in_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+    let pty_in_tx_for_dsr = pty_in_tx.clone();
+    let mut write_task = tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        while let Some(bytes) = pty_in_rx.blocking_recv() {
+            if master_writer.write_all(&bytes).is_err() || master_writer.flush().is_err() {
+                break;
+            }
+        }
+    });
 
     // Task 1: read bytes from PTY master and queue them for network transmission
     let (pty_out_tx, mut pty_out_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
-    let read_task = tokio::task::spawn_blocking(move || {
+    let mut read_task = tokio::task::spawn_blocking(move || {
         use std::io::Read;
         let mut reader = master_reader;
         let mut buf = [0u8; 4096];
@@ -293,6 +303,11 @@ where
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
+                    // If the shell requests cursor position (DSR \x1b[6n, e.g. PowerShell PSReadLine),
+                    // reply with \x1b[1;1R so the shell doesn't block waiting for a terminal emulator.
+                    if buf[..n].windows(4).any(|w| w == b"\x1b[6n") {
+                        let _ = pty_in_tx_for_dsr.blocking_send(b"\x1b[1;1R".to_vec());
+                    }
                     if pty_out_tx.blocking_send(buf[..n].to_vec()).is_err() {
                         break;
                     }
@@ -303,7 +318,7 @@ where
     });
 
     // Task 2: forward pty_out_rx to network_write
-    let send_task = tokio::spawn(async move {
+    let mut send_task = tokio::spawn(async move {
         while let Some(bytes) = pty_out_rx.recv().await {
             if ShellFrame::Data(bytes)
                 .write_to(&mut network_write)
@@ -315,54 +330,73 @@ where
         }
     });
 
-    // Task 3: write bytes to PTY master
-    let (pty_in_tx, mut pty_in_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
-    let write_task = tokio::task::spawn_blocking(move || {
-        use std::io::Write;
-        while let Some(bytes) = pty_in_rx.blocking_recv() {
-            if master_writer.write_all(&bytes).is_err() || master_writer.flush().is_err() {
-                break;
-            }
-        }
-    });
+    let mut killer = child.clone_killer();
+    let mut child_task = tokio::task::spawn_blocking(move || child.wait());
 
     let master_for_resize = Arc::clone(&master);
-    loop {
-        match ShellFrame::read_from(&mut network_read).await {
-            Ok(Some(ShellFrame::Data(bytes))) => {
-                if pty_in_tx.send(bytes).await.is_err() {
-                    break;
+    let mut child_completed = false;
+    let mut send_completed = false;
+
+    tokio::select! {
+        res = &mut child_task => {
+            child_completed = true;
+            tracing::debug!("Child shell process exited: {:?}", res);
+        }
+        _ = &mut send_task => {
+            send_completed = true;
+        }
+        _ = async {
+            loop {
+                match ShellFrame::read_from(&mut network_read).await {
+                    Ok(Some(ShellFrame::Data(bytes))) => {
+                        if pty_in_tx.send(bytes).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(Some(ShellFrame::Resize { cols, rows })) => {
+                        let m = Arc::clone(&master_for_resize);
+                        let _ = tokio::task::spawn_blocking(move || {
+                            if let Some(master) = m.lock().unwrap().as_ref() {
+                                let _ = master.resize(portable_pty::PtySize {
+                                    rows,
+                                    cols,
+                                    pixel_width: 0,
+                                    pixel_height: 0,
+                                });
+                            }
+                        })
+                        .await;
+                    }
+                    Ok(Some(ShellFrame::Ping)) => {}
+                    Ok(Some(ShellFrame::Pong)) => {}
+                    Ok(None) => break, // EOF
+                    Err(_) => break,
                 }
             }
-            Ok(Some(ShellFrame::Resize { cols, rows })) => {
-                let m = Arc::clone(&master_for_resize);
-                let _ = tokio::task::spawn_blocking(move || {
-                    let _ = m.lock().unwrap().resize(portable_pty::PtySize {
-                        rows,
-                        cols,
-                        pixel_width: 0,
-                        pixel_height: 0,
-                    });
-                })
-                .await;
-            }
-            Ok(Some(ShellFrame::Ping)) => {}
-            Ok(Some(ShellFrame::Pong)) => {}
-            Ok(None) => break, // EOF
-            Err(_) => break,
-        }
+        } => {}
     }
 
-    drop(pty_in_tx);
-    let _ = write_task.await;
-    send_task.abort();
-    let _ = send_task.await;
-    read_task.abort();
-    let _ = read_task.await;
+    // Give a brief window for remaining buffered output to drain
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    // Terminate and reap child process
-    let _ = child.kill();
-    let _ = child.wait();
+    drop(pty_in_tx);
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut write_task).await;
+
+    // Drop the master PTY handle so ConPTY closes the pseudo console and unblocks master_reader
+    master.lock().unwrap().take();
+
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut read_task).await;
+    read_task.abort();
+
+    if !send_completed {
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut send_task).await;
+        send_task.abort();
+    }
+
+    let _ = killer.kill();
+    if !child_completed {
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut child_task).await;
+    }
 
     Ok(())
 }
@@ -490,5 +524,38 @@ mod tests {
                 rows: 40
             }
         );
+    }
+
+    #[tokio::test]
+    async fn test_serve_and_run_client_command() {
+        use tokio_util::compat::TokioAsyncReadCompatExt;
+        let (client, server) = tokio::io::duplex(4096);
+        let client = client.compat();
+        let mut server = server.compat();
+
+        let node_info = NodeInfo::local(
+            "12D3KooWD3XWsmNtAiqrmFmC6D5gY8QZk4T5D2xSm9R9aZg7kF8h"
+                .parse()
+                .unwrap(),
+            "test-node".to_string(),
+            fortiq_core::NodeMode::Managed,
+        );
+
+        let server_task = tokio::spawn(async move {
+            send_authorization(&mut server, true).await.unwrap();
+            serve(server, node_info).await
+        });
+
+        let client_res = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            run_client(client, Some("whoami".to_string())),
+        )
+        .await;
+
+        println!("client_res: {:?}", client_res);
+        assert!(client_res.is_ok());
+        assert!(client_res.unwrap().is_ok());
+        let server_res = tokio::time::timeout(std::time::Duration::from_secs(5), server_task).await;
+        println!("server_res: {:?}", server_res);
     }
 }
