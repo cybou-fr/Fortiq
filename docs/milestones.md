@@ -7,6 +7,12 @@
 - Milestone 2: configuration loading and visible operator/managed mode detection.
 - Milestone 3: QUIC listen/dial, Identify, Ping, `/fortiq/hello/1.0`, authenticated remote PeerId reporting, and Ctrl+C shutdown.
 - Milestone 4: receiving-peer authorization helper that accepts only the configured operator's authenticated libp2p PeerId.
+- Milestone 5: authorized `/fortiq/shell/1.0` bidirectional streams, Linux `/bin/bash` → `/bin/sh` selection, metadata banner, pipe bridging, and child cleanup.
+- Milestone 6: persistent `OPEN`/`CLOSED` tickets, local open/status commands, authenticated operator-only remote close, and ticket-gated shell admission.
+- Milestone 7: native Windows shell serving with `pwsh.exe` → `powershell.exe` → `cmd.exe` selection and the shared process cleanup path.
+- Milestone 8: optional rendezvous server capability plus client registration/discovery in the private `fortiq` namespace.
+- Milestone 9: optional Circuit Relay v2 service, client reservations, relayed dialing, and shell operation through a relay.
+- Milestone 10: automatic DCUtR direct-upgrade attempts on relayed connections with explicit, non-disruptive relay fallback.
 
 ## WSL to VPS smoke test
 
@@ -19,4 +25,4 @@
 
 ## Explicitly deferred
 
-Milestones 5 and later: remote shell, tickets, Windows shell selection, rendezvous, circuit relay, and DCUtR.
+The initial connectivity roadmap through Milestone 10 is implemented. PTY/ConPTY and later product features remain deferred.

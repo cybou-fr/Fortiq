@@ -42,7 +42,6 @@ pub async fn load_or_create_identity(path: &Path) -> Result<(Keypair, IdentitySt
 async fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
             .create_new(true)

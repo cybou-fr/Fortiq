@@ -2,4 +2,6 @@
 *.identity
 fortiq.identity
 fortiq.toml
+*.ticket.json
+fortiq.ticket.json
 

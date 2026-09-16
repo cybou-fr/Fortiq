@@ -14,6 +14,8 @@ pub struct Config {
     pub network: NetworkConfig,
     #[serde(default)]
     pub capabilities: CapabilitiesConfig,
+    #[serde(default)]
+    pub ticket: TicketConfig,
 }
 
 impl Config {
@@ -44,7 +46,19 @@ impl Config {
                 .parse::<PeerId>()
                 .context("authorization.operator_peer_id is not a valid libp2p PeerId")?;
         }
+        if let Some(address) = &self.network.relay_peer {
+            address
+                .parse::<libp2p::Multiaddr>()
+                .context("network.relay_peer is not a valid libp2p Multiaddr")?;
+        }
         Ok(())
+    }
+
+    pub fn ticket_path(&self) -> PathBuf {
+        self.ticket
+            .path
+            .clone()
+            .unwrap_or_else(|| self.identity.path.with_extension("ticket.json"))
     }
 }
 
@@ -82,12 +96,14 @@ pub struct AuthorizationConfig {
 pub struct NetworkConfig {
     #[serde(default = "default_listen_quic")]
     pub listen_quic: String,
+    pub relay_peer: Option<String>,
 }
 
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
             listen_quic: default_listen_quic(),
+            relay_peer: None,
         }
     }
 }
@@ -102,6 +118,93 @@ pub struct CapabilitiesConfig {
     pub rendezvous: bool,
     #[serde(default)]
     pub relay: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TicketConfig {
+    pub path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ticket {
+    pub id: String,
+    pub state: TicketState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TicketState {
+    Open,
+    Closed,
+}
+
+#[derive(Debug, Clone)]
+pub struct TicketStore {
+    path: PathBuf,
+}
+
+impl TicketStore {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    pub async fn get(&self) -> Result<Option<Ticket>> {
+        match tokio::fs::read(&self.path).await {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .context("ticket file contains invalid data")
+                .map(Some),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => {
+                Err(error).with_context(|| format!("failed to read ticket {}", self.path.display()))
+            }
+        }
+    }
+
+    pub async fn is_open(&self) -> Result<bool> {
+        Ok(self
+            .get()
+            .await?
+            .is_some_and(|ticket| ticket.state == TicketState::Open))
+    }
+
+    pub async fn open(&self) -> Result<Ticket> {
+        if let Some(ticket) = self.get().await? {
+            if ticket.state == TicketState::Open {
+                return Ok(ticket);
+            }
+        }
+        let ticket = Ticket {
+            id: uuid::Uuid::new_v4().to_string(),
+            state: TicketState::Open,
+        };
+        self.save(&ticket).await?;
+        Ok(ticket)
+    }
+
+    pub async fn close(&self) -> Result<Option<Ticket>> {
+        let Some(mut ticket) = self.get().await? else {
+            return Ok(None);
+        };
+        ticket.state = TicketState::Closed;
+        self.save(&ticket).await?;
+        Ok(Some(ticket))
+    }
+
+    async fn save(&self, ticket: &Ticket) -> Result<()> {
+        if let Some(parent) = self
+            .path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            tokio::fs::create_dir_all(parent).await.with_context(|| {
+                format!("failed to create ticket directory {}", parent.display())
+            })?;
+        }
+        let bytes = serde_json::to_vec_pretty(ticket)?;
+        tokio::fs::write(&self.path, bytes)
+            .await
+            .with_context(|| format!("failed to persist ticket {}", self.path.display()))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,6 +259,7 @@ mod tests {
             authorization: AuthorizationConfig { operator_peer_id },
             network: NetworkConfig::default(),
             capabilities: CapabilitiesConfig::default(),
+            ticket: TicketConfig::default(),
         }
     }
 
@@ -196,5 +300,24 @@ mod tests {
         libp2p::identity::Keypair::generate_ed25519()
             .public()
             .to_peer_id()
+    }
+
+    #[tokio::test]
+    async fn ticket_lifecycle_is_persistent() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = TicketStore::new(directory.path().join("ticket.json"));
+
+        assert!(!store.is_open().await.unwrap());
+        let opened = store.open().await.unwrap();
+        assert_eq!(opened.state, TicketState::Open);
+        assert!(store.is_open().await.unwrap());
+
+        let reloaded = TicketStore::new(directory.path().join("ticket.json"));
+        assert_eq!(reloaded.get().await.unwrap(), Some(opened.clone()));
+
+        let closed = reloaded.close().await.unwrap().unwrap();
+        assert_eq!(closed.id, opened.id);
+        assert_eq!(closed.state, TicketState::Closed);
+        assert!(!reloaded.is_open().await.unwrap());
     }
 }

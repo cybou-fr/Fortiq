@@ -1,9 +1,9 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use anyhow::{Context, Result};
-use clap::Parser;
-use fortiq_core::{Config, NodeInfo, NodeMode};
-use fortiq_p2p::{load_or_create_identity, IdentityStatus};
+use clap::{Parser, Subcommand};
+use fortiq_core::{Config, NodeInfo, NodeMode, TicketState, TicketStore};
+use fortiq_p2p::{load_or_create_identity, IdentityStatus, RunOptions};
 use libp2p::{multiaddr::Protocol, Multiaddr};
 use tracing_subscriber::EnvFilter;
 
@@ -16,6 +16,41 @@ struct Args {
     /// Explicit QUIC multiaddress to dial. Include /p2p/<PeerId>.
     #[arg(long)]
     dial: Option<Multiaddr>,
+
+    /// Open an interactive shell on this peer after connecting.
+    #[arg(long, requires = "dial")]
+    shell: Option<libp2p::PeerId>,
+
+    /// Run one shell command and exit. Useful for smoke tests.
+    #[arg(long = "command", requires = "shell")]
+    shell_command: Option<String>,
+
+    #[command(subcommand)]
+    action: Option<Action>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Action {
+    /// Manage support tickets.
+    Ticket {
+        #[command(subcommand)]
+        action: TicketAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TicketAction {
+    /// Open a local support ticket on a managed peer.
+    Open,
+    /// Show the local ticket state.
+    Status,
+    /// Close a managed peer's ticket as the operator.
+    Close {
+        #[arg(long)]
+        peer: libp2p::PeerId,
+        #[arg(long)]
+        dial: Multiaddr,
+    },
 }
 
 #[tokio::main]
@@ -30,6 +65,49 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let config = Config::load(&args.config).await?;
     let mode = config.mode();
+    let ticket_store = TicketStore::new(config.ticket_path());
+    let mut dial = args.dial;
+    let mut close_ticket_peer = None;
+
+    if let Some(Action::Ticket { action }) = args.action {
+        match action {
+            TicketAction::Open => {
+                if mode != NodeMode::Managed {
+                    anyhow::bail!("Support tickets can be opened only on a managed peer.");
+                }
+                let ticket = ticket_store.open().await?;
+                println!("Ticket {}: OPEN", ticket.id);
+                return Ok(());
+            }
+            TicketAction::Status => {
+                match ticket_store.get().await? {
+                    Some(ticket) => println!(
+                        "Ticket {}: {}",
+                        ticket.id,
+                        match ticket.state {
+                            TicketState::Open => "OPEN",
+                            TicketState::Closed => "CLOSED",
+                        }
+                    ),
+                    None => println!("No ticket"),
+                }
+                return Ok(());
+            }
+            TicketAction::Close {
+                peer,
+                dial: close_dial,
+            } => {
+                if mode != NodeMode::Operator {
+                    anyhow::bail!("Only the operator peer may close tickets.");
+                }
+                close_ticket_peer = Some(peer);
+                dial = Some(close_dial);
+            }
+        }
+    }
+    if args.shell.is_some() && mode != NodeMode::Operator {
+        anyhow::bail!("Administrative shell initiation is available only on the operator peer.");
+    }
     let (keypair, identity_status) = load_or_create_identity(&config.identity.path).await?;
     let peer_id = keypair.public().to_peer_id();
 
@@ -58,13 +136,24 @@ async fn main() -> Result<()> {
         config.identity.path.display()
     );
 
-    if config.capabilities.rendezvous || config.capabilities.relay {
-        eprintln!("Note: rendezvous/relay capabilities are configured but not implemented before milestone 8.");
+    if config.capabilities.rendezvous {
+        println!("Rendezvous capability: ENABLED\n");
+    }
+    if config.capabilities.relay {
+        println!("Circuit Relay v2 capability: ENABLED\n");
     }
 
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
-    let local_info = NodeInfo::local(peer_id, config.node.name, mode);
-    fortiq_p2p::run(keypair, local_info, listen_address, args.dial).await
+    let local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
+    let options = RunOptions {
+        config,
+        listen_address,
+        dial_address: dial,
+        shell_peer: args.shell,
+        shell_command: args.shell_command,
+        close_ticket_peer,
+    };
+    fortiq_p2p::run(keypair, local_info, options).await
 }
 
 fn listen_multiaddr(value: &str) -> Result<Multiaddr> {
