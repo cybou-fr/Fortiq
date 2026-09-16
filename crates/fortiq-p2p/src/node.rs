@@ -447,7 +447,20 @@ pub async fn run(
                 .into(),
             relay_client,
             relay_server: relay_enabled
-                .then(|| relay::Behaviour::new(local_peer_id, Default::default()))
+                .then(|| {
+                    let relay_config = relay::Config {
+                        max_reservations: 256,
+                        max_reservations_per_peer: 16,
+                        reservation_duration: Duration::from_secs(3600),
+                        reservation_rate_limiters: Vec::new(),
+                        max_circuits: 256,
+                        max_circuits_per_peer: 16,
+                        max_circuit_duration: Duration::from_secs(2 * 3600),
+                        max_circuit_bytes: 1024 * 1024 * 1024,
+                        circuit_src_rate_limiters: Vec::new(),
+                    };
+                    relay::Behaviour::new(local_peer_id, relay_config)
+                })
                 .into(),
             dcutr: dcutr_enabled
                 .then(|| dcutr::Behaviour::new(local_peer_id))
