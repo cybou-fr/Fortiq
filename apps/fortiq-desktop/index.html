@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/src/assets/logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FORTIQ Remote Support</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app-root">
+      <!-- Sidebar Navigation -->
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="/src/assets/logo.png" alt="FORTIQ Logo" class="brand-logo" />
+          <div class="brand-text">
+            <span class="brand-title">FORTIQ</span>
+            <span id="brand-mode" class="brand-subtitle">Remote Support</span>
+          </div>
+        </div>
+
+        <nav class="nav-menu">
+          <button class="nav-item active" data-tab="tickets">
+            <span class="nav-icon">📋</span>
+            <span>Tickets</span>
+          </button>
+          <button class="nav-item" data-tab="peers">
+            <span class="nav-icon">💻</span>
+            <span>Peers</span>
+          </button>
+          <button class="nav-item" data-tab="settings">
+            <span class="nav-icon">⚙️</span>
+            <span>Settings</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="user-badge">
+            <span class="status-dot online"></span>
+            <div class="user-info">
+              <span id="user-role" class="user-role">Operator</span>
+              <span id="agent-state" class="user-state">Online</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content Area -->
+      <main class="main-layout">
+        <!-- Panel 1: Tickets List -->
+        <section class="panel panel-list">
+          <div class="panel-header">
+            <h2>Tickets</h2>
+            <div class="panel-actions">
+              <span class="badge open">1 Active</span>
+            </div>
+          </div>
+          <div class="ticket-list">
+            <div class="ticket-card active">
+              <div class="ticket-card-header">
+                <span class="ticket-badge open">OPEN</span>
+                <span class="ticket-id">#FT-7842</span>
+              </div>
+              <div class="ticket-card-title">Remote Administration Request</div>
+              <div class="ticket-card-meta">
+                <span>OFFICE-PC-01</span>
+                <span>•</span>
+                <span>Just now</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Panel 2: Ticket / Session Details -->
+        <section class="panel panel-detail">
+          <div class="panel-header">
+            <div>
+              <h2>Ticket #FT-7842</h2>
+              <span class="panel-subtitle">Session Details</span>
+            </div>
+            <button id="btn-close-ticket" class="btn btn-secondary">Close Ticket</button>
+          </div>
+
+          <div class="detail-card">
+            <div class="detail-row">
+              <span class="detail-label">Peer Hostname</span>
+              <span class="detail-value">OFFICE-PC-01</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Peer ID</span>
+              <span class="detail-value code">12D3KooWSx8m...9aZ</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Operating System</span>
+              <span class="detail-value">Windows 11 Pro (x86_64)</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Shell Engine</span>
+              <span class="detail-value">PowerShell (pwsh.exe)</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Transport</span>
+              <span class="detail-value"><span class="badge transport">QUIC DIRECT</span></span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Status</span>
+              <span class="detail-value"><span class="badge online">Connected</span></span>
+            </div>
+          </div>
+
+          <div class="detail-actions">
+            <button id="btn-connect" class="btn btn-primary">Connect Terminal</button>
+          </div>
+        </section>
+
+        <!-- Panel 3: Live Terminal -->
+        <section class="panel panel-terminal">
+          <div class="panel-header terminal-header">
+            <div class="terminal-title">
+              <span class="status-dot online"></span>
+              <span>Terminal — OFFICE-PC-01</span>
+            </div>
+            <div class="terminal-actions">
+              <button class="btn-icon" title="Clear">🧹</button>
+              <button class="btn-icon" title="Fullscreen">⛶</button>
+            </div>
+          </div>
+          <div class="terminal-body" id="terminal-view">
+            <div class="terminal-line banner">FORTIQ Remote Session (M10 QUIC)</div>
+            <div class="terminal-line banner">Host: OFFICE-PC-01 | Shell: pwsh.exe | Auth: OK</div>
+            <div class="terminal-line">&nbsp;</div>
+            <div class="terminal-line prompt">PS C:\Users\support&gt; whoami</div>
+            <div class="terminal-line output">office-pc-01\administrator</div>
+            <div class="terminal-line prompt">PS C:\Users\support&gt; Get-Service fortiq-service</div>
+            <div class="terminal-line output">Status   Name               DisplayName</div>
+            <div class="terminal-line output">------   ----               -----------</div>
+            <div class="terminal-line output">Running  fortiq-service     FORTIQ Remote Support Agent</div>
+            <div class="terminal-line prompt">PS C:\Users\support&gt; <span class="cursor">_</span></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
