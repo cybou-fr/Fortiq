@@ -22,6 +22,8 @@ pub const HELLO_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/hello/1.
 pub const SHELL_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/shell/1.0");
 pub const TICKET_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/ticket/1.0");
 const MAX_HELLO_BYTES: usize = 16 * 1024;
+/// How often a node re-queries the rendezvous points it knows.
+const REDISCOVERY_INTERVAL: Duration = Duration::from_secs(60);
 
 struct ShellSessionGuard(Arc<AtomicBool>);
 
@@ -454,6 +456,13 @@ async fn event_loop(
     let _keep_dummy_alive = dummy_tx;
 
     let mut peer_registry = PeerRegistry::new();
+    // Rendezvous is queried once per identify, which only happens at startup.
+    // Keep the nodes so discovery can be repeated: a peer that registers later,
+    // or comes back after a restart, is otherwise never seen again.
+    let mut rendezvous_nodes: std::collections::HashSet<PeerId> =
+        std::collections::HashSet::new();
+    let mut discovery_ticker = tokio::time::interval(REDISCOVERY_INTERVAL);
+    discovery_ticker.tick().await;
     let mut pending_close_tickets: std::collections::HashMap<
         libp2p::request_response::OutboundRequestId,
         tokio::sync::oneshot::Sender<Result<(), String>>,
@@ -599,6 +608,20 @@ async fn event_loop(
             Some(result) = shell_result_receiver.recv() => {
                 return result;
             }
+            _ = discovery_ticker.tick() => {
+                let namespace = rendezvous::Namespace::from_static("fortiq");
+                for node in &rendezvous_nodes {
+                    if !swarm.is_connected(node) {
+                        continue;
+                    }
+                    swarm.behaviour_mut().rendezvous_client.discover(
+                        Some(namespace.clone()),
+                        None,
+                        None,
+                        *node,
+                    );
+                }
+            }
             event = swarm.select_next_some() => match event {
                 libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
                     let has_local_peer_id = matches!(
@@ -706,6 +729,7 @@ async fn event_loop(
                         .any(|protocol| protocol.as_ref() == "/rendezvous/1.0.0")
                     {
                         let namespace = rendezvous::Namespace::from_static("fortiq");
+                        rendezvous_nodes.insert(peer_id);
                         if let Err(error) = swarm.behaviour_mut().rendezvous_client.register(
                             namespace.clone(),
                             peer_id,
