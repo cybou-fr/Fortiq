@@ -106,6 +106,40 @@ npm run build
 cargo run --manifest-path apps/fortiq-desktop/src-tauri/Cargo.toml
 ```
 
+## Production Packaging & Distribution
+
+### Debian / Ubuntu (`.deb`)
+
+Build the standalone system service Debian package:
+
+```bash
+# Builds target/debian/fortiq-service_0.1.0_amd64.deb
+./packaging/linux/build_deb.sh [version] [target]
+```
+
+Install and manage:
+
+```bash
+sudo dpkg -i fortiq-service_0.1.0_amd64.deb
+sudo nano /etc/fortiq/fortiq.toml
+sudo systemctl start fortiq
+sudo systemctl status fortiq
+```
+
+### Windows & Multi-Platform Desktop Bundles
+
+The desktop GUI and background service are bundled for production via Tauri:
+
+```bash
+cd apps/fortiq-desktop
+npm run tauri build
+```
+
+- **Windows**: Produces signed/unsigned `.msi` (WiX) and `.exe` (NSIS) installers under `target/release/bundle/`.
+- **Linux**: Produces `.deb` and `.AppImage` bundles under `target/release/bundle/`.
+- **GitHub Actions**: Tagging a commit (`git tag v0.1.0 && git push origin v0.1.0`) triggers `.github/workflows/release.yml`, automatically building and attaching all Linux `.deb`, Windows `.zip`, and desktop installer artifacts to the GitHub Release.
+
+
 ## Rendezvous discovery
 
 Any ordinary FORTIQ peer can provide rendezvous by setting:

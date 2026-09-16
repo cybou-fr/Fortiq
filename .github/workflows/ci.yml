@@ -51,6 +51,22 @@ jobs:
       - name: Run Workspace Tests
         run: cargo test --workspace -- --nocapture
 
+      - name: Run Automated Smoke Test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x scripts/smoke_test.sh
+          ./scripts/smoke_test.sh
+
+      - name: Verify Debian Package Creation (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x packaging/linux/build_deb.sh
+          ./packaging/linux/build_deb.sh 0.1.0 x86_64-unknown-linux-gnu
+
+      - name: Run Automated Smoke Test (Windows)
+        if: runner.os == 'Windows'
+        run: powershell -ExecutionPolicy Bypass -File scripts/smoke_test.ps1
+
   desktop-frontend:
     name: Tauri Desktop Frontend & Backend Check
     strategy:

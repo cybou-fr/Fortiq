@@ -33,15 +33,67 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           tar -czf ${{ matrix.asset_name }} -C target/${{ matrix.target }}/release ${{ matrix.bin_name }}
+          chmod +x packaging/linux/build_deb.sh
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./packaging/linux/build_deb.sh "${VERSION}" "${{ matrix.target }}"
 
       - name: Package Binary (Windows)
         if: runner.os == 'Windows'
         run: |
           Compress-Archive -Path target\${{ matrix.target }}\release\${{ matrix.bin_name }} -DestinationPath ${{ matrix.asset_name }}
 
-      - name: Upload Release Asset
+      - name: Upload Service Release Assets
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.asset_name }}
+          files: |
+            ${{ matrix.asset_name }}
+            target/debian/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-desktop:
+    name: Build fortiq-desktop (${{ matrix.platform }})
+    needs: build-service
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "macos-latest"
+            os: macos-latest
+          - platform: "ubuntu-22.04"
+            os: ubuntu-22.04
+          - platform: "windows-latest"
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install Frontend Dependencies
+        working-directory: apps/fortiq-desktop
+        run: npm ci
+
+      - name: Build Desktop Application Bundle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: "apps/fortiq-desktop"
+          tagName: ${{ github.ref_name }}
+          releaseName: "FORTIQ v__VERSION__"
+          releaseBody: "See release notes and commit history for details."
+          releaseDraft: false
+          prerelease: false
+

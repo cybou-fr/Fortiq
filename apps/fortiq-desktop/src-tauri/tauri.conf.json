@@ -35,6 +35,27 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Network",
+    "shortDescription": "Sovereign P2P Remote Administration Desktop",
+    "longDescription": "FORTIQ is a sovereign peer-to-peer remote administration client with end-to-end authenticated QUIC transport, ConPTY/PTY terminal streaming, and ticket-gated session authorization.",
+    "copyright": "2026 FORTIQ Contributors",
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": false
+      },
+      "wix": {
+        "language": ["en-US"]
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1 | libappindicator3-1"
+        ]
+      }
+    }
   }
 }

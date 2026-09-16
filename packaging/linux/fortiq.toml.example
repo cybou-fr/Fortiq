@@ -1,0 +1,28 @@
+# FORTIQ Node Configuration Example for Linux / systemd
+# Default system location: /etc/fortiq/fortiq.toml
+
+[node]
+name = "fortiq-node"
+
+[identity]
+# Sovereign Ed25519 keypair persisted on disk (chmod 0600)
+path = "/etc/fortiq/identity.key"
+
+[authorization]
+# Set the authorized operator's PeerId to run in MANAGED mode.
+# If omitted or commented out, this node operates in OPERATOR mode.
+# operator_peer_id = "12D3KooW..."
+
+[network]
+listen_quic = "0.0.0.0:4001"
+# Optional public address if behind NAT / reverse proxy:
+# public_addr = "/ip4/203.0.113.10/udp/4001/quic-v1"
+# Optional circuit relay peer for NAT traversal:
+# relay_peer = "/ip4/203.0.113.20/udp/4001/quic-v1/p2p/12D3KooW..."
+
+[ticket]
+path = "/var/lib/fortiq/ticket.json"
+
+[capabilities]
+rendezvous = false
+relay = false
