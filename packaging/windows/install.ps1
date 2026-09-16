@@ -262,6 +262,15 @@ $cliShortcut.WorkingDirectory = $InstallDir
 $cliShortcut.Description = "FORTIQ command line"
 $cliShortcut.Save()
 
+$publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+if ($publicDesktop -and (Test-Path -LiteralPath $publicDesktop)) {
+    $publicShortcut = $shell.CreateShortcut((Join-Path $publicDesktop "FORTIQ.lnk"))
+    $publicShortcut.TargetPath = Join-Path $InstallDir "fortiq-desktop.exe"
+    $publicShortcut.WorkingDirectory = $InstallDir
+    $publicShortcut.Description = "FORTIQ $Role"
+    $publicShortcut.Save()
+}
+
 Write-Host "FORTIQ $Role installation completed." -ForegroundColor Green
 Write-Host "Service starts at boot; desktop starts at interactive user logon."
 Invoke-NativeCommand -FailureMessage "status" -IgnoreExitCode -Command {

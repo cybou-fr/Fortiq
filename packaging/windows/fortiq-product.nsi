@@ -21,17 +21,24 @@ ManifestDPIAware true
   !define OUTDIR "."
 !endif
 
+!ifndef SRCDIR
+  !define SRCDIR "..\.."
+!endif
+
 !define PRODUCT_NAME "FORTIQ ${PACKAGE_ROLE}"
 Name "${PRODUCT_NAME}"
 OutFile "${OUTDIR}\FORTIQ-${PACKAGE_ROLE}-Setup-${VERSION}-x64.exe"
 InstallDir "$PROGRAMFILES64\FORTIQ"
-BrandingText "FORTIQ — Assistance & Sécurité"
+BrandingText "FORTIQ — Assistance & Sécurité Souveraine"
 VIProductVersion "${VERSION_NUM}"
 VIAddVersionKey /LANG=1033 "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey /LANG=1033 "CompanyName" "FORTIQ"
 VIAddVersionKey /LANG=1033 "FileDescription" "${PRODUCT_NAME} Setup"
 VIAddVersionKey /LANG=1033 "FileVersion" "${VERSION}"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright 2026 FORTIQ Contributors"
+
+!define MUI_ICON "${SRCDIR}\apps\fortiq-desktop\src-tauri\icons\icon.ico"
+!define MUI_UNICON "${SRCDIR}\apps\fortiq-desktop\src-tauri\icons\icon.ico"
 
 Var NodeName
 Var NodeNameInput
@@ -42,10 +49,22 @@ Var ConfigDialog
 !endif
 
 !define MUI_ABORTWARNING
+!define MUI_WELCOMEPAGE_TITLE "Installation de ${PRODUCT_NAME}"
+!if "${PACKAGE_ROLE}" == "Client"
+  !define MUI_WELCOMEPAGE_TEXT "Bienvenue dans l'assistant d'installation de FORTIQ Client.\r\n\r\nCe logiciel permet à votre administrateur ou support informatique de vous assister à distance de manière souveraine et sécurisée (connexions chiffrées P2P, zéro port entrant ouvert).\r\n\r\nCliquez sur Suivant pour configurer et démarrer l'installation."
+!else
+  !define MUI_WELCOMEPAGE_TEXT "Bienvenue dans l'assistant d'installation de FORTIQ Operator.\r\n\r\nCette console d'administration souveraine vous permet de superviser votre parc de postes clients et d'ouvrir des sessions de terminal à distance sécurisées.\r\n\r\nCliquez sur Suivant pour démarrer l'installation."
+!endif
 !insertmacro MUI_PAGE_WELCOME
 Page custom ConfigPageCreate ConfigPageLeave
 !insertmacro MUI_PAGE_INSTFILES
+
+!define MUI_FINISHPAGE_RUN "$INSTDIR\fortiq-desktop.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Lancer FORTIQ maintenant"
+!define MUI_FINISHPAGE_LINK "Visiter le site officiel fortiq.fr"
+!define MUI_FINISHPAGE_LINK_LOCATION "https://fortiq.fr"
 !insertmacro MUI_PAGE_FINISH
+
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "French"
@@ -124,7 +143,7 @@ Section "FORTIQ ${PACKAGE_ROLE}" SecMain
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\FORTIQ" "Publisher" "FORTIQ"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\FORTIQ" "UninstallString" '"$INSTDIR\Uninstall FORTIQ.exe"'
   RMDir /r "$TEMP\FORTIQ-${PACKAGE_ROLE}-Setup"
-  IfSilent +2
+  IfSilent 0 +2
   ExecShell "open" "$INSTDIR\fortiq-desktop.exe"
 SectionEnd
 

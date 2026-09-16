@@ -13,7 +13,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     throw "FORTIQ uninstallation requires Administrator privileges."
 }
 
-Get-Process -Name "fortiq-desktop", "FORTIQ" -ErrorAction SilentlyContinue |
+Get-Process -Name "fortiq-desktop", "fortiq-service", "fortiq", "FORTIQ" -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
 if (Get-Service -Name "FortiqService" -ErrorAction SilentlyContinue) {
     Stop-Service -Name "FortiqService" -Force -ErrorAction SilentlyContinue
@@ -34,6 +34,11 @@ foreach ($registryView in @([Microsoft.Win32.RegistryView]::Registry64, [Microso
     $registryBase.Dispose()
 }
 Remove-Item -LiteralPath (Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\FORTIQ") -Recurse -Force -ErrorAction SilentlyContinue
+$publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+if ($publicDesktop) {
+    Remove-Item -LiteralPath (Join-Path $publicDesktop "FORTIQ.lnk") -Force -ErrorAction SilentlyContinue
+}
+Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath("Desktop")) "FORTIQ.lnk") -Force -ErrorAction SilentlyContinue
 $machinePath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
 $newPath = @($machinePath -split ';' | Where-Object { $_ -and $_ -ne $InstallDir }) -join ';'
 [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::Machine)

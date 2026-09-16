@@ -125,7 +125,7 @@ $nsiScript = Join-Path $rootDir "packaging\windows\fortiq-product.nsi"
 Push-Location $installerDir
 try {
     foreach ($role in @("Operator", "Client")) {
-        & $MakeNsisPath "/DVERSION=$Version" "/DVERSION_NUM=$versionNum" "/DPACKAGE_ROLE=$role" "/DDISTDIR=$payloadDir" "/DOUTDIR=$installerDir" $nsiScript
+        & $MakeNsisPath "/DVERSION=$Version" "/DVERSION_NUM=$versionNum" "/DPACKAGE_ROLE=$role" "/DDISTDIR=$payloadDir" "/DSRCDIR=$rootDir" "/DOUTDIR=$installerDir" $nsiScript
         if ($LASTEXITCODE -ne 0) { throw "NSIS failed for role $role." }
     }
 } finally {
