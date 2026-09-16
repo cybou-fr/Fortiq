@@ -43,14 +43,14 @@ class P2PParticleCanvas {
 
   createParticles() {
     this.particles = [];
-    const baseCount = Math.floor((this.width * this.height) / 22000);
-    const count = Math.max(25, Math.min(baseCount, 65));
+    const baseCount = Math.floor((this.width * this.height) / 16000);
+    const count = Math.max(35, Math.min(baseCount, 85));
 
     const colors = [
-      { r: 0, g: 132, b: 255 },  // Electric blue
-      { r: 0, g: 210, b: 255 },  // Cyan
-      { r: 79, g: 140, b: 255 }, // Indigo-azure
-      { r: 46, g: 160, b: 67 }   // Sovereign green accent
+      { r: 0, g: 150, b: 255 },  // Vivid electric blue
+      { r: 0, g: 220, b: 255 },  // Bright cyan
+      { r: 99, g: 150, b: 255 }, // Indigo azure
+      { r: 52, g: 211, b: 153 }  // Emerald cyber green
     ];
 
     for (let i = 0; i < count; i++) {
@@ -58,12 +58,12 @@ class P2PParticleCanvas {
       this.particles.push({
         x: Math.random() * this.width,
         y: Math.random() * this.height,
-        vx: (Math.random() - 0.5) * 0.5,
-        vy: (Math.random() - 0.5) * 0.5,
-        radius: Math.random() * 1.8 + 1.2,
+        vx: (Math.random() - 0.5) * 0.6,
+        vy: (Math.random() - 0.5) * 0.6,
+        radius: Math.random() * 2.2 + 1.6,
         color: color,
-        alpha: Math.random() * 0.45 + 0.35,
-        pulseSpeed: 0.015 + Math.random() * 0.02,
+        alpha: Math.random() * 0.35 + 0.55,
+        pulseSpeed: 0.018 + Math.random() * 0.025,
         pulseVal: Math.random() * Math.PI * 2
       });
     }
@@ -124,7 +124,7 @@ class P2PParticleCanvas {
   draw() {
     this.ctx.clearRect(0, 0, this.width, this.height);
 
-    const maxConnectionDist = this.width < 768 ? 95 : 125;
+    const maxConnectionDist = this.width < 768 ? 105 : 140;
     const maxConnectionDistSq = maxConnectionDist * maxConnectionDist;
     const mouseRadiusSq = this.mouse.radius * this.mouse.radius;
 
@@ -140,7 +140,7 @@ class P2PParticleCanvas {
       else if (p.y > this.height + 10) p.y = -10;
 
       p.pulseVal += p.pulseSpeed;
-      const currentAlpha = p.alpha + Math.sin(p.pulseVal) * 0.15;
+      const currentAlpha = p.alpha + Math.sin(p.pulseVal) * 0.18;
 
       // Interaction with mouse cursor
       if (this.mouse.active && this.mouse.x !== null) {
@@ -150,16 +150,16 @@ class P2PParticleCanvas {
 
         if (distSq < mouseRadiusSq) {
           const dist = Math.sqrt(distSq);
-          const force = (1 - dist / this.mouse.radius) * 0.025;
+          const force = (1 - dist / this.mouse.radius) * 0.03;
           p.x += dx * force;
           p.y += dy * force;
 
-          const mouseLineAlpha = (1 - dist / this.mouse.radius) * 0.32;
+          const mouseLineAlpha = (1 - dist / this.mouse.radius) * 0.45;
           this.ctx.beginPath();
           this.ctx.moveTo(p.x, p.y);
           this.ctx.lineTo(this.mouse.x, this.mouse.y);
-          this.ctx.strokeStyle = `rgba(0, 210, 255, ${mouseLineAlpha})`;
-          this.ctx.lineWidth = 0.9;
+          this.ctx.strokeStyle = `rgba(0, 220, 255, ${mouseLineAlpha})`;
+          this.ctx.lineWidth = 1.1;
           this.ctx.stroke();
         }
       }
@@ -167,13 +167,13 @@ class P2PParticleCanvas {
       // Draw particle dot
       this.ctx.beginPath();
       this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      this.ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${Math.max(0.1, currentAlpha)})`;
+      this.ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${Math.max(0.15, currentAlpha)})`;
       this.ctx.fill();
 
       // Soft halo glow around node
       this.ctx.beginPath();
-      this.ctx.arc(p.x, p.y, p.radius * 2.4, 0, Math.PI * 2);
-      this.ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${Math.max(0.02, currentAlpha * 0.25)})`;
+      this.ctx.arc(p.x, p.y, p.radius * 2.8, 0, Math.PI * 2);
+      this.ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${Math.max(0.04, currentAlpha * 0.3)})`;
       this.ctx.fill();
 
       // Connect with neighboring particles (P2P mesh lines)
@@ -185,12 +185,12 @@ class P2PParticleCanvas {
 
         if (distSq < maxConnectionDistSq) {
           const dist = Math.sqrt(distSq);
-          const lineAlpha = (1 - dist / maxConnectionDist) * 0.16;
+          const lineAlpha = (1 - dist / maxConnectionDist) * 0.28;
           this.ctx.beginPath();
           this.ctx.moveTo(p.x, p.y);
           this.ctx.lineTo(p2.x, p2.y);
-          this.ctx.strokeStyle = `rgba(0, 180, 255, ${lineAlpha})`;
-          this.ctx.lineWidth = 0.75;
+          this.ctx.strokeStyle = `rgba(0, 200, 255, ${lineAlpha})`;
+          this.ctx.lineWidth = 0.9;
           this.ctx.stroke();
         }
       }

@@ -17,6 +17,8 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <!-- Remix Icon font for clean tech vector icons -->
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet" />
   </head>
   <body>
     <!-- Interactive P2P Particle Canvas Background -->
@@ -69,7 +71,7 @@
       <div class="container hero-container">
         <div class="hero-badge">
           <span class="badge-dot"></span>
-          <span>🇫🇷 Informatique Souveraine · Assistance de Proximité · Zéro Cloud Tiers</span>
+          <span><i class="ri-shield-check-line" style="margin-right: 4px; vertical-align: -1px;"></i> Informatique Souveraine · Assistance de Proximité · Zéro Cloud Tiers</span>
         </div>
 
         <h1 class="hero-title">
@@ -129,7 +131,9 @@
               <div class="dash-metrics-grid">
                 <div class="dash-metric-card">
                   <div class="dash-metric-top">
-                    <span class="dash-metric-icon">💻</span>
+                    <span class="dash-metric-icon">
+                      <i class="ri-computer-line"></i>
+                    </span>
                     <span class="dash-metric-badge">En Ligne</span>
                   </div>
                   <div class="dash-metric-title">Postes Entreprise</div>
@@ -139,7 +143,9 @@
 
                 <div class="dash-metric-card">
                   <div class="dash-metric-top">
-                    <span class="dash-metric-icon">💾</span>
+                    <span class="dash-metric-icon">
+                      <i class="ri-database-2-line"></i>
+                    </span>
                     <span class="dash-metric-badge">Vérifiée</span>
                   </div>
                   <div class="dash-metric-title">Sauvegardes Données</div>
@@ -149,7 +155,9 @@
 
                 <div class="dash-metric-card">
                   <div class="dash-metric-top">
-                    <span class="dash-metric-icon">📶</span>
+                    <span class="dash-metric-icon">
+                      <i class="ri-wifi-line"></i>
+                    </span>
                     <span class="dash-metric-badge">Actif</span>
                   </div>
                   <div class="dash-metric-title">Réseau &amp; Wi-Fi</div>
@@ -159,7 +167,9 @@
 
                 <div class="dash-metric-card">
                   <div class="dash-metric-top">
-                    <span class="dash-metric-icon">🛡️</span>
+                    <span class="dash-metric-icon">
+                      <i class="ri-shield-check-line"></i>
+                    </span>
                     <span class="dash-metric-badge">Sain</span>
                   </div>
                   <div class="dash-metric-title">Sécurité &amp; Antivirus</div>
@@ -173,52 +183,63 @@
                 <!-- Panel 1: Machine status -->
                 <div class="dash-panel">
                   <div class="dash-panel-header">
-                    <div class="dash-panel-title">🖥️ État de vos Postes &amp; Équipements</div>
+                    <div class="dash-panel-title">
+                      <i class="ri-dashboard-3-line dash-title-icon"></i>
+                      <span>État de vos Postes &amp; Équipements</span>
+                    </div>
                     <div class="dash-panel-tag">Synchronisation P2P</div>
                   </div>
                   <div class="dash-list">
                     <div class="dash-device-row">
                       <div class="dash-device-left">
-                        <span>💻</span>
+                        <span class="dash-device-icon">
+                          <i class="ri-windows-fill"></i>
+                        </span>
                         <div>
                           <div class="dash-device-name">PC-Direction</div>
                           <div class="dash-device-detail">Windows 11 Pro · Espace disque sain</div>
                         </div>
                       </div>
-                      <div class="dash-device-status">● Sauvegardé</div>
+                      <div class="dash-device-status"><i class="ri-checkbox-circle-fill"></i> Sauvegardé</div>
                     </div>
 
                     <div class="dash-device-row">
                       <div class="dash-device-left">
-                        <span>🍏</span>
+                        <span class="dash-device-icon">
+                          <i class="ri-apple-fill"></i>
+                        </span>
                         <div>
                           <div class="dash-device-name">MacBook-Compta</div>
                           <div class="dash-device-detail">macOS Sequoia · Système à jour</div>
                         </div>
                       </div>
-                      <div class="dash-device-status">● Sécurisé</div>
+                      <div class="dash-device-status"><i class="ri-checkbox-circle-fill"></i> Sécurisé</div>
                     </div>
 
                     <div class="dash-device-row">
                       <div class="dash-device-left">
-                        <span>💻</span>
+                        <span class="dash-device-icon">
+                          <i class="ri-computer-line"></i>
+                        </span>
                         <div>
                           <div class="dash-device-name">Poste-Facturation</div>
                           <div class="dash-device-detail">Windows 10 · Logiciel métier actif</div>
                         </div>
                       </div>
-                      <div class="dash-device-status">● Opérationnel</div>
+                      <div class="dash-device-status"><i class="ri-checkbox-circle-fill"></i> Opérationnel</div>
                     </div>
 
                     <div class="dash-device-row">
                       <div class="dash-device-left">
-                        <span>🗄️</span>
+                        <span class="dash-device-icon">
+                          <i class="ri-server-line"></i>
+                        </span>
                         <div>
                           <div class="dash-device-name">NAS-Fichiers-Bureau</div>
                           <div class="dash-device-detail">Synology 4 To · Disques RAID 1 vérifiés</div>
                         </div>
                       </div>
-                      <div class="dash-device-status">● 100% Intègre</div>
+                      <div class="dash-device-status"><i class="ri-checkbox-circle-fill"></i> 100% Intègre</div>
                     </div>
                   </div>
                 </div>
@@ -226,12 +247,15 @@
                 <!-- Panel 2: Recent actions -->
                 <div class="dash-panel">
                   <div class="dash-panel-header">
-                    <div class="dash-panel-title">📋 Dernières Interventions &amp; Sérénité</div>
+                    <div class="dash-panel-title">
+                      <i class="ri-history-line dash-title-icon"></i>
+                      <span>Dernières Interventions &amp; Sérénité</span>
+                    </div>
                     <div class="dash-panel-tag">Assistance Directe</div>
                   </div>
                   <div class="dash-list">
                     <div class="dash-activity-row">
-                      <span class="dash-act-icon">✓</span>
+                      <span class="dash-act-icon"><i class="ri-checkbox-circle-line"></i></span>
                       <div class="dash-act-text">
                         <strong>Mises à jour système appliquées</strong> sans coupure pour les collaborateurs en dehors des heures de bureau.
                       </div>
@@ -239,7 +263,7 @@
                     </div>
 
                     <div class="dash-activity-row">
-                      <span class="dash-act-icon">✓</span>
+                      <span class="dash-act-icon"><i class="ri-checkbox-circle-line"></i></span>
                       <div class="dash-act-text">
                         <strong>Test de restauration de données :</strong> intégrité du dossier comptabilité validée avec succès sur le NAS.
                       </div>
@@ -247,7 +271,7 @@
                     </div>
 
                     <div class="dash-activity-row">
-                      <span class="dash-act-icon">✓</span>
+                      <span class="dash-act-icon"><i class="ri-checkbox-circle-line"></i></span>
                       <div class="dash-act-text">
                         <strong>Dépannage réseau bureau :</strong> réinitialisation du routeur et stabilisation de la borne Wi-Fi principale.
                       </div>
@@ -255,7 +279,7 @@
                     </div>
 
                     <div class="dash-activity-row">
-                      <span class="dash-act-icon">✓</span>
+                      <span class="dash-act-icon"><i class="ri-checkbox-circle-line"></i></span>
                       <div class="dash-act-text">
                         <strong>Assistance utilisateur :</strong> configuration de la nouvelle imprimante partagée sur 3 postes résolue en 12 min.
                       </div>
@@ -283,7 +307,7 @@
 
         <div class="grid grid-3">
           <div class="feature-card reveal reveal-delay-1">
-            <div class="feature-icon">💻</div>
+            <div class="feature-icon"><i class="ri-customer-service-2-line"></i></div>
             <h3>Dépannage &amp; Assistance Rapide (PC &amp; Mac)</h3>
             <p>
               Ordinateur au ralenti, boîte mail Outlook ou Mac Mail bloquée, mise à jour en échec, écran bleu ou logiciel professionnel qui refuse de s'ouvrir. Nous prenons la main à distance pour vous débloquer rapidement.
@@ -291,7 +315,7 @@
           </div>
 
           <div class="feature-card reveal reveal-delay-2">
-            <div class="feature-icon">💾</div>
+            <div class="feature-icon"><i class="ri-save-3-line"></i></div>
             <h3>Sauvegardes Automatiques &amp; Anti-Ransomware</h3>
             <p>
               Mise en place de sauvegardes automatiques chiffrées sur votre NAS local ou disque dédié. Nous testons régulièrement la restauration pour garantir que vos devis, factures et fichiers clients sont toujours récupérables en cas de coup dur.
@@ -299,7 +323,7 @@
           </div>
 
           <div class="feature-card reveal reveal-delay-3">
-            <div class="feature-icon">📶</div>
+            <div class="feature-icon"><i class="ri-router-line"></i></div>
             <h3>Réseau de Bureau, Wi-Fi &amp; Télétravail Sécurisé</h3>
             <p>
               Configuration de votre box internet, routeur et switchs, couverture Wi-Fi professionnelle stable, imprimantes partagées et connexion VPN chiffrée pour travailler de chez vous en toute sécurité.
@@ -307,7 +331,7 @@
           </div>
 
           <div class="feature-card reveal reveal-delay-1">
-            <div class="feature-icon">🗄️</div>
+            <div class="feature-icon"><i class="ri-hard-drive-2-line"></i></div>
             <h3>Serveurs de Fichiers &amp; NAS (Synology / QNAP)</h3>
             <p>
               Centralisation de vos documents avec gestion des droits d'accès par employé. Vos données restent dans vos locaux, sur votre matériel, protégées contre les pannes de disque grâce aux configurations RAID.
@@ -315,7 +339,7 @@
           </div>
 
           <div class="feature-card reveal reveal-delay-2">
-            <div class="feature-icon">🛡️</div>
+            <div class="feature-icon"><i class="ri-shield-keyhole-line"></i></div>
             <h3>Sécurité, Antivirus &amp; Hygiène Numérique</h3>
             <p>
               Protection antivirus managée, filtrage contre les e-mails piégés (phishing), nettoyage régulier des programmes inutiles et conseils simples pour éviter les pièges sur internet.
@@ -323,7 +347,7 @@
           </div>
 
           <div class="feature-card reveal reveal-delay-3">
-            <div class="feature-icon">🤝</div>
+            <div class="feature-icon"><i class="ri-cpu-line"></i></div>
             <h3>Conseil, Achat &amp; Préparation de Matériel</h3>
             <p>
               Besoin de remplacer un ordinateur ou d'équiper une nouvelle recrue ? Nous vous conseillons le bon matériel selon votre budget sans surfacturation commerciale, et nous le configurons prêt à l'emploi.
@@ -442,16 +466,16 @@
         <div class="grid grid-3">
           <div class="competency-card reveal reveal-delay-1">
             <div class="competency-header">
-              <div class="competency-icon">⚖️</div>
+              <div class="competency-icon"><i class="ri-scales-3-line"></i></div>
               <h3>Professions Libérales &amp; Cabinets</h3>
             </div>
             <p class="competency-desc">
               Avocats, experts-comptables, notaires, architectes, professionnels de santé.
             </p>
             <ul class="competency-points">
-              <li><span class="bullet">✓</span> Secret professionnel garanti par l'absence de cloud tiers</li>
-              <li><span class="bullet">✓</span> Sauvegardes étanches de vos dossiers confidentiels</li>
-              <li><span class="bullet">✓</span> Réactivité maximale lors des périodes de bilan ou de plaidoiries</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Secret professionnel garanti par l'absence de cloud tiers</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Sauvegardes étanches de vos dossiers confidentiels</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Réactivité maximale lors des périodes de bilan ou de plaidoiries</li>
             </ul>
             <div class="tech-tags">
               <span class="tech-tag">Secret Client</span>
@@ -462,16 +486,16 @@
 
           <div class="competency-card reveal reveal-delay-2">
             <div class="competency-header">
-              <div class="competency-icon">🔨</div>
+              <div class="competency-icon"><i class="ri-tools-line"></i></div>
               <h3>Artisans, Commerçants &amp; Ateliers</h3>
             </div>
             <p class="competency-desc">
               Électriciens, plombiers, menuisiers, commerces de proximité, garages.
             </p>
             <ul class="competency-points">
-              <li><span class="bullet">✓</span> Facturation, devis et logiciel de caisse toujours disponibles</li>
-              <li><span class="bullet">✓</span> Dépannage rapide à distance pour ne jamais bloquer un chantier</li>
-              <li><span class="bullet">✓</span> Protection contre les virus et fausses factures reçues par mail</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Facturation, devis et logiciel de caisse toujours disponibles</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Dépannage rapide à distance pour ne jamais bloquer un chantier</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Protection contre les virus et fausses factures reçues par mail</li>
             </ul>
             <div class="tech-tags">
               <span class="tech-tag">Devis &amp; Factures</span>
@@ -482,16 +506,16 @@
 
           <div class="competency-card reveal reveal-delay-3">
             <div class="competency-header">
-              <div class="competency-icon">🏢</div>
+              <div class="competency-icon"><i class="ri-building-4-line"></i></div>
               <h3>TPE &amp; PME de Services (3 à 30 postes)</h3>
             </div>
             <p class="competency-desc">
               Entreprises de services, bureaux d'études, consultants, équipes en télétravail.
             </p>
             <ul class="competency-points">
-              <li><span class="bullet">✓</span> Configuration rapide des postes pour les nouveaux salariés</li>
-              <li><span class="bullet">✓</span> Réseau Wi-Fi performant et VPN sécurisé pour la maison</li>
-              <li><span class="bullet">✓</span> Un interlocuteur technique unique qui connaît votre historique</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Configuration rapide des postes pour les nouveaux salariés</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Réseau Wi-Fi performant et VPN sécurisé pour la maison</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Un interlocuteur technique unique qui connaît votre historique</li>
             </ul>
             <div class="tech-tags">
               <span class="tech-tag">Télétravail Sécurisé</span>
@@ -553,15 +577,15 @@
           </p>
           <div class="contact-details">
             <div class="contact-row">
-              <span class="contact-icon">📍</span>
+              <span class="contact-icon"><i class="ri-map-pin-2-line"></i></span>
               <span>Interventions à distance partout en France &amp; sur site selon secteur</span>
             </div>
             <div class="contact-row">
-              <span class="contact-icon">⚡</span>
+              <span class="contact-icon"><i class="ri-flashlight-line"></i></span>
               <span>Assistance réactive en moins de 30 minutes pour les urgences</span>
             </div>
             <div class="contact-row">
-              <span class="contact-icon">✉️</span>
+              <span class="contact-icon"><i class="ri-mail-send-line"></i></span>
               <span>contact@fortiq.net</span>
             </div>
           </div>
@@ -612,7 +636,7 @@
             <button type="submit" class="btn btn-primary btn-block btn-lg">Envoyer Ma Demande d'Échange</button>
           </form>
           <div id="formSuccess" class="form-success" style="display: none;">
-            ✓ Merci ! Votre demande a bien été reçue. Un technicien vous recontactera très rapidement.
+            <i class="ri-checkbox-circle-fill" style="margin-right: 6px; vertical-align: -1px;"></i> Merci ! Votre demande a bien été reçue. Un technicien vous recontactera très rapidement.
           </div>
         </div>
       </div>
