@@ -36,7 +36,41 @@
         "url": "https://fortiq.fr"
       },
       "areaServed": "France",
-      "description": "Mise en place de la stratégie 3-2-1, supervision quotidienne des sauvegardes, chiffrement des données et tests réguliers de restauration pour TPE et PME."
+      "description": "Mise en place de la stratégie 3-2-1, supervision quotidienne des sauvegardes, chiffrement des données et tests réguliers de restauration pour postes, NAS et serveurs.",
+      "hasOfferCatalog": {
+        "@type": "OfferCatalog",
+        "name": "Tarifs Sauvegarde & Restauration FORTIQ",
+        "itemListElement": [
+          {
+            "@type": "Offer",
+            "name": "Sauvegarde Poste de Travail",
+            "price": "9",
+            "priceCurrency": "EUR",
+            "description": "59 € HT mise en service + 9 € HT / poste / mois ou inclus dans TPE Sécurité"
+          },
+          {
+            "@type": "Offer",
+            "name": "Sauvegarde Serveur NAS",
+            "price": "29",
+            "priceCurrency": "EUR",
+            "description": "Configuration 290 € HT + 29 € HT / NAS / mois avec réplication 3-2-1"
+          },
+          {
+            "@type": "Offer",
+            "name": "Sauvegarde Serveur & VM",
+            "price": "79",
+            "priceCurrency": "EUR",
+            "description": "Configuration 590 € HT + 79 € HT / serveur / mois"
+          },
+          {
+            "@type": "Offer",
+            "name": "Test de Restauration Périodique",
+            "price": "75",
+            "priceCurrency": "EUR",
+            "description": "Test de restauration réel : 75 € HT pour poste / dès 190 € HT pour serveur/NAS"
+          }
+        ]
+      }
     }
     </script>
   </head>
@@ -109,7 +143,7 @@
           Disque dur en panne, suppression accidentelle d'un dossier clé, vol ou rançongiciel : la question n'est pas de savoir si un incident surviendra, mais à quelle vitesse vous pourrez reprendre votre activité. FORTIQ sécurise, supervise et teste vos sauvegardes au quotidien.
         </p>
         <div class="hero-cta-group" style="justify-content: center;">
-          <a href="contact.html" class="btn btn-primary btn-lg">Faire Tester Vos Sauvegardes</a>
+          <a href="contact.html?plan=sauvegardes" class="btn btn-primary btn-lg">Faire Tester Vos Sauvegardes</a>
           <a href="tarifs.html" class="btn btn-secondary btn-lg">Voir Nos Forfaits avec Sauvegarde</a>
         </div>
       </div>
@@ -220,6 +254,127 @@
               En cas de panne matérielle ou de vol, votre technicien FORTIQ réinjecte vos données sur une nouvelle machine configurée en un temps record.
             </p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Grille Tarifaire Sauvegarde Dédiée -->
+    <section class="section" style="padding: 70px 0; border-top: 1px solid var(--border-color);">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">TARIFS PUBLICS SAUVEGARDE 2026–2027</span>
+          <h2 class="section-title">Combien Coûte la Sécurisation de Vos Données ?</h2>
+          <p class="section-subtitle">
+            Une tarification transparente au poste ou au serveur, sans engagement opaque ni surtaxe cachée sur le stockage.
+          </p>
+        </div>
+
+        <div class="pricing-grid pricing-grid-3 reveal">
+          <!-- Carte 1 : Poste de travail -->
+          <div class="price-card">
+            <div class="price-header">
+              <div class="price-target">Poste Collaborateur · PC / Mac</div>
+              <h3 class="price-title">Sauvegarde Poste</h3>
+              <p class="price-desc">Idéal pour protéger les documents, boîtes locales et dossiers de travail de vos équipes.</p>
+            </div>
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">9 €</span>
+                <span class="price-unit">HT / poste / mois</span>
+              </div>
+              <div class="price-setup">Mise en service initiale : 59 € HT / poste</div>
+              <div class="price-minimum" style="color: var(--accent-cyan); font-weight: 500; margin-top: 8px;">
+                Inclus d'office dans le forfait TPE Sécurité (65 € HT / mois)
+              </div>
+            </div>
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span>Chiffrement fort de bout en bout (AES-256)</span></li>
+              <li><i class="ri-check-line"></i> <span>Sauvegarde incrémentale quotidienne invisible</span></li>
+              <li><i class="ri-check-line"></i> <span>Supervision proactive des alertes d'échec</span></li>
+              <li><i class="ri-check-line"></i> <span>Restauration unitaire de fichiers à la demande</span></li>
+            </ul>
+            <a href="contact.html?plan=sauvegarde-poste" class="btn btn-secondary price-cta">Sécuriser Mes Postes</a>
+          </div>
+
+          <!-- Carte 2 : NAS Synology / QNAP -->
+          <div class="price-card featured">
+            <span class="price-badge">Le Plus Demandé</span>
+            <div class="price-header">
+              <div class="price-target">Serveur Local · Synology / QNAP</div>
+              <h3 class="price-title">Sauvegarde Serveur NAS</h3>
+              <p class="price-desc">Sécurisation du cœur de données partagées de votre entreprise et réplication isolée.</p>
+            </div>
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">29 €</span>
+                <span class="price-unit">HT / NAS / mois</span>
+              </div>
+              <div class="price-setup">Configuration initiale : 290 € HT</div>
+            </div>
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span>Application rigoureuse de la <strong>règle 3-2-1</strong></span></li>
+              <li><i class="ri-check-line"></i> <span>Copie locale + réplication distante chiffrée</span></li>
+              <li><i class="ri-check-line"></i> <span>Protection immuable anti-ransomware</span></li>
+              <li><i class="ri-check-line"></i> <span>Supervision quotidienne des logs d'exécution</span></li>
+            </ul>
+            <a href="contact.html?plan=sauvegarde-nas" class="btn btn-primary price-cta">Sécuriser Mon NAS</a>
+          </div>
+
+          <!-- Carte 3 : Serveur Infrastructure / VM -->
+          <div class="price-card">
+            <div class="price-header">
+              <div class="price-target">Infrastructure · Serveur Windows / Linux / VM</div>
+              <h3 class="price-title">Sauvegarde Serveur &amp; VM</h3>
+              <p class="price-desc">Image système complète Bare-Metal et sauvegarde cohérente des bases de données.</p>
+            </div>
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">79 €</span>
+                <span class="price-unit">HT / serveur / mois</span>
+              </div>
+              <div class="price-setup">Configuration initiale : 590 € HT</div>
+            </div>
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span>Sauvegarde image Bare-Metal / Snapshots VM</span></li>
+              <li><i class="ri-check-line"></i> <span>Cohérence applicative bases SQL / Active Directory</span></li>
+              <li><i class="ri-check-line"></i> <span>Surveillance proactive 5j/7 par technicien</span></li>
+              <li><i class="ri-check-line"></i> <span>Plan de reprise d'activité documenté</span></li>
+            </ul>
+            <a href="contact.html?plan=sauvegarde-serveur" class="btn btn-secondary price-cta">Protéger Mes Serveurs</a>
+          </div>
+        </div>
+
+        <!-- Callout Tests de Restauration -->
+        <div class="product-box reveal" style="margin-top: 45px; border-color: rgba(46, 160, 67, 0.45);">
+          <div>
+            <span class="launch-banner-badge" style="background: var(--accent-green); margin-bottom: 12px; display: inline-block;">La Vraie Garantie</span>
+            <h3 style="font-size: 22px; color: var(--text-primary); margin-bottom: 8px;">Tests Réels de Restauration Périodiques</h3>
+            <p style="color: var(--text-secondary); font-size: 14.5px; line-height: 1.6; margin-bottom: 12px;">
+              Une sauvegarde non testée n'offre aucune garantie de survie. Nous procédons à des simulations réelles d'extraction et de lecture de vos fichiers comptables, bases ou dossiers clients pour valider le temps de redémarrage effectif :
+            </p>
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; font-size: 14px; color: var(--text-primary);">
+              <div>• <strong>Test de restauration poste :</strong> 75 € HT / test</div>
+              <div>• <strong>Test de restauration NAS / serveur :</strong> dès 190 € HT / test</div>
+              <div>• <strong>Stockage cloud souverain :</strong> facturé à prix coûtant direct (~0,006 €/Go/mois)</div>
+            </div>
+          </div>
+          <div>
+            <a href="contact.html?plan=test-restauration" class="btn btn-primary" style="white-space: nowrap;">Demander un Test de Restauration</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="section text-center" style="padding: 80px 0; background: rgba(10, 16, 26, 0.35);">
+      <div class="container reveal">
+        <h2 class="section-title">Ne Laissez Plus le Hasard Décider de la Survie de Vos Données</h2>
+        <p class="section-subtitle" style="margin: 16px auto 32px;">
+          Audit gratuit de votre dispositif actuel de sauvegarde ou devis d'infogérance sécurisée sur mesure sous 24h.
+        </p>
+        <div class="hero-cta-group" style="justify-content: center;">
+          <a href="contact.html?plan=sauvegardes" class="btn btn-primary btn-lg">Demander un Diagnostic Sauvegardes Offert</a>
+          <a href="tarifs.html" class="btn btn-secondary btn-lg">Consulter la Grille Tarifaire Complète</a>
         </div>
       </div>
     </section>

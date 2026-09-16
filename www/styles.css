@@ -2391,4 +2391,108 @@ body {
   }
 }
 
+/* ==========================================================================
+   Prestations Complémentaires Catalog Table
+   ========================================================================== */
+
+.catalog-section {
+  padding: 60px 0 100px;
+}
+
+.catalog-table-wrapper {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin: 36px 0;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.catalog-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 14.5px;
+}
+
+.catalog-table th {
+  background: rgba(16, 26, 44, 0.85);
+  padding: 18px 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+  text-transform: uppercase;
+  font-size: 12.5px;
+  letter-spacing: 0.05em;
+}
+
+.catalog-table td {
+  padding: 14px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+
+.catalog-table tr:hover td {
+  background: rgba(0, 132, 255, 0.04);
+}
+
+.catalog-category-row td {
+  background: rgba(0, 132, 255, 0.12) !important;
+  color: var(--accent-cyan) !important;
+  font-weight: 700;
+  font-size: 13.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 12px 24px;
+  border-top: 1px solid rgba(0, 210, 255, 0.2);
+  border-bottom: 1px solid rgba(0, 210, 255, 0.2);
+}
+
+.price-pro {
+  color: var(--accent-cyan);
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.price-part {
+  color: #2ea043;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.exclusion-box {
+  background: rgba(16, 25, 42, 0.45);
+  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-md);
+  padding: 24px 28px;
+  margin: 40px 0;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.exclusion-box strong {
+  color: var(--text-secondary);
+}
+
+.product-box {
+  background: linear-gradient(135deg, rgba(16, 28, 48, 0.6) 0%, rgba(10, 16, 26, 0.5) 100%);
+  border: 1px solid rgba(0, 210, 255, 0.4);
+  border-radius: var(--radius-lg);
+  padding: 32px 36px;
+  margin: 40px 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 32px;
+  align-items: center;
+}
+
+@media (max-width: 768px) {
+  .product-box {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 

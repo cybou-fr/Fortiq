@@ -271,6 +271,20 @@ document.addEventListener("DOMContentLoaded", () => {
   // Contact / Diagnostic form handler
   const contactForm = document.getElementById("contactForm");
   const formSuccess = document.getElementById("formSuccess");
+  const serviceTypeSelect = document.getElementById("serviceType");
+
+  if (serviceTypeSelect) {
+    const params = new URLSearchParams(window.location.search);
+    const planParam = params.get("plan");
+    if (planParam) {
+      const match = Array.from(serviceTypeSelect.options).find(opt => 
+        opt.value === planParam || opt.value.includes(planParam) || planParam.includes(opt.value)
+      );
+      if (match) {
+        serviceTypeSelect.value = match.value;
+      }
+    }
+  }
 
   if (contactForm && formSuccess) {
     contactForm.addEventListener("submit", (e) => {
