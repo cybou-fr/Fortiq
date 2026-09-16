@@ -306,44 +306,6 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 Err(e) => IpcResponse::Error(format!("Failed to open ticket: {e}")),
             }
         }
-        IpcRequest::OpenRemoteTicket { peer } => {
-            if state.config.mode() != NodeMode::Operator {
-                return IpcResponse::Error(
-                    "Only an operator can open a remote ticket".to_string(),
-                );
-            }
-            let target_peer: PeerId = match peer.parse() {
-                Ok(p) => p,
-                Err(e) => return IpcResponse::Error(format!("Invalid target PeerId: {e}")),
-            };
-
-            let Some(sender) = &state.p2p_sender else {
-                return IpcResponse::Error("P2P node is not running".to_string());
-            };
-            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            if sender
-                .send(fortiq_p2p::P2pCommand::OpenTicket {
-                    peer: target_peer,
-                    reply: reply_tx,
-                })
-                .await
-                .is_err()
-            {
-                return IpcResponse::Error("P2P event loop is unavailable".to_string());
-            }
-            match tokio::time::timeout(std::time::Duration::from_secs(20), reply_rx).await {
-                Ok(Ok(Ok(()))) => IpcResponse::RemoteTicketOpened,
-                Ok(Ok(Err(err))) => {
-                    IpcResponse::Error(format!("Failed to open remote ticket: {err}"))
-                }
-                Ok(Err(_)) => {
-                    IpcResponse::Error("P2P event loop dropped ticket reply channel".to_string())
-                }
-                Err(_) => {
-                    IpcResponse::Error("Timeout waiting for remote ticket opening".to_string())
-                }
-            }
-        }
         IpcRequest::CloseTicket { peer, dial } => {
             if state.config.mode() != NodeMode::Operator {
                 return IpcResponse::Error("Only operator can close tickets".to_string());

@@ -862,9 +862,3 @@ button:disabled, .btn:disabled {
   color: #7ee787;
   flex-shrink: 0;
 }
-
-.panel-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}

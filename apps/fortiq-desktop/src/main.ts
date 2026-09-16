@@ -159,7 +159,6 @@ function clearPeerDetails() {
   const detailOs = document.getElementById("detail-os");
   const detailTransport = document.getElementById("detail-transport");
   const detailBadge = document.getElementById("detail-connection-badge");
-  const btnOpen = document.getElementById("btn-open-ticket") as HTMLButtonElement | null;
   const btnClose = document.getElementById("btn-close-ticket") as HTMLButtonElement | null;
   const btnConnect = document.getElementById("btn-connect") as HTMLButtonElement | null;
   const termDot = document.getElementById("terminal-dot");
@@ -174,7 +173,6 @@ function clearPeerDetails() {
     detailBadge.textContent = "Non sélectionné";
     detailBadge.className = "badge";
   }
-  if (btnOpen) btnOpen.disabled = true;
   if (btnClose) btnClose.disabled = true;
   if (btnConnect) btnConnect.disabled = true;
   if (termDot) termDot.className = "status-dot";
@@ -188,7 +186,6 @@ function updatePeerDetails(peer: DesktopPeer) {
   const detailOs = document.getElementById("detail-os");
   const detailTransport = document.getElementById("detail-transport");
   const detailBadge = document.getElementById("detail-connection-badge");
-  const btnOpen = document.getElementById("btn-open-ticket") as HTMLButtonElement | null;
   const btnClose = document.getElementById("btn-close-ticket") as HTMLButtonElement | null;
   const btnConnect = document.getElementById("btn-connect") as HTMLButtonElement | null;
   const termDot = document.getElementById("terminal-dot");
@@ -206,9 +203,6 @@ function updatePeerDetails(peer: DesktopPeer) {
     detailBadge.textContent = isConnected ? "Connecté & Prêt" : peer.status;
     detailBadge.className = isConnected ? "badge online" : "badge";
   }
-  // Opening a ticket is what makes a discovered peer reachable for a shell,
-  // so it must stay available before the peer is connected.
-  if (btnOpen) btnOpen.disabled = false;
   if (btnClose) btnClose.disabled = !isConnected;
   if (btnConnect) btnConnect.disabled = !isConnected;
   if (termDot) termDot.className = isConnected ? "status-dot online" : "status-dot";
@@ -380,26 +374,6 @@ function initEventListeners() {
       } finally {
         btnManagedOpen.disabled = false;
         btnManagedOpen.innerHTML = `<i class="ph ph-ticket"></i><span>Ouvrir un Ticket de Support</span>`;
-        refresh();
-      }
-    });
-  }
-
-  // Open a ticket on the remote managed peer
-  const btnOpenTicket = document.getElementById("btn-open-ticket") as HTMLButtonElement | null;
-  if (btnOpenTicket) {
-    btnOpenTicket.addEventListener("click", async () => {
-      if (!selectedPeerId) return;
-      try {
-        btnOpenTicket.disabled = true;
-        btnOpenTicket.textContent = "Ouverture...";
-        await invoke("open_remote_ticket", { peer: selectedPeerId });
-      } catch (err) {
-        console.error("Failed to open remote ticket:", err);
-        alert(`Échec de l'ouverture du ticket : ${err}`);
-      } finally {
-        btnOpenTicket.disabled = false;
-        btnOpenTicket.textContent = "Ouvrir Ticket";
         refresh();
       }
     });
