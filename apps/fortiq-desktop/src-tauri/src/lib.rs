@@ -188,6 +188,21 @@ async fn open_ticket() -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn open_remote_ticket(peer: String) -> Result<(), String> {
+    if let Some(resp) =
+        send_ipc_request(&fortiq_core::ipc::IpcRequest::OpenRemoteTicket { peer }).await
+    {
+        match resp {
+            fortiq_core::ipc::IpcResponse::RemoteTicketOpened => Ok(()),
+            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
+            _ => Err("Réponse inattendue du démon".to_string()),
+        }
+    } else {
+        Err("Service FORTIQ indisponible (démon hors-ligne)".to_string())
+    }
+}
+
+#[tauri::command]
 async fn close_ticket(peer: String) -> Result<(), String> {
     if let Some(resp) =
         send_ipc_request(&fortiq_core::ipc::IpcRequest::CloseTicket { peer, dial: None }).await
@@ -489,6 +504,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             desktop_status,
             open_ticket,
+            open_remote_ticket,
             close_ticket,
             list_peers,
             start_terminal_session,

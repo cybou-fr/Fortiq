@@ -36,6 +36,10 @@ pub enum P2pCommand {
     ListPeers {
         reply: tokio::sync::oneshot::Sender<Vec<fortiq_core::ipc::PeerSummary>>,
     },
+    OpenTicket {
+        peer: PeerId,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
     CloseTicket {
         peer: PeerId,
         dial: Option<Multiaddr>,
@@ -298,6 +302,7 @@ struct HelloResponse(NodeInfo);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum TicketRequest {
+    Open,
     Close,
 }
 
@@ -454,7 +459,7 @@ async fn event_loop(
     let _keep_dummy_alive = dummy_tx;
 
     let mut peer_registry = PeerRegistry::new();
-    let mut pending_close_tickets: std::collections::HashMap<
+    let mut pending_ticket_requests: std::collections::HashMap<
         libp2p::request_response::OutboundRequestId,
         tokio::sync::oneshot::Sender<Result<(), String>>,
     > = std::collections::HashMap::new();
@@ -469,6 +474,21 @@ async fn event_loop(
                 match cmd {
                     P2pCommand::ListPeers { reply } => {
                         let _ = reply.send(peer_registry.to_summaries());
+                    }
+                    P2pCommand::OpenTicket { peer, reply } => {
+                        if !swarm.is_connected(&peer) {
+                            dial_peer_candidates(
+                                swarm,
+                                peer,
+                                &peer_registry,
+                                config.network.relay_peer.as_deref(),
+                            );
+                        }
+                        let request_id = swarm
+                            .behaviour_mut()
+                            .ticket
+                            .send_request(&peer, TicketRequest::Open);
+                        pending_ticket_requests.insert(request_id, reply);
                     }
                     P2pCommand::CloseTicket { peer, dial, reply } => {
                         if let Some(addr) = dial {
@@ -487,7 +507,7 @@ async fn event_loop(
                             &peer,
                             TicketRequest::Close,
                         );
-                        pending_close_tickets.insert(request_id, reply);
+                        pending_ticket_requests.insert(request_id, reply);
                     }
                     P2pCommand::OpenShellStream { peer, dial, reply } => {
                         if let Some(addr) = dial {
@@ -636,7 +656,7 @@ async fn event_loop(
                         &ticket_store,
                         &active_shells,
                         &shell_result_sender,
-                        &mut pending_close_tickets,
+                        &mut pending_ticket_requests,
                     ).await;
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::RendezvousClient(event)) => {
@@ -813,13 +833,54 @@ async fn handle_ticket(
     ticket_store: &TicketStore,
     active_shells: &Arc<AtomicBool>,
     completion: &tokio::sync::mpsc::Sender<Result<()>>,
-    pending_close_tickets: &mut std::collections::HashMap<
+    pending_ticket_requests: &mut std::collections::HashMap<
         request_response::OutboundRequestId,
         tokio::sync::oneshot::Sender<Result<(), String>>,
     >,
 ) {
     match event {
         request_response::Event::Message { peer, message, .. } => match message {
+            request_response::Message::Request {
+                request: TicketRequest::Open,
+                channel,
+                ..
+            } => {
+                // Only the operator this node was explicitly configured to
+                // trust may open a ticket. The PeerId comes from libp2p's
+                // authenticated connection, never from payload data.
+                let response = if !is_authorized_operator(peer, config) {
+                    warn!(remote_peer_id = %peer, "denied ticket open from unauthorized peer");
+                    TicketResponse {
+                        success: false,
+                        message: "authenticated peer is not the configured operator".to_owned(),
+                    }
+                } else {
+                    match ticket_store.open().await {
+                        Ok(ticket) => {
+                            info!(remote_peer_id = %peer, ticket_id = %ticket.id, "ticket opened");
+                            TicketResponse {
+                                success: true,
+                                message: format!("ticket {} opened", ticket.id),
+                            }
+                        }
+                        Err(error) => {
+                            warn!(remote_peer_id = %peer, %error, "failed to open ticket");
+                            TicketResponse {
+                                success: false,
+                                message: "internal error opening ticket".to_owned(),
+                            }
+                        }
+                    }
+                };
+                if swarm
+                    .behaviour_mut()
+                    .ticket
+                    .send_response(channel, response)
+                    .is_err()
+                {
+                    warn!(remote_peer_id = %peer, "ticket response connection closed before sending");
+                }
+            }
             request_response::Message::Request {
                 request: TicketRequest::Close,
                 channel,
@@ -872,7 +933,7 @@ async fn handle_ticket(
                 request_id,
                 response,
             } => {
-                if let Some(reply) = pending_close_tickets.remove(&request_id) {
+                if let Some(reply) = pending_ticket_requests.remove(&request_id) {
                     if response.success {
                         let _ = reply.send(Ok(()));
                     } else {
@@ -895,7 +956,7 @@ async fn handle_ticket(
             error,
             ..
         } => {
-            if let Some(reply) = pending_close_tickets.remove(&request_id) {
+            if let Some(reply) = pending_ticket_requests.remove(&request_id) {
                 let _ = reply.send(Err(format!("ticket request to {peer} failed: {error}")));
             }
             let _ = completion

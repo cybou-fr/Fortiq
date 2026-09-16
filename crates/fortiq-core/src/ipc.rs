@@ -50,6 +50,10 @@ fn default_terminal_rows() -> u16 {
 pub enum IpcRequest {
     GetStatus,
     OpenTicket,
+    /// Operator-initiated: asks a remote managed peer to open a ticket.
+    OpenRemoteTicket {
+        peer: String,
+    },
     CloseTicket {
         peer: String,
         #[serde(default)]
@@ -63,6 +67,7 @@ pub enum IpcRequest {
 pub enum IpcResponse {
     Status(DaemonStatus),
     TicketOpened(Ticket),
+    RemoteTicketOpened,
     TicketClosed,
     Peers(Vec<PeerSummary>),
     Error(String),
