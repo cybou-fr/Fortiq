@@ -47,11 +47,13 @@ body, html {
   display: flex;
   height: 100vh;
   width: 100vw;
+  min-width: 0;
 }
 
 /* Sidebar */
 .sidebar {
-  width: 250px;
+  width: clamp(210px, 17vw, 240px);
+  flex: 0 0 clamp(210px, 17vw, 240px);
   background-color: var(--bg-sidebar);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
@@ -126,6 +128,14 @@ body, html {
   color: var(--text-primary);
 }
 
+.nav-item:focus-visible,
+.btn:focus-visible,
+.btn-icon:focus-visible,
+.ticket-card:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
 .nav-item.active {
   background-color: rgba(0, 132, 255, 0.15);
   border: 1px solid rgba(0, 180, 255, 0.25);
@@ -176,7 +186,7 @@ body, html {
 }
 
 .network-layout {
-  grid-column: 2;
+  flex: 1;
   min-width: 0;
   height: 100vh;
   padding: 18px;
@@ -282,10 +292,16 @@ body, html {
 .main-layout {
   flex: 1;
   display: grid;
-  grid-template-columns: 280px 340px 1fr;
+  grid-template-columns: minmax(240px, 280px) minmax(300px, 350px) minmax(360px, 1fr);
+  grid-template-areas: "list detail terminal";
+  min-width: 0;
   height: 100vh;
   overflow: hidden;
 }
+
+.panel-list { grid-area: list; }
+.panel-detail { grid-area: detail; }
+.panel-terminal { grid-area: terminal; }
 
 .panel {
   display: flex;
@@ -294,6 +310,9 @@ body, html {
   background-color: var(--bg-panel);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .panel-header {
@@ -323,6 +342,7 @@ body, html {
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .ticket-card {
@@ -373,6 +393,10 @@ body, html {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-secondary);
+  max-width: 58%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ticket-card-title {
@@ -424,6 +448,9 @@ body, html {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--accent-cyan);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  user-select: text;
 }
 
 .detail-actions {
@@ -868,4 +895,48 @@ button:disabled, .btn:disabled {
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-muted, #8b98a8);
+}
+
+@media (max-width: 1240px) {
+  .sidebar { width: 200px; flex-basis: 200px; }
+  .main-layout {
+    grid-template-columns: minmax(220px, 250px) minmax(270px, 310px) minmax(320px, 1fr);
+  }
+  .panel-header, .detail-card, .detail-actions {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+@media (max-width: 1050px) {
+  .sidebar {
+    width: 76px;
+    flex-basis: 76px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .brand { justify-content: center; padding-left: 0; padding-right: 0; }
+  .brand-text, .nav-item span, .user-info { display: none; }
+  .nav-item { justify-content: center; min-height: 46px; padding: 10px; }
+  .nav-icon { font-size: 21px; }
+  .user-badge { justify-content: center; padding: 12px; }
+  .main-layout {
+    grid-template-columns: minmax(230px, 270px) minmax(0, 1fr);
+    grid-template-rows: minmax(250px, 42%) minmax(270px, 58%);
+    grid-template-areas: "list detail" "list terminal";
+  }
+  .panel-detail { border-bottom: 1px solid var(--border-color); }
+  .detail-card { padding-top: 14px; gap: 9px; }
+  .detail-row { padding-bottom: 8px; }
+  .detail-actions { padding-top: 12px; padding-bottom: 12px; }
+}
+
+@media (max-height: 720px) {
+  .sidebar { padding-top: 12px; padding-bottom: 12px; }
+  .brand { padding-bottom: 12px; }
+  .nav-menu { margin-top: 12px; }
+  .panel-header { min-height: 58px; padding-top: 12px; padding-bottom: 12px; }
+  .ticket-card { padding: 11px 12px; }
+  .detail-card { padding-top: 12px; padding-bottom: 12px; gap: 8px; }
+  .detail-actions { padding-top: 10px; padding-bottom: 10px; }
 }

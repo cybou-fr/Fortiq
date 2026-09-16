@@ -77,6 +77,11 @@ function setOperatorTab(tab: "tickets" | "peers") {
   const peersView = document.getElementById("peers-view");
   if (operatorView) operatorView.style.display = tab === "tickets" ? "grid" : "none";
   if (peersView) peersView.style.display = tab === "peers" ? "grid" : "none";
+  document.querySelectorAll<HTMLElement>(".nav-item").forEach((item) => {
+    const selected = item.dataset.tab === tab;
+    item.classList.toggle("active", selected);
+    item.setAttribute("aria-selected", String(selected));
+  });
 }
 
 function updateStatusBadge(isOnline: boolean, stateText: string) {
@@ -246,6 +251,8 @@ function renderPeerList(peers: DesktopPeer[], isOnline: boolean) {
     const isSelected = peer.peerId === selectedPeerId;
     card.className = `ticket-card ${isSelected ? "active" : ""}`;
     card.dataset.peerId = peer.peerId;
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
 
     const isConnected = isPeerConnected(peer.status);
     const statusText = isConnected ? "CONNECTÉ" : peer.status.toUpperCase();
@@ -264,7 +271,7 @@ function renderPeerList(peers: DesktopPeer[], isOnline: boolean) {
       </div>
     `;
 
-    card.addEventListener("click", () => {
+    const selectPeer = () => {
       const switchedPeer = selectedPeerId !== peer.peerId;
       selectedPeerId = peer.peerId;
       document.querySelectorAll(".ticket-card").forEach((c) => c.classList.remove("active"));
@@ -276,6 +283,13 @@ function renderPeerList(peers: DesktopPeer[], isOnline: boolean) {
       // An already running session is left alone: reconnecting would kill it.
       if (isPeerConnected(peer.status) && (switchedPeer || !isTerminalActive)) {
         void connectTerminalSession(false);
+      }
+    };
+    card.addEventListener("click", selectPeer);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectPeer();
       }
     });
 
@@ -444,8 +458,6 @@ function initEventListeners() {
   const navItems = document.querySelectorAll(".nav-item");
   navItems.forEach((btn) => {
     btn.addEventListener("click", () => {
-      navItems.forEach((item) => item.classList.remove("active"));
-      btn.classList.add("active");
       const tab = (btn as HTMLElement).dataset.tab;
       if (tab === "tickets" || tab === "peers") {
         setOperatorTab(tab);

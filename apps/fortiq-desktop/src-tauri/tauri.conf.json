@@ -13,10 +13,10 @@
       {
         "label": "main",
         "title": "FORTIQ — Support & Supervision Souveraine",
-        "width": 1440,
-        "height": 960,
-        "minWidth": 1100,
-        "minHeight": 700,
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 620,
         "center": true,
         "resizable": true,
         "visible": true
