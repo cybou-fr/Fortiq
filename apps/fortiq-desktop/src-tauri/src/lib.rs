@@ -155,14 +155,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let open = MenuItem::with_id(app, "open", "Open FORTIQ", true, None::<&str>)?;
-            let status = MenuItem::with_id(app, "status", "Agent: online", false, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Ouvrir FORTIQ", true, None::<&str>)?;
+            let status = MenuItem::with_id(app, "status", "Statut : Prêt", false, None::<&str>)?;
             let separator = PredefinedMenuItem::separator(app)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit FORTIQ", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quitter FORTIQ", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &status, &separator, &quit])?;
 
             let mut tray = TrayIconBuilder::with_id("fortiq")
-                .tooltip("FORTIQ · Agent online")
+                .tooltip("FORTIQ · Supervision P2P Souveraine")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -181,10 +181,14 @@ pub fn run() {
                     }
                 });
 
-            if let Some(icon) = app.default_window_icon() {
-                tray = tray.icon(icon.clone());
-            }
-            tray.build(app)?;
+            let icon = app
+                .default_window_icon()
+                .cloned()
+                .unwrap_or_else(|| tauri::include_image!("icons/32x32.png"));
+            tray = tray.icon(icon);
+            let _ = tray.build(app);
+
+            show_main_window(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {

@@ -4,8 +4,6 @@
   "version": "0.1.0",
   "identifier": "com.fortiq.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -13,13 +11,15 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "FORTIQ Remote Support",
+        "label": "main",
+        "title": "FORTIQ — Support & Supervision Souveraine",
         "width": 1440,
         "height": 960,
         "minWidth": 1100,
         "minHeight": 700,
         "center": true,
-        "resizable": true
+        "resizable": true,
+        "visible": true
       }
     ],
     "security": {
