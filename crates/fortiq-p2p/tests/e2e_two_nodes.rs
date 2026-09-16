@@ -50,6 +50,7 @@ async fn e2e_managed_operator_quic_interaction() {
         ticket: TicketConfig {
             path: Some(managed_ticket_path.clone()),
         },
+        ipc: fortiq_core::IpcConfig::default(),
     };
 
     let operator_config = Config {
@@ -69,6 +70,7 @@ async fn e2e_managed_operator_quic_interaction() {
         },
         capabilities: CapabilitiesConfig::default(),
         ticket: TicketConfig::default(),
+        ipc: fortiq_core::IpcConfig::default(),
     };
 
     let managed_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{managed_port}/quic-v1")
@@ -228,6 +230,7 @@ async fn e2e_unauthorized_operator_rejected_on_ticket_close() {
         ticket: TicketConfig {
             path: Some(managed_ticket_path.clone()),
         },
+        ipc: fortiq_core::IpcConfig::default(),
     };
 
     let intruder_config = Config {
@@ -247,6 +250,7 @@ async fn e2e_unauthorized_operator_rejected_on_ticket_close() {
         },
         capabilities: CapabilitiesConfig::default(),
         ticket: TicketConfig::default(),
+        ipc: fortiq_core::IpcConfig::default(),
     };
 
     let managed_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{managed_port}/quic-v1")

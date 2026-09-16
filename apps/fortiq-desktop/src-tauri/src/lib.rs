@@ -82,8 +82,8 @@ async fn send_ipc_request(
         use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
         use tokio::net::windows::named_pipe::ClientOptions;
 
-        let pipe_name = fortiq_core::ipc::DEFAULT_WINDOWS_PIPE_NAME;
-        let client = ClientOptions::new().open(pipe_name).ok()?;
+        let pipe_name = fortiq_core::ipc::windows_pipe_name();
+        let client = ClientOptions::new().open(&pipe_name).ok()?;
         let (read_half, mut write_half) = tokio::io::split(client);
         let mut reader = BufReader::new(read_half);
 
@@ -235,8 +235,8 @@ async fn start_terminal_session(
     #[cfg(windows)]
     let stream = {
         use tokio::net::windows::named_pipe::ClientOptions;
-        let pipe_name = fortiq_core::ipc::DEFAULT_WINDOWS_TERMINAL_PIPE_NAME;
-        ClientOptions::new().open(pipe_name).map_err(|e| {
+        let pipe_name = fortiq_core::ipc::windows_terminal_pipe_name();
+        ClientOptions::new().open(&pipe_name).map_err(|e| {
             format!("Impossible de se connecter au pipe terminal ({pipe_name}): {e}")
         })?
     };
@@ -244,8 +244,8 @@ async fn start_terminal_session(
     #[cfg(unix)]
     let stream = {
         use tokio::net::UnixStream;
-        let path = fortiq_core::ipc::DEFAULT_UNIX_TERMINAL_SOCKET_PATH;
-        UnixStream::connect(path)
+        let path = fortiq_core::ipc::unix_terminal_socket_path();
+        UnixStream::connect(&path)
             .await
             .map_err(|e| format!("Impossible de se connecter au socket terminal ({path}): {e}"))?
     };

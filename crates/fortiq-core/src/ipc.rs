@@ -8,6 +8,24 @@ pub const DEFAULT_UNIX_SOCKET_PATH: &str = "/run/fortiq.sock";
 pub const DEFAULT_WINDOWS_TERMINAL_PIPE_NAME: &str = r"\\.\pipe\fortiq-terminal";
 pub const DEFAULT_UNIX_TERMINAL_SOCKET_PATH: &str = "/run/fortiq-terminal.sock";
 
+pub fn windows_pipe_name() -> String {
+    std::env::var("FORTIQ_PIPE").unwrap_or_else(|_| DEFAULT_WINDOWS_PIPE_NAME.to_owned())
+}
+
+pub fn windows_terminal_pipe_name() -> String {
+    std::env::var("FORTIQ_TERMINAL_PIPE")
+        .unwrap_or_else(|_| DEFAULT_WINDOWS_TERMINAL_PIPE_NAME.to_owned())
+}
+
+pub fn unix_socket_path() -> String {
+    std::env::var("FORTIQ_SOCK").unwrap_or_else(|_| DEFAULT_UNIX_SOCKET_PATH.to_owned())
+}
+
+pub fn unix_terminal_socket_path() -> String {
+    std::env::var("FORTIQ_TERMINAL_SOCK")
+        .unwrap_or_else(|_| DEFAULT_UNIX_TERMINAL_SOCKET_PATH.to_owned())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TerminalSessionInit {
     pub peer: String,

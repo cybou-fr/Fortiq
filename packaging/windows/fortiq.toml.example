@@ -1,0 +1,25 @@
+# FORTIQ Node Configuration
+# Default Windows Location: C:\ProgramData\FORTIQ\fortiq.toml
+
+[node]
+name = "my-computer"
+
+[identity]
+# Node identity key (Ed25519). Generated automatically on first start.
+path = "C:/ProgramData/FORTIQ/identity.key"
+
+[authorization]
+# Managed peer: uncomment and specify the operator's PeerId
+# operator_peer_id = "12D3KooW..."
+# Operator peer: leave commented out to allow initiating remote sessions
+
+[network]
+# Local QUIC UDP listen address
+listen_quic = "0.0.0.0:4001"
+
+# Official Sovereign Circuit Relay v2 & Rendezvous Node
+relay_peer = "/ip4/51.255.46.58/udp/4001/quic-v1/p2p/12D3KooWRFrWVx2CANXcjXvTNaqkh6APgAecsW94CLwNEg5wsqLy"
+
+[ticket]
+# Path to local support session ticket file
+path = "C:/ProgramData/FORTIQ/ticket.json"

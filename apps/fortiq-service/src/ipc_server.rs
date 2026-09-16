@@ -52,22 +52,22 @@ async fn run_terminal_ipc(state: Arc<IpcState>) -> Result<()> {
 async fn run_windows_pipe(state: Arc<IpcState>) -> Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
 
-    let pipe_name = fortiq_core::ipc::DEFAULT_WINDOWS_PIPE_NAME;
+    let pipe_name = state.config.ipc_endpoint();
     tracing::info!("Starting Windows Named Pipe IPC server at {}", pipe_name);
 
     let mut server = ServerOptions::new()
         .first_pipe_instance(true)
-        .create(pipe_name)?;
+        .create(&pipe_name)?;
 
     loop {
         if let Err(err) = server.connect().await {
             tracing::warn!("Named pipe connection failed: {err}");
-            server = ServerOptions::new().create(pipe_name)?;
+            server = ServerOptions::new().create(&pipe_name)?;
             continue;
         }
 
         let client = server;
-        server = ServerOptions::new().create(pipe_name)?;
+        server = ServerOptions::new().create(&pipe_name)?;
 
         let state_clone = Arc::clone(&state);
         tokio::spawn(async move {
@@ -82,22 +82,22 @@ async fn run_windows_pipe(state: Arc<IpcState>) -> Result<()> {
 async fn run_windows_terminal_pipe(state: Arc<IpcState>) -> Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
 
-    let pipe_name = fortiq_core::ipc::DEFAULT_WINDOWS_TERMINAL_PIPE_NAME;
+    let pipe_name = state.config.terminal_ipc_endpoint();
     tracing::info!("Starting Windows Terminal Named Pipe at {}", pipe_name);
 
     let mut server = ServerOptions::new()
         .first_pipe_instance(true)
-        .create(pipe_name)?;
+        .create(&pipe_name)?;
 
     loop {
         if let Err(err) = server.connect().await {
             tracing::warn!("Terminal named pipe connection failed: {err}");
-            server = ServerOptions::new().create(pipe_name)?;
+            server = ServerOptions::new().create(&pipe_name)?;
             continue;
         }
 
         let client = server;
-        server = ServerOptions::new().create(pipe_name)?;
+        server = ServerOptions::new().create(&pipe_name)?;
 
         let state_clone = Arc::clone(&state);
         tokio::spawn(async move {
@@ -112,8 +112,7 @@ async fn run_windows_terminal_pipe(state: Arc<IpcState>) -> Result<()> {
 async fn run_unix_socket(state: Arc<IpcState>) -> Result<()> {
     use tokio::net::UnixListener;
 
-    let path = std::env::var("FORTIQ_SOCK")
-        .unwrap_or_else(|_| fortiq_core::ipc::DEFAULT_UNIX_SOCKET_PATH.to_owned());
+    let path = state.config.ipc_endpoint();
     let _ = tokio::fs::remove_file(&path).await;
     if let Some(parent) = std::path::Path::new(&path).parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
@@ -148,7 +147,7 @@ async fn run_unix_socket(state: Arc<IpcState>) -> Result<()> {
 async fn run_unix_terminal_socket(state: Arc<IpcState>) -> Result<()> {
     use tokio::net::UnixListener;
 
-    let path = fortiq_core::ipc::DEFAULT_UNIX_TERMINAL_SOCKET_PATH;
+    let path = state.config.terminal_ipc_endpoint();
     let _ = tokio::fs::remove_file(&path).await;
     if let Some(parent) = std::path::Path::new(&path).parent() {
         let _ = tokio::fs::create_dir_all(parent).await;
@@ -337,7 +336,7 @@ where
         return Ok(());
     }
 
-    let mut ipc_read = reader.into_inner();
+    let mut ipc_read = reader;
 
     let init: fortiq_core::ipc::TerminalSessionInit = match serde_json::from_str(init_line.trim()) {
         Ok(val) => val,

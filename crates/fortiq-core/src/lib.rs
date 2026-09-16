@@ -18,6 +18,8 @@ pub struct Config {
     pub capabilities: CapabilitiesConfig,
     #[serde(default)]
     pub ticket: TicketConfig,
+    #[serde(default)]
+    pub ipc: IpcConfig,
 }
 
 impl Config {
@@ -66,6 +68,34 @@ impl Config {
             .path
             .clone()
             .unwrap_or_else(|| self.identity.path.with_extension("ticket.json"))
+    }
+
+    pub fn ipc_endpoint(&self) -> String {
+        #[cfg(windows)]
+        {
+            self.ipc.pipe.clone().unwrap_or_else(ipc::windows_pipe_name)
+        }
+        #[cfg(not(windows))]
+        {
+            self.ipc.sock.clone().unwrap_or_else(ipc::unix_socket_path)
+        }
+    }
+
+    pub fn terminal_ipc_endpoint(&self) -> String {
+        #[cfg(windows)]
+        {
+            self.ipc
+                .terminal_pipe
+                .clone()
+                .unwrap_or_else(ipc::windows_terminal_pipe_name)
+        }
+        #[cfg(not(windows))]
+        {
+            self.ipc
+                .terminal_sock
+                .clone()
+                .unwrap_or_else(ipc::unix_terminal_socket_path)
+        }
     }
 
     /// Resolves the default configuration file path:
@@ -191,6 +221,14 @@ pub struct CapabilitiesConfig {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct TicketConfig {
     pub path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct IpcConfig {
+    pub pipe: Option<String>,
+    pub terminal_pipe: Option<String>,
+    pub sock: Option<String>,
+    pub terminal_sock: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -328,6 +366,7 @@ mod tests {
             network: NetworkConfig::default(),
             capabilities: CapabilitiesConfig::default(),
             ticket: TicketConfig::default(),
+            ipc: IpcConfig::default(),
         }
     }
 

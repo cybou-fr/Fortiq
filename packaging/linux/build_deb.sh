@@ -19,10 +19,16 @@ if [[ ! -f "${BIN_PATH}" ]]; then
     BIN_PATH="${ROOT_DIR}/target/release/fortiq-service"
 fi
 
-if [[ ! -f "${BIN_PATH}" ]]; then
+CLI_PATH="${ROOT_DIR}/target/${TARGET}/release/fortiq"
+if [[ ! -f "${CLI_PATH}" ]]; then
+    CLI_PATH="${ROOT_DIR}/target/release/fortiq"
+fi
+
+if [[ ! -f "${BIN_PATH}" ]] || [[ ! -f "${CLI_PATH}" ]]; then
     echo "--> Compiling release binary for ${TARGET}..."
-    cargo build --release --target "${TARGET}" -p fortiq-service
+    cargo build --release --target "${TARGET}" -p fortiq-service -p fortiq-cli
     BIN_PATH="${ROOT_DIR}/target/${TARGET}/release/fortiq-service"
+    CLI_PATH="${ROOT_DIR}/target/${TARGET}/release/fortiq"
 fi
 
 if [[ ! -f "${BIN_PATH}" ]]; then
@@ -43,6 +49,11 @@ mkdir -p "${STAGE_DIR}/var/lib/fortiq"
 # 3. Copy binaries and system assets
 cp -f "${BIN_PATH}" "${STAGE_DIR}/usr/bin/fortiq-service"
 chmod 0755 "${STAGE_DIR}/usr/bin/fortiq-service"
+
+if [[ -f "${CLI_PATH}" ]]; then
+    cp -f "${CLI_PATH}" "${STAGE_DIR}/usr/bin/fortiq"
+    chmod 0755 "${STAGE_DIR}/usr/bin/fortiq"
+fi
 
 cp -f "${SCRIPT_DIR}/fortiq.service" "${STAGE_DIR}/lib/systemd/system/fortiq.service"
 chmod 0644 "${STAGE_DIR}/lib/systemd/system/fortiq.service"

@@ -16,7 +16,7 @@
 - Milestone 11: Local daemon IPC server (Windows Named Pipes, Unix Domain Sockets) and dual-mode Tauri desktop client (`fortiq-desktop`) with strict Thin Client / Fat Daemon separation, live P2P swarm commands, honest UI states, and real remote ticket closure.
 - Milestone 12: Windows ConPTY and Unix PTY terminal integration (`portable-pty`) with binary framing (`ShellFrame`), dedicated terminal IPC pipe/socket forwarding, and frontend `@xterm/xterm` stream handling in Tauri.
 - Milestone 13: System service installation/packaging (`systemd` unit on Linux, Windows Service Control Manager wrapper via `windows-service`) and end-to-end multi-platform automated validation tests (`e2e_two_nodes`).
-- Milestone 14: Production packaging (Debian `.deb` package builder for `fortiq-service` with `systemd` integration, Tauri bundle NSIS/MSI/deb configuration for `fortiq-desktop`, and multi-platform GitHub Actions release automation).
+- Milestone 14: Productization & Testable Product (dedicated lightweight `fortiq` CLI binary with raw-mode terminal and thin IPC forwarding; complete Windows installer packaging with `install.ps1`, `uninstall.ps1`, and service automation; Debian package builder including both `fortiq-service` and `fortiq` CLI; live OVH VPS relay integration; standalone distribution bundling in `scripts/build_windows_dist.ps1`; and step-by-step verification guide in `docs/manual-test.md`).
 
 ## WSL to VPS smoke test
 

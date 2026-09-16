@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "apps/fortiq-service",
+    "apps/fortiq-cli",
     "crates/fortiq-core",
     "crates/fortiq-p2p",
     "crates/fortiq-shell",
@@ -19,6 +20,7 @@ rust-version = "1.81"
 [workspace.dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.29"
 futures = "0.3"
 libp2p = { version = "0.56", features = ["dcutr", "identify", "json", "macros", "noise", "ping", "quic", "relay", "rendezvous", "request-response", "tokio", "yamux"] }
 libp2p-stream = "0.4.0-alpha"

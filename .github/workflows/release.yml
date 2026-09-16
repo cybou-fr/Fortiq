@@ -27,12 +27,12 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build Release Binary
-        run: cargo build --release --target ${{ matrix.target }} -p fortiq-service
+        run: cargo build --release --target ${{ matrix.target }} -p fortiq-service -p fortiq-cli
 
       - name: Package Binary (Linux)
         if: runner.os == 'Linux'
         run: |
-          tar -czf ${{ matrix.asset_name }} -C target/${{ matrix.target }}/release ${{ matrix.bin_name }}
+          tar -czf ${{ matrix.asset_name }} -C target/${{ matrix.target }}/release fortiq-service fortiq
           chmod +x packaging/linux/build_deb.sh
           VERSION="${GITHUB_REF_NAME#v}"
           ./packaging/linux/build_deb.sh "${VERSION}" "${{ matrix.target }}"
@@ -40,7 +40,7 @@ jobs:
       - name: Package Binary (Windows)
         if: runner.os == 'Windows'
         run: |
-          Compress-Archive -Path target\${{ matrix.target }}\release\${{ matrix.bin_name }} -DestinationPath ${{ matrix.asset_name }}
+          Compress-Archive -Path target\${{ matrix.target }}\release\fortiq-service.exe, target\${{ matrix.target }}\release\fortiq.exe, packaging\windows\install.ps1, packaging\windows\uninstall.ps1, packaging\windows\fortiq.toml.example -DestinationPath ${{ matrix.asset_name }}
 
       - name: Upload Service Release Assets
         uses: softprops/action-gh-release@v2

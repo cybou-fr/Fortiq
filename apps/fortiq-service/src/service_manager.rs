@@ -292,12 +292,9 @@ pub mod windows {
 
 #[cfg(unix)]
 pub mod unix {
-    use super::{SERVICE_DESCRIPTION, SERVICE_NAME};
+    use super::SERVICE_DESCRIPTION;
     use anyhow::{Context, Result};
-    use std::{
-        path::{Path, PathBuf},
-        process::Command,
-    };
+    use std::{path::Path, process::Command};
 
     const SYSTEMD_UNIT_PATH: &str = "/etc/systemd/system/fortiq.service";
 
