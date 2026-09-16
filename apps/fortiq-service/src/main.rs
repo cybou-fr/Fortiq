@@ -139,22 +139,7 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
 
     tracing::info!("FORTIQ Service starting: mode={mode}, peer_id={peer_id}");
 
-    // Lab and infrastructure nodes (our relay VPS, the WSL test peer) opt in
-    // locally to staying reachable across restarts. The flag lives in this
-    // machine's own config: an operator can never set it remotely, and a client
-    // machine leaves it off so the ticket stays the user's consent gesture.
-    if config.ticket.auto_open {
-        if mode != NodeMode::Managed {
-            tracing::warn!("ticket.auto_open ignored: tickets exist only on managed nodes");
-        } else {
-            match ticket_store.open().await {
-                Ok(ticket) => {
-                    tracing::info!(ticket_id = %ticket.id, "ticket auto-opened at service start")
-                }
-                Err(error) => tracing::warn!(%error, "failed to auto-open ticket at start"),
-            }
-        }
-    }
+    maybe_auto_open_ticket(&config, &ticket_store, mode).await;
 
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
     let local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
@@ -272,6 +257,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
 
     let (p2p_cmd_tx, p2p_cmd_rx) = tokio::sync::mpsc::channel(32);
 
+    let auto_open_store = ticket_store.clone();
     let ipc_state = Arc::new(ipc_server::IpcState {
         config: config.clone(),
         peer_id,
@@ -285,6 +271,8 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
         }
     });
 
+    maybe_auto_open_ticket(&config, &auto_open_store, mode).await;
+
     let options = RunOptions {
         config,
         listen_address,
@@ -295,6 +283,29 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
         command_receiver: Some(p2p_cmd_rx),
     };
     fortiq_p2p::run(keypair, local_info, options).await
+}
+
+/// Opens this node's ticket at start when its own config asks for it.
+///
+/// Lab and infrastructure nodes (our relay VPS, the WSL test peer) opt in
+/// locally to staying reachable across restarts. The flag lives in this
+/// machine's own config: an operator can never set it remotely, and a client
+/// machine leaves it off so the ticket stays the user's consent gesture.
+///
+/// Both daemon entry points call this: `async_main` serves systemd, while
+/// `run_daemon` serves the Windows service.
+async fn maybe_auto_open_ticket(config: &Config, ticket_store: &TicketStore, mode: NodeMode) {
+    if !config.ticket.auto_open {
+        return;
+    }
+    if mode != NodeMode::Managed {
+        tracing::warn!("ticket.auto_open ignored: tickets exist only on managed nodes");
+        return;
+    }
+    match ticket_store.open().await {
+        Ok(ticket) => tracing::info!(ticket_id = %ticket.id, "ticket auto-opened at service start"),
+        Err(error) => tracing::warn!(%error, "failed to auto-open ticket at start"),
+    }
 }
 
 fn listen_multiaddr(value: &str) -> Result<Multiaddr> {
