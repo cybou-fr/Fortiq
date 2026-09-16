@@ -51,6 +51,11 @@ impl Config {
                 .parse::<libp2p::Multiaddr>()
                 .context("network.relay_peer is not a valid libp2p Multiaddr")?;
         }
+        if let Some(address) = &self.network.public_addr {
+            address
+                .parse::<libp2p::Multiaddr>()
+                .context("network.public_addr is not a valid libp2p Multiaddr")?;
+        }
         Ok(())
     }
 
@@ -97,6 +102,7 @@ pub struct NetworkConfig {
     #[serde(default = "default_listen_quic")]
     pub listen_quic: String,
     pub relay_peer: Option<String>,
+    pub public_addr: Option<String>,
 }
 
 impl Default for NetworkConfig {
@@ -104,6 +110,7 @@ impl Default for NetworkConfig {
         Self {
             listen_quic: default_listen_quic(),
             relay_peer: None,
+            public_addr: None,
         }
     }
 }
@@ -319,5 +326,19 @@ mod tests {
         assert_eq!(closed.id, opened.id);
         assert_eq!(closed.state, TicketState::Closed);
         assert!(!reloaded.is_open().await.unwrap());
+    }
+
+    #[test]
+    fn valid_public_addr_passes_validation() {
+        let mut cfg = config(None);
+        cfg.network.public_addr = Some("/ip4/203.0.113.1/udp/4001/quic-v1".to_owned());
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn invalid_public_addr_fails_validation() {
+        let mut cfg = config(None);
+        cfg.network.public_addr = Some("not-a-multiaddr".to_owned());
+        assert!(cfg.validate().is_err());
     }
 }

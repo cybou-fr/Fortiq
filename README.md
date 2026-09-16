@@ -58,7 +58,7 @@ cargo run -p fortiq-service -- --config operator.toml \
   --shell 12D3KooW_TARGET
 ```
 
-For a non-interactive smoke test, add `--command 'whoami; hostname; uname -a; pwd'`. Managed peers refuse the `--shell` option locally, and the receiving peer rejects every authenticated PeerId except its configured operator.
+For a non-interactive smoke test, add `--command 'whoami; hostname; uname -a; pwd'`. Managed peers refuse the `--shell` option locally, and the receiving peer rejects every authenticated PeerId except its configured operator. Only one concurrent shell session is permitted per managed peer.
 
 The operator closes the managed peer's ticket over the authenticated P2P connection:
 
@@ -68,7 +68,7 @@ cargo run -p fortiq-service -- --config operator.toml ticket close \
   --dial /ip4/127.0.0.1/udp/4002/quic-v1/p2p/12D3KooW_TARGET
 ```
 
-After closure, new shell streams are rejected. By default, the ticket is stored beside the identity as `<identity-name>.ticket.json`; `[ticket] path = "..."` overrides that location.
+If an active shell session is currently open, `ticket close` is rejected. The workflow is `exit shell -> ticket close -> CLOSED`. After closure, new shell streams are rejected. By default, the ticket is stored beside the identity as `<identity-name>.ticket.json`; `[ticket] path = "..."` overrides that location.
 
 This milestone uses ordinary pipes, not a PTY. Full-screen terminal applications and job-control behavior are therefore deferred.
 
@@ -79,12 +79,16 @@ On Windows, the managed peer selects `pwsh.exe`, then `powershell.exe`, then `cm
 Any ordinary FORTIQ peer can provide rendezvous by setting:
 
 ```toml
+[network]
+# Optional explicit public address for VPS/public nodes:
+public_addr = "/ip4/203.0.113.10/udp/4001/quic-v1"
+
 [capabilities]
 rendezvous = true
 relay = false
 ```
 
-Peers dial it with the existing `--dial <multiaddr>` option. They register their authenticated peer record and current listen addresses in the `fortiq` namespace, then discover existing registrations. Discovered PeerIds and QUIC addresses are printed. Rendezvous capability does not grant administrative authority.
+Peers dial it with the existing `--dial <multiaddr>` option. They register their authenticated peer record and current listen addresses in the `fortiq` namespace, then discover existing registrations. If an operator requests a `--shell <TARGET_PEER>`, discovering that target via rendezvous automatically initiates dialing its discovered address. Rendezvous capability does not grant administrative authority.
 
 ## Circuit Relay v2
 

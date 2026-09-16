@@ -18,7 +18,11 @@ Milestones 0–10 use direct QUIC connections with optional rendezvous discovery
 
 Administrative authorization is local to the receiving managed peer. `is_authorized_operator` accepts only the authenticated libp2p remote PeerId and compares it with the configured `authorization.operator_peer_id`. It always denies on an operator-mode node because that node has no configured remote operator.
 
-Each managed peer persists one minimal ticket containing an ID and `OPEN`/`CLOSED` state. Opening is a local support action. Closing is an authenticated `/fortiq/ticket/1.0` request accepted only from the configured operator. Shell admission reads the current persisted state and requires both authorization conditions.
+Each managed peer persists one minimal ticket containing an ID and `OPEN`/`CLOSED` state. Opening is a local support action. Closing is an authenticated `/fortiq/ticket/1.0` request accepted only from the configured operator. Shell admission reads the current persisted state and requires both authorization conditions. To prevent race conditions and ensure that a closed ticket means zero active access without forcibly terminating running tasks, the managed node permits only one concurrent shell session and rejects ticket close requests while that session is active (`exit shell -> ticket close -> CLOSED`).
+
+Network and protocol validation errors (such as mismatched claimed PeerId in HELLO or ticket persistence issues) are isolated: they log warnings and reject the offending request, but never terminate the swarm event loop.
+
+Nodes can configure an explicit `network.public_addr` to avoid advertising internal, loopback, or WSL-private addresses to peers and rendezvous. When an operator node discovers the requested target peer via rendezvous, it automatically initiates dialing to the discovered addresses.
 
 Rendezvous is an optional networking capability independent from operator/managed mode. A capable peer serves the standard libp2p rendezvous protocol; connected peers register and discover within the `fortiq` namespace. No DHT or public IPFS network is involved.
 

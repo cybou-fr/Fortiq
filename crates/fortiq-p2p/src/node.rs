@@ -1,4 +1,10 @@
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use anyhow::{Context, Result};
 use fortiq_core::{is_authorized_operator, Config, NodeInfo, TicketStore};
@@ -17,6 +23,14 @@ pub const SHELL_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/shell/1.
 pub const TICKET_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/ticket/1.0");
 const MAX_HELLO_BYTES: usize = 16 * 1024;
 
+struct ShellSessionGuard(Arc<AtomicBool>);
+
+impl Drop for ShellSessionGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 pub struct RunOptions {
     pub config: Config,
     pub listen_address: Multiaddr,
@@ -33,6 +47,7 @@ struct EventOptions {
     shell_command: Option<String>,
     close_ticket_peer: Option<PeerId>,
     ticket_store: TicketStore,
+    active_shells: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +143,14 @@ pub async fn run(
         .listen_on(listen_address)
         .context("failed to listen on QUIC address")?;
 
+    if let Some(public_address) = config.network.public_addr.as_deref() {
+        let public_address: Multiaddr = public_address
+            .parse()
+            .context("network.public_addr is invalid")?;
+        info!(address = %public_address, "adding configured public address");
+        swarm.add_external_address(public_address);
+    }
+
     if let Some(relay_address) = config.network.relay_peer.as_deref() {
         let relay_address: Multiaddr = relay_address
             .parse()
@@ -151,6 +174,7 @@ pub async fn run(
         .context("shell protocol already registered")?;
 
     let ticket_store = TicketStore::new(config.ticket_path());
+    let active_shells = Arc::new(AtomicBool::new(false));
     let event_options = EventOptions {
         local_info,
         config,
@@ -158,6 +182,7 @@ pub async fn run(
         shell_command,
         close_ticket_peer,
         ticket_store,
+        active_shells,
     };
     event_loop(&mut swarm, incoming_shells, shell_control, event_options).await
 }
@@ -175,9 +200,11 @@ async fn event_loop(
         shell_command,
         close_ticket_peer,
         ticket_store,
+        active_shells,
     } = options;
     let (shell_result_sender, mut shell_result_receiver) = tokio::sync::mpsc::channel(1);
     let mut shell_started = false;
+    let target_peer = shell_peer.or(close_ticket_peer);
 
     loop {
         tokio::select! {
@@ -186,22 +213,41 @@ async fn event_loop(
                 return Ok(());
             }
             Some((remote_peer, stream)) = incoming_shells.next() => {
-                let allowed = is_authorized_operator(remote_peer, &config)
-                    && ticket_store.is_open().await?;
+                let ticket_open = ticket_store.is_open().await.unwrap_or_else(|error| {
+                    warn!(%error, "failed to check ticket state; denying shell");
+                    false
+                });
+                let authorized = is_authorized_operator(remote_peer, &config) && ticket_open;
                 let mut stream = stream;
-                if let Err(error) = fortiq_shell::send_authorization(&mut stream, allowed).await {
-                    warn!(remote_peer_id = %remote_peer, %error, "failed to send shell authorization result");
+
+                if !authorized {
+                    warn!(remote_peer_id = %remote_peer, "denied shell from unauthorized peer or closed ticket");
+                    let _ = fortiq_shell::send_authorization(&mut stream, false).await;
+                    drop(stream);
                     continue;
                 }
-                if !allowed {
-                    warn!(remote_peer_id = %remote_peer, "denied shell from unauthorized peer");
+
+                if active_shells
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_err()
+                {
+                    warn!(remote_peer_id = %remote_peer, "denied shell: another shell session is already active");
+                    let _ = fortiq_shell::send_authorization(&mut stream, false).await;
                     drop(stream);
+                    continue;
+                }
+
+                if let Err(error) = fortiq_shell::send_authorization(&mut stream, true).await {
+                    warn!(remote_peer_id = %remote_peer, %error, "failed to send shell authorization result");
+                    active_shells.store(false, Ordering::SeqCst);
                     continue;
                 }
 
                 info!(remote_peer_id = %remote_peer, "accepted authorized shell");
                 let info = local_info.clone();
+                let shells_flag = active_shells.clone();
                 tokio::spawn(async move {
+                    let _guard = ShellSessionGuard(shells_flag);
                     if let Err(error) = fortiq_shell::serve(stream, info).await {
                         warn!(remote_peer_id = %remote_peer, %error, "shell session failed");
                     }
@@ -212,7 +258,6 @@ async fn event_loop(
             }
             event = swarm.select_next_some() => match event {
                 libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
-                    swarm.add_external_address(address.clone());
                     let has_local_peer_id = matches!(
                         address.iter().last(),
                         Some(libp2p::multiaddr::Protocol::P2p(peer)) if peer == *swarm.local_peer_id()
@@ -256,7 +301,7 @@ async fn event_loop(
                     }
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::Hello(event)) => {
-                    handle_hello(event, swarm, &local_info)?;
+                    handle_hello(event, swarm, &local_info);
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::Ticket(event)) => {
                     handle_ticket(
@@ -264,11 +309,12 @@ async fn event_loop(
                         swarm,
                         &config,
                         &ticket_store,
+                        &active_shells,
                         &shell_result_sender,
-                    ).await?;
+                    ).await;
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::RendezvousClient(event)) => {
-                    handle_rendezvous_client(event, swarm.local_peer_id());
+                    handle_rendezvous_client(event, swarm, target_peer);
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::RendezvousServer(event)) => {
                     handle_rendezvous_server(event);
@@ -343,7 +389,11 @@ async fn event_loop(
     }
 }
 
-fn handle_rendezvous_client(event: rendezvous::client::Event, local_peer_id: &PeerId) {
+fn handle_rendezvous_client(
+    event: rendezvous::client::Event,
+    swarm: &mut Swarm<Behaviour>,
+    target_peer: Option<PeerId>,
+) {
     match event {
         rendezvous::client::Event::Registered {
             rendezvous_node,
@@ -359,13 +409,24 @@ fn handle_rendezvous_client(event: rendezvous::client::Event, local_peer_id: &Pe
         } => {
             for registration in registrations {
                 let peer_id = registration.record.peer_id();
-                if &peer_id == local_peer_id {
+                if &peer_id == swarm.local_peer_id() {
                     continue;
                 }
                 let addresses = registration.record.addresses();
                 println!("Rendezvous discovered peer: {peer_id}");
                 for address in addresses {
                     println!("  {address}/p2p/{peer_id}");
+                }
+                if Some(peer_id) == target_peer {
+                    info!(%peer_id, "discovered requested target peer; initiating dial");
+                    println!("Auto-dialing discovered target peer: {peer_id}");
+                    for address in addresses {
+                        let mut dial_address = address.clone();
+                        dial_address.push(libp2p::multiaddr::Protocol::P2p(peer_id));
+                        if let Err(error) = swarm.dial(dial_address.clone()) {
+                            warn!(address = %dial_address, %error, "failed to dial discovered address");
+                        }
+                    }
                 }
             }
             info!(%rendezvous_node, "rendezvous discovery completed");
@@ -421,8 +482,9 @@ async fn handle_ticket(
     swarm: &mut Swarm<Behaviour>,
     config: &Config,
     ticket_store: &TicketStore,
+    active_shells: &Arc<AtomicBool>,
     completion: &tokio::sync::mpsc::Sender<Result<()>>,
-) -> Result<()> {
+) {
     match event {
         request_response::Event::Message { peer, message, .. } => match message {
             request_response::Message::Request {
@@ -436,26 +498,42 @@ async fn handle_ticket(
                         success: false,
                         message: "authenticated peer is not the configured operator".to_owned(),
                     }
+                } else if active_shells.load(Ordering::SeqCst) {
+                    warn!(remote_peer_id = %peer, "rejected ticket close: active shell session in progress");
+                    TicketResponse {
+                        success: false,
+                        message: "cannot close ticket while shell session is active".to_owned(),
+                    }
                 } else {
-                    match ticket_store.close().await? {
-                        Some(ticket) => {
+                    match ticket_store.close().await {
+                        Ok(Some(ticket)) => {
                             info!(remote_peer_id = %peer, ticket_id = %ticket.id, "ticket closed");
                             TicketResponse {
                                 success: true,
                                 message: format!("ticket {} closed", ticket.id),
                             }
                         }
-                        None => TicketResponse {
+                        Ok(None) => TicketResponse {
                             success: false,
                             message: "no ticket exists".to_owned(),
                         },
+                        Err(error) => {
+                            warn!(remote_peer_id = %peer, %error, "failed to close ticket");
+                            TicketResponse {
+                                success: false,
+                                message: "internal error closing ticket".to_owned(),
+                            }
+                        }
                     }
                 };
-                swarm
+                if swarm
                     .behaviour_mut()
                     .ticket
                     .send_response(channel, response)
-                    .map_err(|_| anyhow::anyhow!("ticket response connection closed"))?;
+                    .is_err()
+                {
+                    warn!(remote_peer_id = %peer, "ticket response connection closed before sending");
+                }
             }
             request_response::Message::Response { response, .. } => {
                 if response.success {
@@ -482,29 +560,37 @@ async fn handle_ticket(
             info!(remote_peer_id = %peer, "ticket response sent");
         }
     }
-    Ok(())
 }
 
 fn handle_hello(
     event: request_response::Event<HelloRequest, HelloResponse>,
     swarm: &mut Swarm<Behaviour>,
     local_info: &NodeInfo,
-) -> Result<()> {
+) {
     match event {
         request_response::Event::Message { peer, message, .. } => match message {
             request_response::Message::Request {
                 request, channel, ..
             } => {
-                validate_hello(&peer, &request.0)?;
+                if let Err(error) = validate_hello(&peer, &request.0) {
+                    warn!(remote_peer_id = %peer, %error, "rejected invalid HELLO request");
+                    return;
+                }
                 print_remote_hello(&peer, &request.0);
-                swarm
+                if swarm
                     .behaviour_mut()
                     .hello
                     .send_response(channel, HelloResponse(local_info.clone()))
-                    .map_err(|_| anyhow::anyhow!("HELLO response connection closed"))?;
+                    .is_err()
+                {
+                    warn!(remote_peer_id = %peer, "HELLO response connection closed before sending");
+                }
             }
             request_response::Message::Response { response, .. } => {
-                validate_hello(&peer, &response.0)?;
+                if let Err(error) = validate_hello(&peer, &response.0) {
+                    warn!(remote_peer_id = %peer, %error, "rejected invalid HELLO response");
+                    return;
+                }
                 print_remote_hello(&peer, &response.0);
             }
         },
@@ -518,7 +604,6 @@ fn handle_hello(
             info!(remote_peer_id = %peer, "HELLO response sent");
         }
     }
-    Ok(())
 }
 
 fn validate_hello(authenticated_peer: &PeerId, info: &NodeInfo) -> Result<()> {
@@ -546,4 +631,54 @@ fn print_remote_hello(peer: &PeerId, info: &NodeInfo) {
     println!("remote_os = {}", info.os);
     println!("remote_arch = {}", info.arch);
     println!("remote_version = {}", info.version);
+}
+
+#[cfg(test)]
+mod tests {
+    use fortiq_core::NodeMode;
+
+    use super::*;
+
+    #[test]
+    fn validate_hello_accepts_matching_peer_id() {
+        let peer_id = PeerId::random();
+        let info = NodeInfo::local(peer_id, "node".to_owned(), NodeMode::Operator);
+        assert!(validate_hello(&peer_id, &info).is_ok());
+    }
+
+    #[test]
+    fn validate_hello_rejects_mismatched_peer_id() {
+        let auth_peer = PeerId::random();
+        let claimed_peer = PeerId::random();
+        let info = NodeInfo::local(claimed_peer, "node".to_owned(), NodeMode::Operator);
+        let error = validate_hello(&auth_peer, &info).unwrap_err();
+        assert!(error.to_string().contains("HELLO PeerId mismatch"));
+    }
+
+    #[test]
+    fn single_active_shell_enforced_by_atomic_and_guard() {
+        let active = Arc::new(AtomicBool::new(false));
+
+        // First session succeeds
+        assert!(active
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok());
+
+        // Second concurrent session is rejected
+        assert!(active
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err());
+
+        // Guard drops and resets active flag
+        {
+            let _guard = ShellSessionGuard(active.clone());
+            assert!(active.load(Ordering::SeqCst));
+        }
+        assert!(!active.load(Ordering::SeqCst));
+
+        // New session can now be acquired
+        assert!(active
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok());
+    }
 }

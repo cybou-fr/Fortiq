@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "apps/fortiq-desktop/src-tauri",
     "apps/fortiq-service",
     "crates/fortiq-core",
     "crates/fortiq-p2p",
