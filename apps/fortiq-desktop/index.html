@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/src/assets/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FORTIQ Remote Support</title>
+    <title>FORTIQ — Support &amp; Supervision Souveraine</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
@@ -12,60 +12,67 @@
       <!-- Sidebar Navigation -->
       <aside class="sidebar">
         <div class="brand">
-          <img src="/src/assets/logo.png" alt="FORTIQ Logo" class="brand-logo" />
+          <img src="/src/assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
           <div class="brand-text">
             <span class="brand-title">FORTIQ</span>
-            <span id="brand-mode" class="brand-subtitle">Remote Support</span>
+            <span id="brand-mode" class="brand-subtitle">OPERATOR CONSOLE</span>
           </div>
         </div>
 
         <nav class="nav-menu">
           <button class="nav-item active" data-tab="tickets">
-            <span class="nav-icon">📋</span>
+            <i class="ph ph-ticket nav-icon"></i>
             <span>Tickets</span>
           </button>
           <button class="nav-item" data-tab="peers">
-            <span class="nav-icon">💻</span>
-            <span>Peers</span>
+            <i class="ph ph-desktop nav-icon"></i>
+            <span>Postes &amp; Équipements</span>
           </button>
           <button class="nav-item" data-tab="settings">
-            <span class="nav-icon">⚙️</span>
-            <span>Settings</span>
+            <i class="ph ph-gear nav-icon"></i>
+            <span>Paramètres</span>
           </button>
         </nav>
+
+        <div class="sidebar-mode-switcher">
+          <button id="btn-toggle-mode" class="btn-mode-toggle" title="Basculer entre la console Opérateur et la vue Client Managé">
+            <i class="ph ph-swap"></i>
+            <span id="toggle-mode-label">Vue: Opérateur</span>
+          </button>
+        </div>
 
         <div class="sidebar-footer">
           <div class="user-badge">
             <span class="status-dot online"></span>
             <div class="user-info">
-              <span id="user-role" class="user-role">Operator</span>
-              <span id="agent-state" class="user-state">Online</span>
+              <span id="user-role" class="user-role">OPERATEUR</span>
+              <span id="agent-state" class="user-state">En Ligne (P2P)</span>
             </div>
           </div>
         </div>
       </aside>
 
-      <!-- Main Content Area -->
-      <main class="main-layout">
+      <!-- Main Content Area: Operator Console (3 Panels) -->
+      <main id="operator-view" class="main-layout">
         <!-- Panel 1: Tickets List -->
         <section class="panel panel-list">
           <div class="panel-header">
-            <h2>Tickets</h2>
+            <h2>Tickets Ouverts</h2>
             <div class="panel-actions">
-              <span class="badge open">1 Active</span>
+              <span id="tickets-count-badge" class="badge open">1 Actif</span>
             </div>
           </div>
-          <div class="ticket-list">
-            <div class="ticket-card active">
+          <div class="ticket-list" id="operator-ticket-list">
+            <div class="ticket-card active" id="sample-ticket-card">
               <div class="ticket-card-header">
-                <span class="ticket-badge open">OPEN</span>
-                <span class="ticket-id">#FT-7842</span>
+                <span class="ticket-badge open">OUVERT</span>
+                <span class="ticket-id" id="card-ticket-id">#FT-7842</span>
               </div>
-              <div class="ticket-card-title">Remote Administration Request</div>
+              <div class="ticket-card-title">Demande de Dépannage Réseau</div>
               <div class="ticket-card-meta">
                 <span>OFFICE-PC-01</span>
                 <span>•</span>
-                <span>Just now</span>
+                <span>À l'instant</span>
               </div>
             </div>
           </div>
@@ -75,41 +82,44 @@
         <section class="panel panel-detail">
           <div class="panel-header">
             <div>
-              <h2>Ticket #FT-7842</h2>
-              <span class="panel-subtitle">Session Details</span>
+              <h2 id="detail-ticket-title">Ticket #FT-7842</h2>
+              <span class="panel-subtitle">Détails de Session Distante</span>
             </div>
-            <button id="btn-close-ticket" class="btn btn-secondary">Close Ticket</button>
+            <button id="btn-close-ticket" class="btn btn-secondary">Clôturer Ticket</button>
           </div>
 
           <div class="detail-card">
             <div class="detail-row">
-              <span class="detail-label">Peer Hostname</span>
+              <span class="detail-label">Poste Client (Hostname)</span>
               <span class="detail-value">OFFICE-PC-01</span>
             </div>
             <div class="detail-row">
-              <span class="detail-label">Peer ID</span>
-              <span class="detail-value code">12D3KooWSx8m...9aZ</span>
+              <span class="detail-label">Peer ID Client</span>
+              <span class="detail-value code" id="detail-peer-id">12D3KooWSx8m9zY24kLPq9aZ</span>
             </div>
             <div class="detail-row">
-              <span class="detail-label">Operating System</span>
+              <span class="detail-label">Système d'Exploitation</span>
               <span class="detail-value">Windows 11 Pro (x86_64)</span>
             </div>
             <div class="detail-row">
-              <span class="detail-label">Shell Engine</span>
+              <span class="detail-label">Moteur de Shell Détecté</span>
               <span class="detail-value">PowerShell (pwsh.exe)</span>
             </div>
             <div class="detail-row">
-              <span class="detail-label">Transport</span>
-              <span class="detail-value"><span class="badge transport">QUIC DIRECT</span></span>
+              <span class="detail-label">Transport Réseau</span>
+              <span class="detail-value"><span class="badge transport">QUIC DIRECT P2P</span></span>
             </div>
             <div class="detail-row">
-              <span class="detail-label">Status</span>
-              <span class="detail-value"><span class="badge online">Connected</span></span>
+              <span class="detail-label">État de Connexion</span>
+              <span class="detail-value"><span class="badge online" id="detail-connection-badge">Connecté &amp; Prêt</span></span>
             </div>
           </div>
 
           <div class="detail-actions">
-            <button id="btn-connect" class="btn btn-primary">Connect Terminal</button>
+            <button id="btn-connect" class="btn btn-primary">
+              <i class="ph ph-terminal-window"></i>
+              <span>Ouvrir Terminal d'Assistance</span>
+            </button>
           </div>
         </section>
 
@@ -121,23 +131,93 @@
               <span>Terminal — OFFICE-PC-01</span>
             </div>
             <div class="terminal-actions">
-              <button class="btn-icon" title="Clear">🧹</button>
-              <button class="btn-icon" title="Fullscreen">⛶</button>
+              <button class="btn-icon" id="btn-term-clear" title="Effacer l'écran">
+                <i class="ph ph-trash"></i>
+              </button>
+              <button class="btn-icon" id="btn-term-fullscreen" title="Plein écran">
+                <i class="ph ph-corners-out"></i>
+              </button>
             </div>
           </div>
           <div class="terminal-body" id="terminal-view">
-            <div class="terminal-line banner">FORTIQ Remote Session (M10 QUIC)</div>
-            <div class="terminal-line banner">Host: OFFICE-PC-01 | Shell: pwsh.exe | Auth: OK</div>
+            <div class="terminal-line banner">FORTIQ Session SRE Distante (libp2p QUIC Direct)</div>
+            <div class="terminal-line banner">Cible: OFFICE-PC-01 | Shell: pwsh.exe | Authentification Ed25519: OK</div>
             <div class="terminal-line">&nbsp;</div>
             <div class="terminal-line prompt">PS C:\Users\support&gt; whoami</div>
-            <div class="terminal-line output">office-pc-01\administrator</div>
+            <div class="terminal-line output">office-pc-01\administrateur</div>
             <div class="terminal-line prompt">PS C:\Users\support&gt; Get-Service fortiq-service</div>
             <div class="terminal-line output">Status   Name               DisplayName</div>
             <div class="terminal-line output">------   ----               -----------</div>
-            <div class="terminal-line output">Running  fortiq-service     FORTIQ Remote Support Agent</div>
+            <div class="terminal-line output">Running  fortiq-service     FORTIQ Agent de Maintenance Souverain</div>
+            <div class="terminal-line prompt">PS C:\Users\support&gt; Test-NetConnection -Port 4001 -InformationLevel Quiet</div>
+            <div class="terminal-line output">True</div>
             <div class="terminal-line prompt">PS C:\Users\support&gt; <span class="cursor">_</span></div>
           </div>
         </section>
+      </main>
+
+      <!-- Main Content Area: Managed Support View (Minimalist Customer Card) -->
+      <main id="managed-view" class="managed-layout" style="display: none;">
+        <div class="managed-card">
+          <div class="managed-card-header">
+            <div class="managed-beacon">
+              <span class="status-dot online"></span>
+              <span class="managed-beacon-text">Service Agent Actif · Réseau P2P Sécurisé</span>
+            </div>
+            <span class="badge transport">SOUVERAIN</span>
+          </div>
+
+          <div class="managed-hero">
+            <div class="managed-icon-box">
+              <i class="ph ph-shield-check"></i>
+            </div>
+            <h2>Assistance Informatique FORTIQ</h2>
+            <p>
+              Votre poste de travail est protégé par notre agent souverain. En cas de besoin technique ou d'incident, ouvrez un ticket d'assistance en un clic pour autoriser votre technicien référent à intervenir.
+            </p>
+          </div>
+
+          <div id="managed-ticket-box" class="managed-ticket-box">
+            <!-- State 1: No open ticket -->
+            <div id="managed-state-closed" class="ticket-state-box">
+              <div class="ticket-state-prompt">
+                <i class="ph ph-shield-warning"></i>
+                <span>Aucune session distante n'est actuellement autorisée.</span>
+              </div>
+              <button id="btn-managed-open" class="btn btn-primary btn-lg btn-managed-action">
+                <i class="ph ph-ticket"></i>
+                <span>Ouvrir un Ticket de Support</span>
+              </button>
+            </div>
+
+            <!-- State 2: Ticket open -->
+            <div id="managed-state-open" class="ticket-state-box" style="display: none;">
+              <div class="ticket-active-badge">
+                <span class="ticket-badge open">TICKET ACTIF</span>
+                <span id="managed-ticket-id" class="ticket-id">#FT-7842</span>
+              </div>
+              <div class="ticket-waiting-msg">
+                <span class="pulse-ring"></span>
+                <span id="managed-session-status">En attente de prise en charge par votre technicien...</span>
+              </div>
+              <div class="ticket-managed-details">
+                <div class="detail-row">
+                  <span class="detail-label">Opérateur autorisé</span>
+                  <span id="managed-operator-id" class="detail-value code">12D3KooW_OPERATOR_REFERENT</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Sécurité &amp; Confidentialité</span>
+                  <span class="detail-value">Chiffrement direct Ed25519 · Zéro cloud intermédiaire</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="managed-security-footer">
+            <i class="ph ph-lock-key"></i>
+            <span>Conformité RGPD garantie. Vos données restent dans vos locaux. Aucun accès n'est possible sans ticket ouvert par vos soins.</span>
+          </div>
+        </div>
       </main>
     </div>
 

@@ -6,6 +6,9 @@ members = [
     "crates/fortiq-p2p",
     "crates/fortiq-shell",
 ]
+exclude = [
+    "apps/fortiq-desktop/src-tauri",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -23,7 +26,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3.14"
 thiserror = "2.0"
-tokio = { version = "1.41", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.41", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 toml = "0.9"
 tracing = "0.1"

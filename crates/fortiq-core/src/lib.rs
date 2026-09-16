@@ -4,6 +4,8 @@ use anyhow::{Context, Result};
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 
+pub mod ipc;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub node: NodeConfig,

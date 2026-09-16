@@ -13,6 +13,7 @@
 - Milestone 8: optional rendezvous server capability plus client registration/discovery in the private `fortiq` namespace.
 - Milestone 9: optional Circuit Relay v2 service, client reservations, relayed dialing, and shell operation through a relay.
 - Milestone 10: automatic DCUtR direct-upgrade attempts on relayed connections with explicit, non-disruptive relay fallback.
+- Milestone 11: Local daemon IPC server (Windows Named Pipes, Linux Unix Domain Sockets) and dual-mode Tauri desktop client (`fortiq-desktop`) presenting the 3-panel Operator Console and Managed support card with vector icons.
 
 ## WSL to VPS smoke test
 
@@ -25,7 +26,6 @@
 
 ## Planned Next
 
-- Milestone 11: Local daemon IPC server (Windows Named Pipes, Linux Unix Domain Sockets) and dual-mode Tauri desktop client (`fortiq-desktop`) presenting the 3-panel Operator Console and Managed support card.
 - Milestone 12: Windows ConPTY and Unix PTY terminal integration with frontend `xterm.js` stream handling.
 
 ## Explicitly deferred

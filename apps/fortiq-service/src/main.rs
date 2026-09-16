@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -6,6 +6,8 @@ use fortiq_core::{Config, NodeInfo, NodeMode, TicketState, TicketStore};
 use fortiq_p2p::{load_or_create_identity, IdentityStatus, RunOptions};
 use libp2p::{multiaddr::Protocol, Multiaddr};
 use tracing_subscriber::EnvFilter;
+
+mod ipc_server;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "FORTIQ peer service")]
@@ -145,6 +147,19 @@ async fn main() -> Result<()> {
 
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
     let local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
+
+    let ipc_state = Arc::new(ipc_server::IpcState {
+        config: config.clone(),
+        peer_id,
+        listen_addresses: vec![listen_address.to_string()],
+        ticket_store,
+    });
+    tokio::spawn(async move {
+        if let Err(e) = ipc_server::run_ipc_server(ipc_state).await {
+            tracing::warn!("Local IPC server finished with: {e}");
+        }
+    });
+
     let options = RunOptions {
         config,
         listen_address,
