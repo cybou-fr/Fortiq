@@ -208,6 +208,67 @@ impl PeerRegistry {
     }
 }
 
+/// Builds the ordered list of addresses to dial when reaching `peer`.
+///
+/// Direct addresses recorded from rendezvous or identify come first, then the
+/// relay circuit address, so a peer behind NAT stays reachable when every
+/// direct path fails. Addresses that already carry a `/p2p/<id>` component are
+/// used as-is: appending a second one produces a multiaddr libp2p rejects.
+fn dial_candidates(
+    peer: PeerId,
+    registry: &PeerRegistry,
+    relay_peer: Option<&str>,
+) -> Vec<Multiaddr> {
+    let mut candidates: Vec<Multiaddr> = Vec::new();
+
+    if let Some(known) = registry.peers.get(&peer) {
+        for addr in &known.addresses {
+            let has_peer_id = matches!(
+                addr.iter().last(),
+                Some(libp2p::multiaddr::Protocol::P2p(_))
+            );
+            let full = if has_peer_id {
+                addr.clone()
+            } else {
+                let mut full = addr.clone();
+                full.push(libp2p::multiaddr::Protocol::P2p(peer));
+                full
+            };
+            if !candidates.contains(&full) {
+                candidates.push(full);
+            }
+        }
+    }
+
+    if let Some(relay) = relay_peer.and_then(|value| value.parse::<Multiaddr>().ok()) {
+        let mut circuit = relay;
+        circuit.push(libp2p::multiaddr::Protocol::P2pCircuit);
+        circuit.push(libp2p::multiaddr::Protocol::P2p(peer));
+        if !candidates.contains(&circuit) {
+            candidates.push(circuit);
+        }
+    }
+
+    candidates
+}
+
+/// Dials every candidate address for `peer`, logging failures instead of
+/// discarding them: a silently dropped dial error used to surface only as a
+/// shell stream timeout twelve seconds later.
+fn dial_peer_candidates(
+    swarm: &mut Swarm<Behaviour>,
+    peer: PeerId,
+    registry: &PeerRegistry,
+    relay_peer: Option<&str>,
+) {
+    for address in dial_candidates(peer, registry, relay_peer) {
+        match swarm.dial(address.clone()) {
+            Ok(()) => info!(%address, remote_peer_id = %peer, "dialing peer"),
+            Err(error) => warn!(%address, remote_peer_id = %peer, %error, "dial attempt failed"),
+        }
+    }
+}
+
 pub struct RunOptions {
     pub config: Config,
     pub listen_address: Multiaddr,
@@ -414,6 +475,13 @@ async fn event_loop(
                             if let Err(error) = swarm.dial(addr.clone()) {
                                 warn!(%addr, %error, "failed to dial target for ticket close");
                             }
+                        } else if !swarm.is_connected(&peer) {
+                            dial_peer_candidates(
+                                swarm,
+                                peer,
+                                &peer_registry,
+                                config.network.relay_peer.as_deref(),
+                            );
                         }
                         let request_id = swarm.behaviour_mut().ticket.send_request(
                             &peer,
@@ -427,13 +495,12 @@ async fn event_loop(
                                 warn!(%addr, %error, "failed to dial target for shell stream");
                             }
                         } else if !swarm.is_connected(&peer) {
-                            if let Some(known_peer) = peer_registry.peers.get(&peer) {
-                                for addr in &known_peer.addresses {
-                                    let mut full = addr.clone();
-                                    full.push(libp2p::multiaddr::Protocol::P2p(peer));
-                                    let _ = swarm.dial(full);
-                                }
-                            }
+                            dial_peer_candidates(
+                                swarm,
+                                peer,
+                                &peer_registry,
+                                config.network.relay_peer.as_deref(),
+                            );
                         }
 
                         let mut control = shell_control.clone();
@@ -967,6 +1034,49 @@ mod tests {
         assert!(active
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok());
+    }
+
+    #[test]
+    fn dial_candidates_fall_back_to_the_relay_circuit() {
+        let mut registry = PeerRegistry::new();
+        let peer_id = PeerId::random();
+        let relay = "/ip4/203.0.113.9/udp/4001/quic-v1/p2p/12D3KooWRFrWVx2CANXcjXvTNaqkh6APgAecsW94CLwNEg5wsqLy";
+        registry.record_rendezvous(
+            peer_id,
+            &["/ip4/10.0.0.5/udp/4001/quic-v1".parse().unwrap()],
+        );
+
+        let candidates = dial_candidates(peer_id, &registry, Some(relay));
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates[0].to_string(),
+            format!("/ip4/10.0.0.5/udp/4001/quic-v1/p2p/{peer_id}")
+        );
+        assert_eq!(
+            candidates[1].to_string(),
+            format!("{relay}/p2p-circuit/p2p/{peer_id}")
+        );
+    }
+
+    #[test]
+    fn dial_candidates_do_not_append_a_second_peer_id() {
+        let mut registry = PeerRegistry::new();
+        let peer_id = PeerId::random();
+        registry.record_rendezvous(
+            peer_id,
+            &[format!("/ip4/10.0.0.5/udp/4001/quic-v1/p2p/{peer_id}")
+                .parse()
+                .unwrap()],
+        );
+
+        let candidates = dial_candidates(peer_id, &registry, None);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].to_string(),
+            format!("/ip4/10.0.0.5/udp/4001/quic-v1/p2p/{peer_id}")
+        );
     }
 
     #[test]
