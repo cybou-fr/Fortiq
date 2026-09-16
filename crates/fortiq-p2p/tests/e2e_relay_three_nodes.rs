@@ -51,12 +51,13 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         authorization: AuthorizationConfig::default(),
         network: NetworkConfig {
             listen_quic: format!("127.0.0.1:{relay_port}"),
-            public_addr: None,
+            public_addr: Some(format!("/ip4/127.0.0.1/udp/{relay_port}/quic-v1")),
             relay_peer: None,
         },
         capabilities: CapabilitiesConfig {
             rendezvous: true,
             relay: true,
+            dcutr: false,
         },
         ticket: TicketConfig::default(),
         ipc: fortiq_core::IpcConfig::default(),
@@ -97,7 +98,10 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
             public_addr: None,
             relay_peer: Some(relay_addr_str.clone()),
         },
-        capabilities: CapabilitiesConfig::default(),
+        capabilities: CapabilitiesConfig {
+            dcutr: false,
+            ..Default::default()
+        },
         ticket: TicketConfig {
             path: Some(managed_ticket_path.clone()),
             ..TicketConfig::default()
@@ -116,7 +120,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     let managed_options = RunOptions {
         config: managed_config,
         listen_address: managed_listen_addr,
-        dial_address: Some(relay_multiaddr.clone()),
+        dial_address: None,
         shell_peer: None,
         shell_command: None,
         close_ticket_peer: None,
@@ -137,7 +141,10 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
             public_addr: None,
             relay_peer: Some(relay_addr_str.clone()),
         },
-        capabilities: CapabilitiesConfig::default(),
+        capabilities: CapabilitiesConfig {
+            dcutr: false,
+            ..Default::default()
+        },
         ticket: TicketConfig::default(),
         ipc: fortiq_core::IpcConfig::default(),
     };
@@ -162,10 +169,11 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         command_receiver: Some(op_cmd_rx),
     };
 
-    // Start all 3 nodes
+    // Start all 3 nodes (give relay a moment to initialize before clients connect)
     let relay_handle = tokio::spawn(async move {
         let _ = fortiq_p2p::run(relay_keypair, relay_info, relay_options).await;
     });
+    tokio::time::sleep(Duration::from_millis(150)).await;
 
     let managed_handle = tokio::spawn(async move {
         let _ = fortiq_p2p::run(managed_keypair, managed_info, managed_options).await;
@@ -177,6 +185,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
 
     // Step A: Wait for Operator to discover Managed node via Rendezvous & Relay
     let mut discovered = false;
+    let mut discovered_peer = None;
     for _ in 0..50 {
         tokio::time::sleep(Duration::from_millis(200)).await;
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -186,10 +195,11 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
             .is_ok()
         {
             if let Ok(peers) = rx.await {
-                if let Some(_peer) = peers.iter().find(|p| {
+                if let Some(peer) = peers.iter().find(|p| {
                     p.peer_id == managed_peer_id.to_string() && p.hostname == "managed-node"
                 }) {
                     discovered = true;
+                    discovered_peer = Some(peer.clone());
                     break;
                 }
             }
@@ -198,6 +208,11 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     assert!(
         discovered,
         "Operator did not discover Managed node via Rendezvous/Relay"
+    );
+    let peer_summary = discovered_peer.expect("Managed peer summary must exist");
+    assert_eq!(
+        peer_summary.transport, "RELAY CIRCUIT",
+        "Transport must be strictly RELAY CIRCUIT without loopback fallback"
     );
 
     // Step B: Open first shell stream through relay & pending connection state machine
@@ -258,6 +273,20 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         got_output,
         "Did not receive shell output through relay stream"
     );
+
+    // Wait for clean EOF from remote shell process
+    for _ in 0..20 {
+        match tokio::time::timeout(
+            Duration::from_millis(200),
+            ShellFrame::read_from(&mut read_half),
+        )
+        .await
+        {
+            Ok(Ok(None)) => break,
+            Ok(Err(_)) => break,
+            _ => {}
+        }
+    }
     drop(read_half);
     drop(write_half);
 
@@ -286,7 +315,31 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         stream_res2.is_some(),
         "Second shell stream failed to open within retry window"
     );
-    drop(stream_res2);
+
+    let stream2 = stream_res2.unwrap();
+    let (mut read_half2, mut write_half2) = tokio::io::split(stream2.compat());
+
+    // Send exit\r\n and wait for EOF/clean exit before CloseTicket to respect server contract
+    ShellFrame::Data(b"exit\r\n".to_vec())
+        .write_to(&mut write_half2)
+        .await
+        .unwrap();
+
+    for _ in 0..20 {
+        match tokio::time::timeout(
+            Duration::from_millis(200),
+            ShellFrame::read_from(&mut read_half2),
+        )
+        .await
+        {
+            Ok(Ok(None)) => break,
+            Ok(Err(_)) => break,
+            _ => {}
+        }
+    }
+    drop(read_half2);
+    drop(write_half2);
+    tokio::time::sleep(Duration::from_millis(150)).await;
 
     // Step D: Remote ticket close via Relay once second shell exits
     let mut close_ok = false;

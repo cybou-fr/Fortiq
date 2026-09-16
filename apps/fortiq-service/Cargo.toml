@@ -30,3 +30,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_Security_Authorization",
 ] }
+
+[target.'cfg(not(windows))'.dependencies]
+rustix = { version = "0.38", features = ["process"] }
+

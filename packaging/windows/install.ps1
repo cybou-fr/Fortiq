@@ -175,6 +175,11 @@ New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 Get-ChildItem -LiteralPath $InstallDir -Filter "*.old-*" -File -ErrorAction SilentlyContinue |
     Remove-Item -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
+# Harden data directory ACL: restrict to SYSTEM (*S-1-5-18) and Administrators (*S-1-5-32-544),
+# stripping inherited unprivileged user read permissions from ProgramData.
+Invoke-NativeCommand -FailureMessage "Harden ProgramData ACL" -IgnoreExitCode -Command {
+    & icacls.exe $DataDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"
+}
 foreach ($file in $requiredFiles + @("install.ps1")) {
     $source = Join-Path $scriptDir $file
     if (Test-Path -LiteralPath $source) {

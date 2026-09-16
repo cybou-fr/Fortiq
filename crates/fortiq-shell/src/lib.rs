@@ -97,7 +97,12 @@ impl ShellFrame {
     ) -> std::io::Result<()> {
         match self {
             Self::Data(bytes) => {
-                let len = bytes.len() as u16;
+                let len = u16::try_from(bytes.len()).map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "shell frame data payload exceeds 65535 bytes",
+                    )
+                })?;
                 let mut header = [Self::TAG_DATA, 0, 0];
                 let len_bytes = len.to_be_bytes();
                 header[1] = len_bytes[0];
@@ -639,5 +644,65 @@ mod tests {
         assert!(client_res.unwrap().is_ok());
         let server_res = tokio::time::timeout(std::time::Duration::from_secs(5), server_task).await;
         println!("server_res: {:?}", server_res);
+    }
+
+    #[tokio::test]
+    async fn frame_data_payload_exceeding_u16_rejected() {
+        let (mut client, _server) = tokio::io::duplex(1024);
+        let oversized = vec![0u8; 65536];
+        let frame = ShellFrame::Data(oversized);
+        let res = frame.write_to(&mut client).await;
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn abandoned_session_releases_after_timeout() {
+        use tokio::io::AsyncReadExt;
+        use tokio_util::compat::TokioAsyncReadCompatExt;
+        let (mut client, server) = tokio::io::duplex(4096);
+        let mut server = server.compat();
+
+        let node_info = NodeInfo::local(
+            "12D3KooWD3XWsmNtAiqrmFmC6D5gY8QZk4T5D2xSm9R9aZg7kF8h"
+                .parse()
+                .unwrap(),
+            "abandoned-test-node".to_string(),
+            fortiq_core::NodeMode::Managed,
+        );
+
+        let active_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let flag_clone = active_flag.clone();
+
+        let server_task = tokio::spawn(async move {
+            send_authorization(&mut server, true).await.unwrap();
+            let res = serve(server, node_info).await;
+            flag_clone.store(false, std::sync::atomic::Ordering::SeqCst);
+            res
+        });
+
+        // Client reads the 1-byte authorization
+        let mut auth_byte = [0u8; 1];
+        client.read_exact(&mut auth_byte).await.unwrap();
+        assert_eq!(auth_byte[0], AUTHORIZED);
+
+        // Read the initial banner frame sent by server
+        let banner_frame = ShellFrame::read_from(&mut client).await.unwrap();
+        assert!(banner_frame.is_some());
+
+        // Now pause the clock and advance past LIVENESS_TIMEOUT (60s) without sending any client frame
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(65)).await;
+        tokio::time::resume();
+
+        let server_res = tokio::time::timeout(std::time::Duration::from_secs(5), server_task).await;
+        assert!(
+            server_res.is_ok(),
+            "server task should terminate within liveness timeout"
+        );
+        assert!(
+            !active_flag.load(std::sync::atomic::Ordering::SeqCst),
+            "session active flag must be released upon abandoned timeout"
+        );
     }
 }

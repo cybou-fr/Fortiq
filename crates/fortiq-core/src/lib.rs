@@ -210,12 +210,28 @@ fn default_listen_quic() -> String {
     "0.0.0.0:4001".to_owned()
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct CapabilitiesConfig {
     #[serde(default)]
     pub rendezvous: bool,
     #[serde(default)]
     pub relay: bool,
+    #[serde(default = "default_true")]
+    pub dcutr: bool,
+}
+
+impl Default for CapabilitiesConfig {
+    fn default() -> Self {
+        Self {
+            rendezvous: false,
+            relay: false,
+            dcutr: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

@@ -30,7 +30,19 @@ fn instance_lock_path() -> PathBuf {
     }
 
     #[cfg(not(windows))]
-    PathBuf::from("/run/fortiq-service.lock")
+    {
+        if rustix::process::geteuid().is_root() {
+            PathBuf::from("/run/fortiq-service.lock")
+        } else if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+            PathBuf::from(runtime_dir)
+                .join("fortiq")
+                .join("fortiq-service.lock")
+        } else {
+            std::env::temp_dir()
+                .join("fortiq")
+                .join("fortiq-service.lock")
+        }
+    }
 }
 
 fn acquire_instance_lock_at(path: &Path) -> Result<InstanceLock> {
@@ -404,5 +416,11 @@ mod tests {
         assert!(second.is_err());
         drop(first);
         assert!(acquire_instance_lock_at(&lock_path).is_ok());
+    }
+
+    #[test]
+    fn instance_lock_path_is_accessible() {
+        let p = instance_lock_path();
+        assert!(p.to_string_lossy().contains("fortiq-service.lock"));
     }
 }

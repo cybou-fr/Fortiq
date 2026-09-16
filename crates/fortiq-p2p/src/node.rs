@@ -391,7 +391,7 @@ struct Behaviour {
     rendezvous_server: Toggle<rendezvous::server::Behaviour>,
     relay_client: relay::client::Behaviour,
     relay_server: Toggle<relay::Behaviour>,
-    dcutr: dcutr::Behaviour,
+    dcutr: Toggle<dcutr::Behaviour>,
 }
 
 pub async fn run(
@@ -424,6 +424,7 @@ pub async fn run(
     let rendezvous_client_key = keypair.clone();
     let rendezvous_enabled = config.capabilities.rendezvous;
     let relay_enabled = config.capabilities.relay;
+    let dcutr_enabled = config.capabilities.dcutr;
     let mut swarm = SwarmBuilder::with_existing_identity(keypair)
         .with_tokio()
         .with_quic()
@@ -448,7 +449,9 @@ pub async fn run(
             relay_server: relay_enabled
                 .then(|| relay::Behaviour::new(local_peer_id, Default::default()))
                 .into(),
-            dcutr: dcutr::Behaviour::new(local_peer_id),
+            dcutr: dcutr_enabled
+                .then(|| dcutr::Behaviour::new(local_peer_id))
+                .into(),
         })?
         .with_swarm_config(|config| config.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
@@ -852,7 +855,14 @@ async fn event_loop(
                 )) => {
                     info!(remote_peer_id = %peer_id, protocol_version = %info.protocol_version, "identify received");
                     peer_registry.record_identify(peer_id, &info);
-                    swarm.add_external_address(info.observed_addr.clone());
+                    let is_loopback = info.observed_addr.iter().any(|proto| match proto {
+                        libp2p::multiaddr::Protocol::Ip4(ip) => ip.is_loopback(),
+                        libp2p::multiaddr::Protocol::Ip6(ip) => ip.is_loopback(),
+                        _ => false,
+                    });
+                    if !is_loopback && config.network.relay_peer.is_none() {
+                        swarm.add_external_address(info.observed_addr.clone());
+                    }
                     if info
                         .protocols
                         .iter()
@@ -879,6 +889,9 @@ async fn event_loop(
                     if let Err(error) = event.result {
                         warn!(remote_peer_id = %event.peer, %error, "ping failed");
                     }
+                }
+                libp2p::swarm::SwarmEvent::ListenerClosed { listener_id, reason, .. } => {
+                    info!(?listener_id, ?reason, "listener closed");
                 }
                 libp2p::swarm::SwarmEvent::ListenerError { listener_id, error } => {
                     warn!(?listener_id, %error, "listener failed");

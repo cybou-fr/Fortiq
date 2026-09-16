@@ -78,34 +78,48 @@ cargo run -p fortiq-service -- --config operator.toml \
 
 The peers authenticate through libp2p, negotiate `/fortiq/hello/1.0`, and print the remote PeerId and metadata. Press Ctrl+C for clean shutdown.
 
+## Architecture Overview
+
+FORTIQ follows a strict daemon / control-client architecture:
+- **`fortiq-service`**: Sovereign background daemon (systemd service on Linux, Windows Service on Windows). Manages P2P QUIC / Relay transports, identity keys, local support tickets, pseudoterminal allocation (ConPTY / PTY), and serves local IPC.
+- **`fortiq`**: Lightweight command-line client communicating with `fortiq-service` via local IPC (UNIX domain socket on Linux, Named Pipe on Windows).
+- **`fortiq-desktop`**: Desktop GUI console with system tray integration and embedded xterm.js terminal emulator.
+
+FORTIQ permits exactly one service instance per operating system.
+
 ## Remote shell & Terminal Streaming
 
-First, the user of the managed peer opens a local support ticket:
+Once the background service (`fortiq-service`) is running:
+
+1. The managed peer's user opens a local support ticket:
 
 ```bash
-cargo run -p fortiq-service -- --config managed.toml ticket open
-cargo run -p fortiq-service -- --config managed.toml ticket status
+fortiq ticket open
+fortiq ticket status
 ```
 
-After the managed peer is listening, the operator can open an interactive shell:
+2. The operator checks discovered peers and connects to the managed peer:
 
 ```bash
-cargo run -p fortiq-service -- --config operator.toml \
-  --dial /ip4/127.0.0.1/udp/4002/quic-v1/p2p/12D3KooW_TARGET \
-  --shell 12D3KooW_TARGET
+# List discovered peers and connection status
+fortiq peers
+
+# Open an interactive terminal session
+fortiq shell 12D3KooW_TARGET
+
+# Or execute a single non-interactive command
+fortiq shell 12D3KooW_TARGET --command "whoami; hostname; uptime"
 ```
 
-For a non-interactive smoke test, add `--command 'whoami; hostname; uname -a; pwd'`. Managed peers refuse the `--shell` option locally, and the receiving peer rejects every authenticated PeerId except its configured operator. Only one concurrent shell session is permitted per managed peer.
+Only the configured operator PeerId is authorized to open terminal sessions. Only one concurrent shell session is permitted per managed peer.
 
-The operator closes the managed peer's ticket over the authenticated P2P connection:
+3. The operator closes the managed peer's support ticket when intervention is complete:
 
 ```bash
-cargo run -p fortiq-service -- --config operator.toml ticket close \
-  --peer 12D3KooW_TARGET \
-  --dial /ip4/127.0.0.1/udp/4002/quic-v1/p2p/12D3KooW_TARGET
+fortiq ticket close 12D3KooW_TARGET
 ```
 
-If an active shell session is currently open, `ticket close` is rejected. The workflow is `exit shell -> ticket close -> CLOSED`. After closure, new shell streams are rejected. By default, the ticket is stored beside the identity as `<identity-name>.ticket.json`; `[ticket] path = "..."` overrides that location.
+If an active shell session is currently open, `ticket close` is rejected by the server (`cannot close ticket while shell session is active`). The contract is `exit shell -> ticket close -> CLOSED`. After closure, new shell streams are immediately rejected. By default, tickets are stored at `C:\ProgramData\FORTIQ\ticket.json` on Windows and `/var/lib/fortiq/ticket.json` on Linux.
 
 A node whose own config sets `[ticket] auto_open = true` opens its ticket when
 the service starts, surviving restarts and reboots. It is intended for lab and
@@ -263,4 +277,31 @@ for relay circuits, so a relay never sees plaintext. There is no separate
 per-session key for a ticket, chat or shell today, so sessions are not
 cryptographically isolated from one another beyond the transport.
 
-Identity files contain private keys and are ignored by Git. On Unix they are created with mode `0600`. Never copy an identity file between machines or expose its contents.
+Identity files contain private keys and are ignored by Git. On Unix they are created with mode `0600`. On Windows, `C:\ProgramData\FORTIQ` is strictly ACL-hardened to `SYSTEM` (`*S-1-5-18`) and `Administrators` (`*S-1-5-32-544`), blocking standard unprivileged user accounts from reading private key material. Never copy an identity file between machines or expose its contents.
+
+## Clean-Machine Install & Lifecycle Flow
+
+1. **Packaging & Deployment:**
+   - **Windows:** Run `FORTIQ-Client-Setup-<version>-x64.exe` (with required operator PeerId) or `FORTIQ-Operator-Setup-<version>-x64.exe`.
+   - **Linux:** Install `fortiq-service_<version>_amd64.deb` and start via `systemctl start fortiq`.
+2. **Initial Service Startup:**
+   - On first launch, the daemon inspects `[identity] path`. If absent, a new Ed25519 keypair is cryptographically generated and safely saved with restricted permissions.
+   - The daemon connects to the configured relay node, reserves a circuit slot, and registers its authenticated circuit address on the rendezvous point.
+3. **Session Lifecycle:**
+   - The managed user opens a ticket via GUI or `fortiq ticket open`.
+   - The operator discovers the peer via Rendezvous, inspects metadata, and connects over the Relay circuit.
+   - Interactive shell sessions run through native PTY/ConPTY streaming. Abandoned sessions automatically release after 60 seconds of inactivity.
+   - Intervention ends with `exit` in the shell followed by `fortiq ticket close`.
+
+## Repository Governance & Branch Protection
+
+To ensure unbroken stability across Linux and Windows targets, the following GitHub branch protection rules are recommended for `main`:
+- **Require a pull request before merging:** Require at least 1 approving review.
+- **Require status checks to pass before merging:**
+  - `Code Formatting` (`cargo fmt --check`)
+  - `Workspace Tests & Clippy (ubuntu-latest)`
+  - `Workspace Tests & Clippy (windows-latest)`
+  - `Tauri Desktop Frontend & Backend Check (ubuntu-latest)`
+  - `Tauri Desktop Frontend & Backend Check (windows-latest)`
+- **Require linear history:** Enforce rebase or squash merges to maintain a clean git trajectory.
+
