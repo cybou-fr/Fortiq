@@ -24,6 +24,44 @@ $ConfigFile = Join-Path $DataDir "fortiq.toml"
 $RunKeyPath = "Software\Microsoft\Windows\CurrentVersion\Run"
 $RunValueName = "FORTIQ Desktop"
 
+# Windows PowerShell 5.1 turns every stderr line from a native command into a
+# NativeCommandError while $ErrorActionPreference is "Stop". The FORTIQ binaries
+# write progress to stderr, which aborted the installation with a bare "code 1".
+function Invoke-NativeCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$FailureMessage,
+        [Parameter(Mandatory = $true)][scriptblock]$Command,
+        [switch]$IgnoreExitCode
+    )
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Command 2>&1 | ForEach-Object { Write-Host $_ }
+        if (-not $IgnoreExitCode -and $LASTEXITCODE -ne 0) {
+            throw "$FailureMessage (exit code $LASTEXITCODE)"
+        }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
+# Removing the program directory fails while a FORTIQ process still holds a
+# file. Stopping a process is not instant, so give Windows a moment to release
+# the handles instead of failing the whole installation.
+function Remove-DirectoryWithRetry([string]$Path) {
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            if ($attempt -eq 10) {
+                throw "Impossible de supprimer $Path apres 10 tentatives : $($_.Exception.Message)"
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
+
 function Test-Administrator {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -38,6 +76,13 @@ function Get-InstalledRole([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
     if ((Get-Content -Raw -LiteralPath $Path) -match '(?m)^\s*operator_peer_id\s*=') { return "Client" }
     return "Operator"
+}
+
+trap {
+    Write-Host "ECHEC: $_" -ForegroundColor Red
+    Write-Host "Journal complet : $LogFile" -ForegroundColor Yellow
+    try { Stop-Transcript | Out-Null } catch { }
+    exit 1
 }
 
 if (-not (Test-Administrator)) {
@@ -55,6 +100,11 @@ if ($existingRole -and $existingRole -ne $Role -and -not $ForceRoleChange) {
     throw "Existing role is $existingRole. Refusing to change to $Role without -ForceRoleChange."
 }
 
+# Record everything: the Setup wizard only surfaces "code 1", which says
+# nothing about why an installation stopped.
+$LogFile = Join-Path $env:TEMP "FORTIQ-install.log"
+try { Start-Transcript -LiteralPath $LogFile -Force | Out-Null } catch { }
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $requiredFiles = @("fortiq-service.exe", "fortiq.exe", "fortiq-desktop.exe", "uninstall.ps1")
 foreach ($file in $requiredFiles) {
@@ -67,7 +117,9 @@ Write-Host "Installing FORTIQ $Role on $NodeName..." -ForegroundColor Cyan
 if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
     Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath (Join-Path $InstallDir "fortiq-service.exe")) {
-        & (Join-Path $InstallDir "fortiq-service.exe") service uninstall | Out-Null
+        Invoke-NativeCommand -FailureMessage "service uninstall" -IgnoreExitCode -Command {
+            & (Join-Path $InstallDir "fortiq-service.exe") service uninstall
+        }
     }
 }
 
@@ -84,7 +136,7 @@ Get-Process -ErrorAction SilentlyContinue |
     } |
     Stop-Process -Force -ErrorAction SilentlyContinue
 if (Test-Path -LiteralPath $InstallDir) {
-    Remove-Item -LiteralPath $InstallDir -Recurse -Force
+    Remove-DirectoryWithRetry $InstallDir
 }
 
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -129,8 +181,12 @@ if ($pathEntries -notcontains $InstallDir) {
 }
 $env:Path = "$env:Path;$InstallDir"
 
-& (Join-Path $InstallDir "fortiq-service.exe") service install --config $ConfigFile
-& (Join-Path $InstallDir "fortiq-service.exe") service start
+Invoke-NativeCommand -FailureMessage "L'installation du service FORTIQ a echoue" -Command {
+    & (Join-Path $InstallDir "fortiq-service.exe") service install --config $ConfigFile
+}
+Invoke-NativeCommand -FailureMessage "Le demarrage du service FORTIQ a echoue" -Command {
+    & (Join-Path $InstallDir "fortiq-service.exe") service start
+}
 
 # Use the 64-bit registry view explicitly: the NSIS bootstrapper is 32-bit and
 # otherwise redirects this value to WOW6432Node, which Windows does not use for
@@ -174,4 +230,8 @@ $cliShortcut.Save()
 
 Write-Host "FORTIQ $Role installation completed." -ForegroundColor Green
 Write-Host "Service starts at boot; desktop starts at interactive user logon."
-& (Join-Path $InstallDir "fortiq.exe") status
+Invoke-NativeCommand -FailureMessage "status" -IgnoreExitCode -Command {
+    & (Join-Path $InstallDir "fortiq.exe") status
+}
+
+try { Stop-Transcript | Out-Null } catch { }
