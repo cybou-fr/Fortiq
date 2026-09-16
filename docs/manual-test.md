@@ -188,35 +188,10 @@ Removing them requires a separate explicit `uninstall.ps1 -RemoveData` confirmat
 
 ---
 
-## 6. Single-Windows-machine lab
+## 6. Operator/client isolation
 
-The lab starts two ordinary user processes: one Operator and one managed Client.
-Each has its own identity, ticket storage, QUIC port, and named pipes. Neither
-installs a Windows service, and both can run alongside the installed
-`FortiqService` without conflicting with it.
-
-```powershell
-# Start the isolated managed node; its lab ticket opens automatically.
-.\scripts\lab_windows.ps1 start
-
-# Launch separate Operator and Client Desktop windows.
-.\scripts\lab_windows.ps1 launch
-
-# Execute a real operator -> managed-node shell smoke test.
-.\scripts\lab_windows.ps1 test
-
-# Inspect or stop the lab node.
-.\scripts\lab_windows.ps1 status
-.\scripts\lab_windows.ps1 stop
-```
-
-Use `start -NoAutoOpen` when testing the manual client consent flow. In that
-mode, open the ticket from the second Desktop window or run:
-
-```powershell
-.\scripts\lab_windows.ps1 open
-```
-
-Lab state is isolated under `target/lab/windows`, with independent identities,
-ports, ticket storage, and named pipes for both roles. It is ignored by Git and
-does not modify the installed Windows service.
+Only one FORTIQ service node and one FORTIQ Desktop application may run on an
+operating system. For a complete manual workflow, use this host for the operator
+and a separate Windows 11 VM for the managed client. Install the managed package
+inside the VM, authorize the operator PeerId, open a ticket there, and perform the
+terminal workflow from the host operator console.

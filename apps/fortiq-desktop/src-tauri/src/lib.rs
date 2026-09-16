@@ -1,3 +1,4 @@
+use fs2::FileExt;
 use serde::Serialize;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -11,6 +12,29 @@ fn get_log_path() -> std::path::PathBuf {
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".fortiq")))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     base.join("FORTIQ").join("desktop.log")
+}
+
+struct DesktopInstanceLock {
+    _file: std::fs::File,
+}
+
+fn acquire_desktop_instance_lock() -> Result<DesktopInstanceLock, String> {
+    let path = get_log_path().with_file_name("fortiq-desktop.lock");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("Impossible de créer le dossier FORTIQ: {error}"))?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .map_err(|error| format!("Impossible d'ouvrir le verrou Desktop: {error}"))?;
+    file.try_lock_exclusive().map_err(|_| {
+        "Une instance de FORTIQ Desktop est déjà ouverte sur ce système".to_string()
+    })?;
+    Ok(DesktopInstanceLock { _file: file })
 }
 
 pub fn log_diagnostic(msg: &str) {
@@ -446,7 +470,16 @@ pub fn run() {
     log_diagnostic("=== FORTIQ Desktop starting ===");
     log_diagnostic(&format!("Log file path: {}", get_log_path().display()));
 
+    let instance_lock = match acquire_desktop_instance_lock() {
+        Ok(lock) => lock,
+        Err(error) => {
+            log_diagnostic(&format!("[STARTUP BLOCKED] {error}"));
+            return;
+        }
+    };
+
     tauri::Builder::default()
+        .manage(instance_lock)
         .manage(TerminalState(tokio::sync::Mutex::new(None)))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {

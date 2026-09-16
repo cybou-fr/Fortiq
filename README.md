@@ -47,25 +47,33 @@ cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-## Run two local peers
+## Run an operator and a managed peer
 
-Copy `examples/operator.toml` to `operator.toml`, then start it:
+FORTIQ permits exactly one service node and one Desktop application per operating
+system. Run the operator and managed client on separate machines or virtual
+machines. Using alternate configuration files, ports, or IPC names does not bypass
+this isolation rule.
+
+On the operator machine, copy `examples/operator.toml` to `operator.toml`, then start it:
 
 ```bash
 cargo run -p fortiq-service -- --config operator.toml
 ```
 
-Copy the printed operator PeerId into `authorization.operator_peer_id` in a copy of `examples/managed.toml`, then start the managed peer:
+On the managed machine or VM, copy the printed operator PeerId into
+`authorization.operator_peer_id` in a copy of `examples/managed.toml`, then start
+the managed peer:
 
 ```bash
 cargo run -p fortiq-service -- --config managed.toml
 ```
 
-Copy the managed peer's printed listen address and dial it from the operator (a restart preserves both identities):
+Copy the managed peer's printed reachable listen address and dial it from the
+operator (a restart preserves both identities):
 
 ```bash
 cargo run -p fortiq-service -- --config operator.toml \
-  --dial /ip4/127.0.0.1/udp/4002/quic-v1/p2p/12D3KooW_REPLACE_ME
+  --dial /ip4/MANAGED_VM_IP/udp/4002/quic-v1/p2p/12D3KooW_REPLACE_ME
 ```
 
 The peers authenticate through libp2p, negotiate `/fortiq/hello/1.0`, and print the remote PeerId and metadata. Press Ctrl+C for clean shutdown.

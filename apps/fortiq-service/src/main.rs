@@ -1,14 +1,65 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    fs::{self, File, OpenOptions},
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use fortiq_core::{Config, NodeInfo, NodeMode, TicketState, TicketStore};
 use fortiq_p2p::{load_or_create_identity, IdentityStatus, RunOptions};
+use fs2::FileExt;
 use libp2p::{multiaddr::Protocol, Multiaddr};
 use tracing_subscriber::EnvFilter;
 
 mod ipc_server;
 pub mod service_manager;
+
+struct InstanceLock {
+    _file: File,
+}
+
+fn instance_lock_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("PROGRAMDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+        base.join("FORTIQ").join("fortiq-service.lock")
+    }
+
+    #[cfg(not(windows))]
+    PathBuf::from("/run/fortiq-service.lock")
+}
+
+fn acquire_instance_lock_at(path: &Path) -> Result<InstanceLock> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "Failed to create FORTIQ runtime directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path)
+        .with_context(|| format!("Failed to open instance lock {}", path.display()))?;
+    file.try_lock_exclusive().with_context(|| {
+        "Another FORTIQ service instance is already running on this operating system"
+    })?;
+
+    Ok(InstanceLock { _file: file })
+}
+
+fn acquire_instance_lock() -> Result<InstanceLock> {
+    acquire_instance_lock_at(&instance_lock_path())
+}
 
 #[derive(Debug, Parser)]
 #[command(version, about = "FORTIQ peer service")]
@@ -131,6 +182,7 @@ fn main() -> Result<()> {
 }
 
 pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
+    let _instance_lock = acquire_instance_lock()?;
     let config = Config::load(&config_path).await?;
     let mode = config.mode();
     let ticket_store = TicketStore::new(config.ticket_path());
@@ -220,6 +272,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
     if args.shell.is_some() && mode != NodeMode::Operator {
         anyhow::bail!("Administrative shell initiation is available only on the operator peer.");
     }
+    let _instance_lock = acquire_instance_lock()?;
     let (keypair, identity_status) = load_or_create_identity(&config.identity.path).await?;
     let peer_id = keypair.public().to_peer_id();
 
@@ -338,5 +391,18 @@ mod tests {
             listen_multiaddr("127.0.0.1:4001").unwrap().to_string(),
             "/ip4/127.0.0.1/udp/4001/quic-v1"
         );
+    }
+
+    #[test]
+    fn rejects_a_second_service_instance_on_the_same_os() {
+        let directory = tempfile::tempdir().unwrap();
+        let lock_path = directory.path().join("fortiq-service.lock");
+        let first = acquire_instance_lock_at(&lock_path).unwrap();
+
+        let second = acquire_instance_lock_at(&lock_path);
+
+        assert!(second.is_err());
+        drop(first);
+        assert!(acquire_instance_lock_at(&lock_path).is_ok());
     }
 }
