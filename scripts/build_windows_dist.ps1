@@ -7,6 +7,7 @@ param (
     [string]$Version = "0.1.0",
     [string]$Target = "x86_64-pc-windows-msvc",
     [switch]$SkipBuild,
+    [switch]$SkipNsis,
     [string]$MakeNsisPath
 )
 
@@ -111,8 +112,10 @@ if (-not $MakeNsisPath) {
         $MakeNsisPath = $nsisCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
     }
 }
-if (-not $MakeNsisPath -or -not (Test-Path -LiteralPath $MakeNsisPath)) {
-    throw "NSIS makensis.exe is required to build the two Setup executables."
+if ($SkipNsis -or -not $MakeNsisPath -or -not (Test-Path -LiteralPath $MakeNsisPath)) {
+    Write-Host "NSIS makensis.exe introuvable ou -SkipNsis specifie : passage des installeurs Setup .exe." -ForegroundColor Yellow
+    Write-Host "Les distributions autonomes ZIP sont pretes dans : $distRoot" -ForegroundColor Green
+    return
 }
 
 $numericParts = @([regex]::Matches($Version, '\d+') | ForEach-Object { $_.Value })
