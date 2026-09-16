@@ -217,9 +217,24 @@ async fn list_peers() -> Result<Vec<DesktopPeer>, String> {
     }
 }
 
-pub struct TerminalState(
-    pub tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<fortiq_shell::ShellFrame>>>,
-);
+/// A live terminal session: the frame sender plus the handles of the two tasks
+/// that own the IPC pipe. Both must be aborted to close the pipe, which is what
+/// makes the daemon drop the P2P stream and the remote host release its
+/// single-session slot.
+pub struct TerminalSession {
+    pub sender: tokio::sync::mpsc::Sender<fortiq_shell::ShellFrame>,
+    pub writer: tokio::task::JoinHandle<()>,
+    pub reader: tokio::task::JoinHandle<()>,
+}
+
+impl TerminalSession {
+    fn shutdown(self) {
+        self.writer.abort();
+        self.reader.abort();
+    }
+}
+
+pub struct TerminalState(pub tokio::sync::Mutex<Option<TerminalSession>>);
 
 #[tauri::command]
 async fn start_terminal_session(
@@ -294,15 +309,17 @@ async fn start_terminal_session(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<fortiq_shell::ShellFrame>(128);
 
     {
-        // Drop the previous session's sender first. Leaving it in place kept the
-        // old stream open, so the remote host still counted a session as active
-        // and refused every later one.
+        // Tear the previous session down before opening a new one. Dropping its
+        // sender alone was not enough: the read task held a clone, so the pipe
+        // stayed open, the daemon kept the P2P stream, and the remote host went
+        // on refusing every later session as "already active".
         let mut session_guard = state.0.lock().await;
-        session_guard.take();
-        *session_guard = Some(tx.clone());
+        if let Some(previous) = session_guard.take() {
+            previous.shutdown();
+        }
     }
 
-    tokio::spawn(async move {
+    let writer = tokio::spawn(async move {
         while let Some(frame) = rx.recv().await {
             if frame.write_to(&mut write_half).await.is_err() {
                 break;
@@ -312,8 +329,8 @@ async fn start_terminal_session(
 
     let mut read_half = reader.into_inner();
     let app_clone = app.clone();
-    let pong_tx = tx;
-    tokio::spawn(async move {
+    let pong_tx = tx.clone();
+    let session_reader = tokio::spawn(async move {
         loop {
             match fortiq_shell::ShellFrame::read_from(&mut read_half).await {
                 Ok(Some(fortiq_shell::ShellFrame::Data(bytes))) => {
@@ -340,6 +357,15 @@ async fn start_terminal_session(
         let _ = app_clone.emit("terminal-closed", ());
     });
 
+    {
+        let mut session_guard = state.0.lock().await;
+        *session_guard = Some(TerminalSession {
+            sender: tx,
+            writer,
+            reader: session_reader,
+        });
+    }
+
     Ok(())
 }
 
@@ -349,8 +375,10 @@ async fn write_terminal_data(
     data: String,
 ) -> Result<(), String> {
     let guard = state.0.lock().await;
-    if let Some(tx) = guard.as_ref() {
-        tx.send(fortiq_shell::ShellFrame::Data(data.into_bytes()))
+    if let Some(session) = guard.as_ref() {
+        session
+            .sender
+            .send(fortiq_shell::ShellFrame::Data(data.into_bytes()))
             .await
             .map_err(|e| format!("Échec d'envoi des données terminal: {e}"))?;
         Ok(())
@@ -366,8 +394,10 @@ async fn resize_terminal(
     rows: u16,
 ) -> Result<(), String> {
     let guard = state.0.lock().await;
-    if let Some(tx) = guard.as_ref() {
-        tx.send(fortiq_shell::ShellFrame::Resize { cols, rows })
+    if let Some(session) = guard.as_ref() {
+        session
+            .sender
+            .send(fortiq_shell::ShellFrame::Resize { cols, rows })
             .await
             .map_err(|e| format!("Échec d'envoi du redimensionnement: {e}"))?;
         Ok(())
@@ -379,7 +409,9 @@ async fn resize_terminal(
 #[tauri::command]
 async fn close_terminal_session(state: tauri::State<'_, TerminalState>) -> Result<(), String> {
     let mut guard = state.0.lock().await;
-    *guard = None;
+    if let Some(session) = guard.take() {
+        session.shutdown();
+    }
     Ok(())
 }
 
