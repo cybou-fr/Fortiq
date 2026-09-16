@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FORTIQ — Remote Systems Administration Agency</title>
+    <meta
+      name="description"
+      content="FORTIQ is an elite remote infrastructure administration agency powered by its proprietary zero-trust P2P remote access platform."
+    />
+    <link rel="icon" type="image/png" href="assets/logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <!-- Google Fonts for sleek tech typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <!-- Background Glow Effects -->
+    <div class="glow-bg top-glow"></div>
+    <div class="glow-bg center-glow"></div>
+
+    <!-- Navigation Header -->
+    <header class="site-header">
+      <div class="container nav-container">
+        <a href="#" class="nav-brand">
+          <img src="assets/logo.png" alt="FORTIQ Logo" class="brand-logo" />
+          <span class="brand-name">FORTIQ</span>
+          <span class="brand-tag">AGENCY</span>
+        </a>
+
+        <nav class="nav-links">
+          <a href="#services">Services</a>
+          <a href="#technology">Proprietary Software</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#comparison">Why Us</a>
+          <a href="#downloads">Downloads</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a href="#contact" class="btn btn-outline">Request Support</a>
+          <a href="#downloads" class="btn btn-primary">Get Agent</a>
+        </div>
+
+        <button class="mobile-menu-toggle" id="menuToggle" aria-label="Toggle menu">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile Drawer -->
+    <div class="mobile-drawer" id="mobileDrawer">
+      <nav class="mobile-nav">
+        <a href="#services" class="mobile-link">Services</a>
+        <a href="#technology" class="mobile-link">Proprietary Software</a>
+        <a href="#architecture" class="mobile-link">Architecture</a>
+        <a href="#comparison" class="mobile-link">Why Us</a>
+        <a href="#downloads" class="mobile-link">Downloads</a>
+        <a href="#contact" class="btn btn-primary mobile-cta">Request Support</a>
+      </nav>
+    </div>
+
+    <!-- Hero Section -->
+    <section class="hero-section">
+      <div class="container hero-container">
+        <div class="hero-badge">
+          <span class="badge-dot"></span>
+          <span>Proprietary P2P Engine · Zero-Trust Remote Administration</span>
+        </div>
+
+        <h1 class="hero-title">
+          Mission-Critical Server & Fleet Administration Powered by <span class="gradient-text">FORTIQ P2P</span>
+        </h1>
+
+        <p class="hero-subtitle">
+          We are a specialized systems administration agency managing distributed Linux & Windows infrastructure. 
+          We eliminate third-party cloud risks by using our own peer-to-peer, end-to-end encrypted remote access software.
+        </p>
+
+        <div class="hero-cta-group">
+          <a href="#downloads" class="btn btn-primary btn-lg">
+            <span>Download Client Agent</span>
+            <span class="btn-subtext">v0.1.0 for Win & Linux</span>
+          </a>
+          <a href="#contact" class="btn btn-secondary btn-lg">
+            <span>Hire Us for Support</span>
+            <span class="btn-subtext">24/7 SLA Available</span>
+          </a>
+        </div>
+
+        <div class="hero-stats">
+          <div class="stat-item">
+            <span class="stat-value">100%</span>
+            <span class="stat-label">Peer-to-Peer (No Relay Cloud)</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">Ed25519</span>
+            <span class="stat-label">Cryptographic Peer Identity</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">0 B</span>
+            <span class="stat-label">Data Stored on 3rd Parties</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value">&lt; 15 ms</span>
+            <span class="stat-label">Direct QUIC Shell Latency</span>
+          </div>
+        </div>
+
+        <!-- Preview UI Mockup -->
+        <div class="console-preview-wrapper">
+          <div class="console-preview-card">
+            <div class="preview-header">
+              <div class="window-dots">
+                <span class="dot red"></span>
+                <span class="dot yellow"></span>
+                <span class="dot green"></span>
+              </div>
+              <div class="window-title">FORTIQ Operator Console — Managed Fleets</div>
+              <div class="window-status"><span class="status-dot"></span> P2P Swarm Active</div>
+            </div>
+            <img
+              src="assets/console-preview.jpg"
+              alt="FORTIQ Operator Console Interface"
+              class="preview-image"
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Agency Services Section -->
+    <section id="services" class="section services-section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">SERVICES</span>
+          <h2 class="section-title">What Our Administration Agency Delivers</h2>
+          <p class="section-subtitle">
+            Direct high-tier systems engineering. No tier-1 helpdesk scripts, no third-party software licenses.
+          </p>
+        </div>
+
+        <div class="grid grid-3">
+          <div class="feature-card">
+            <div class="feature-icon">🛡️</div>
+            <h3>24/7 Managed Infrastructure</h3>
+            <p>
+              Full lifecycle operations for Linux and Windows Server environments, cloud VPS, hybrid clusters, and office workstations. Proactive health and service management.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">⚡</div>
+            <h3>Emergency Incident Response</h3>
+            <p>
+              Instant remote session establishment through NAT and strict corporate firewalls when outages happen. Direct recovery commands without reboot traps.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">🔒</div>
+            <h3>Zero-Trust Security Hardening</h3>
+            <p>
+              Kernel tuning, firewall configuration, automated patching, SSH/RDP replacement with peer-to-peer authenticated streams, and zero external attack surface.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">🎫</div>
+            <h3>Ticket-Gated Access Control</h3>
+            <p>
+              Our operators can never connect uninvited. Every session requires an explicit cryptographically signed ticket opened directly on the customer's machine.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">📡</div>
+            <h3>Disaster Recovery & Backups</h3>
+            <p>
+              Automated offline and offsite snapshots, encrypted backup verification, failover rehearsal, and bare-metal service restoration within strict SLA windows.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">⚙️</div>
+            <h3>DevOps & CI/CD Automation</h3>
+            <p>
+              Docker, Kubernetes, systemd daemonization, container orchestration, and continuous deployment pipeline monitoring tuned for peak performance.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Proprietary Software Section -->
+    <section id="technology" class="section tech-section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">PROPRIETARY TECHNOLOGY</span>
+          <h2 class="section-title">Why We Built FORTIQ Software</h2>
+          <p class="section-subtitle">
+            Most IT providers rely on commercial tools like TeamViewer or AnyDesk, exposing your servers to central account hijacking and cloud breaches. We engineered our own solution in Rust.
+          </p>
+        </div>
+
+        <div class="grid grid-2 tech-grid">
+          <div class="tech-item">
+            <div class="tech-num">01</div>
+            <div class="tech-content">
+              <h3>True Peer-to-Peer QUIC Streams</h3>
+              <p>
+                Direct authenticated transport with libp2p. Low latency UDP/QUIC streams replace slow TCP tunnels, delivering instantaneous interactive terminal execution.
+              </p>
+            </div>
+          </div>
+
+          <div class="tech-item">
+            <div class="tech-num">02</div>
+            <div class="tech-content">
+              <h3>DCUtR & Circuit Relay v2 Hole Punching</h3>
+              <p>
+                Works seamlessly behind CGNAT, enterprise NAT, and cellular modems. Automatic hole punching upgrades connections to direct paths whenever mathematically possible.
+              </p>
+            </div>
+          </div>
+
+          <div class="tech-item">
+            <div class="tech-num">03</div>
+            <div class="tech-content">
+              <h3>Cryptographic Ed25519 Identities</h3>
+              <p>
+                No usernames, passwords, or master tokens. Access authorization compares only the authenticated cryptographic PeerId derived from node keypairs.
+              </p>
+            </div>
+          </div>
+
+          <div class="tech-item">
+            <div class="tech-num">04</div>
+            <div class="tech-content">
+              <h3>Native Windows & Linux Shell Engines</h3>
+              <p>
+                Intelligent shell priority selection: PowerShell (<code>pwsh.exe</code> &rarr; <code>powershell.exe</code> &rarr; <code>cmd.exe</code>) on Windows; <code>bash</code> &rarr; <code>sh</code> on Linux. Clean process containment and graceful termination.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Terminal Live Preview Box -->
+        <div class="tech-terminal-box">
+          <div class="terminal-bar">
+            <span class="terminal-dot"></span>
+            <span class="terminal-label">fortiq-service — Live Protocol Handshake</span>
+          </div>
+          <pre class="terminal-code"><code><span class="c-comment"># Operator connecting to managed node via FORTIQ QUIC</span>
+<span class="c-cyan">&gt;</span> fortiq-service --dial /ip4/203.0.113.10/udp/4001/quic-v1/p2p/12D3KooW_TARGET --shell 12D3KooW_TARGET
+
+<span class="c-green">[INFO]</span> Authenticated connection established: 12D3KooW_TARGET (QUIC Direct)
+<span class="c-green">[INFO]</span> Remote Ticket verified: #FT-7842 [STATE: OPEN]
+<span class="c-green">[INFO]</span> Remote OS: Windows 11 Pro (x86_64) | Shell: PowerShell 7 (pwsh.exe)
+
+<span class="c-cyan">FORTIQ Remote Session Active — Connected to OFFICE-PC-01</span>
+PS C:\Windows\system32&gt; Get-Service | Where-Object Status -eq 'Running' | Select-Object -First 3
+Status   Name               DisplayName
+------   ----               -----------
+Running  fortiq-service     FORTIQ Remote Administration Agent
+Running  LanmanServer       Server
+Running  Spooler            Print Spooler</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture Section -->
+    <section id="architecture" class="section arch-section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">SYSTEM ARCHITECTURE</span>
+          <h2 class="section-title">Thin Client, Robust Daemon</h2>
+          <p class="section-subtitle">
+            Reliability by design: our desktop GUI can be restarted or closed without dropping connection state or active jobs.
+          </p>
+        </div>
+
+        <div class="arch-flow">
+          <div class="arch-box client-box">
+            <div class="box-tag">PRESENTATION LAYER</div>
+            <h4>FORTIQ Desktop (Tauri v2)</h4>
+            <p>Operator 3-panel console or Managed user widget. Communicates exclusively via local IPC.</p>
+          </div>
+
+          <div class="arch-arrow">
+            <span class="arrow-label">Named Pipe (Win) / Unix Socket (Linux)</span>
+            <span class="arrow-sym">&darr;</span>
+          </div>
+
+          <div class="arch-box daemon-box">
+            <div class="box-tag">SYSTEM SERVICE (FAT DAEMON)</div>
+            <h4>fortiq-service</h4>
+            <p>Runs as Windows Service (SYSTEM) or Linux systemd unit. Holds cryptographic identities, QUIC swarm, ticket state, and shell bridging.</p>
+          </div>
+
+          <div class="arch-arrow">
+            <span class="arrow-label">End-to-End Encrypted QUIC / Relay v2</span>
+            <span class="arrow-sym">&darr;</span>
+          </div>
+
+          <div class="arch-box peer-box">
+            <div class="box-tag">MANAGED TARGET</div>
+            <h4>Managed Peer Node</h4>
+            <p>Requires local OPEN ticket and exact operator PeerId matching before process spawning.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Comparison Table -->
+    <section id="comparison" class="section comp-section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">COMPARISON</span>
+          <h2 class="section-title">Why Agency with Proprietary Tech Wins</h2>
+          <p class="section-subtitle">
+            Traditional outsourced IT vs. FORTIQ Agency with custom peer-to-peer engineering.
+          </p>
+        </div>
+
+        <div class="table-responsive">
+          <table class="comp-table">
+            <thead>
+              <tr>
+                <th>Security &amp; Operational Feature</th>
+                <th>Traditional MSP / SaaS (TeamViewer, AnyDesk)</th>
+                <th class="highlight">FORTIQ Managed Agency</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Data Route</strong></td>
+                <td>Routes through 3rd-party vendor cloud servers</td>
+                <td class="highlight">Direct Peer-to-Peer QUIC (Zero middleman)</td>
+              </tr>
+              <tr>
+                <td><strong>Authentication</strong></td>
+                <td>Usernames, passwords, 2FA tokens on web portals</td>
+                <td class="highlight">Ed25519 Cryptographic Keys &amp; PeerIds</td>
+              </tr>
+              <tr>
+                <td><strong>Access Consent</strong></td>
+                <td>Unattended access passwords stored in SaaS database</td>
+                <td class="highlight">Gated by client-opened cryptographic tickets</td>
+              </tr>
+              <tr>
+                <td><strong>Process Execution</strong></td>
+                <td>Heavy video-streaming GUI requiring high bandwidth</td>
+                <td class="highlight">Sub-millisecond native terminal piping (ConPTY/PTY)</td>
+              </tr>
+              <tr>
+                <td><strong>Vendor Lock-in</strong></td>
+                <td>Monthly subscription traps and license audits</td>
+                <td class="highlight">Included with your agency management agreement</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Downloads Section -->
+    <section id="downloads" class="section downloads-section">
+      <div class="container">
+        <div class="section-header">
+          <span class="section-tag">SOFTWARE DOWNLOADS</span>
+          <h2 class="section-title">Get the FORTIQ Client Agent</h2>
+          <p class="section-subtitle">
+            Install the lightweight agent on your endpoints to enable authorized support by our engineering team.
+          </p>
+        </div>
+
+        <div class="grid grid-3 download-grid">
+          <!-- Windows -->
+          <div class="download-card">
+            <div class="dl-os-icon">🪟</div>
+            <h3>Windows</h3>
+            <div class="dl-version">v0.1.0-preview · x64</div>
+            <p>Windows 10, 11, Windows Server 2019/2022. Supports PowerShell 7, Windows PowerShell &amp; cmd.</p>
+            <div class="dl-actions">
+              <button class="btn btn-primary btn-block dl-btn" data-os="Windows">Download .MSI Installer</button>
+              <button class="btn btn-outline btn-block dl-btn" data-os="Windows Portable">Download Portable .EXE</button>
+            </div>
+          </div>
+
+          <!-- Linux -->
+          <div class="download-card highlight-card">
+            <div class="badge-pop">POPULAR FOR SERVERS</div>
+            <div class="dl-os-icon">🐧</div>
+            <h3>Linux</h3>
+            <div class="dl-version">v0.1.0-preview · x86_64 / ARM64</div>
+            <p>Debian, Ubuntu, RHEL, Rocky, AlmaLinux, Arch. Includes systemd unit for background daemon.</p>
+            <div class="dl-actions">
+              <button class="btn btn-primary btn-block dl-btn" data-os="Linux .deb">Download .DEB Package</button>
+              <button class="btn btn-outline btn-block dl-btn" data-os="Linux Tarball">Download Tarball (.tar.gz)</button>
+            </div>
+          </div>
+
+          <!-- macOS -->
+          <div class="download-card">
+            <div class="dl-os-icon">🍎</div>
+            <h3>macOS</h3>
+            <div class="dl-version">v0.1.0-preview · Apple Silicon / Intel</div>
+            <p>macOS Sonoma, Sequoia. Universal binary package with zsh/bash pipe bridging.</p>
+            <div class="dl-actions">
+              <button class="btn btn-primary btn-block dl-btn" data-os="macOS Universal">Download .DMG Package</button>
+              <button class="btn btn-outline btn-block dl-btn" data-os="Homebrew">Install via Homebrew</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="downloads-note">
+          <p>
+            🔒 All binaries are cryptographically signed. Need custom enterprise deployment scripts or GPO packages? 
+            <a href="#contact">Contact our deployment team</a>.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Contact / Hire Us Section -->
+    <section id="contact" class="section contact-section">
+      <div class="container contact-container">
+        <div class="contact-info">
+          <span class="section-tag">GET STARTED</span>
+          <h2>Partner with FORTIQ for Enterprise Administration</h2>
+          <p>
+            Whether you need emergency support, a dedicated 24/7 server administrator, or custom zero-trust remote deployment, our engineers are ready to assist.
+          </p>
+          <div class="contact-details">
+            <div class="contact-row">
+              <span class="contact-icon">📍</span>
+              <span>Global Remote Operations (US / EU / APAC)</span>
+            </div>
+            <div class="contact-row">
+              <span class="contact-icon">⚡</span>
+              <span>15-Minute Emergency Response for Retained Clients</span>
+            </div>
+            <div class="contact-row">
+              <span class="contact-icon">✉️</span>
+              <span>contact@fortiq.net</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="contact-form-card">
+          <h3>Request Infrastructure Audit or Support</h3>
+          <form id="contactForm" class="contact-form">
+            <div class="form-group">
+              <label for="name">Your Name</label>
+              <input type="text" id="name" required placeholder="Alexander Vance" />
+            </div>
+            <div class="form-group">
+              <label for="email">Work Email</label>
+              <input type="email" id="email" required placeholder="alex@company.com" />
+            </div>
+            <div class="form-group">
+              <label for="servers">Infrastructure Size</label>
+              <select id="servers">
+                <option value="1-5">1 – 5 Servers / Nodes</option>
+                <option value="5-25">5 – 25 Servers / Nodes</option>
+                <option value="25-100">25 – 100 Servers / Nodes</option>
+                <option value="100+">100+ Enterprise Fleet</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="message">Project Details or Problem</label>
+              <textarea id="message" rows="3" placeholder="Need 24/7 Linux server administration and FORTIQ client deployment..."></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block btn-lg">Submit Request</button>
+          </form>
+          <div id="formSuccess" class="form-success" style="display: none;">
+            ✓ Thank you! Your inquiry has been received. An engineer will contact you shortly.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="container footer-container">
+        <div class="footer-left">
+          <div class="footer-brand">
+            <img src="assets/logo.png" alt="FORTIQ Logo" class="brand-logo" />
+            <span class="brand-name">FORTIQ</span>
+          </div>
+          <p class="footer-desc">
+            Professional Remote Administration Agency powered by proprietary peer-to-peer zero-trust software.
+          </p>
+        </div>
+
+        <div class="footer-links-group">
+          <div class="footer-col">
+            <h5>Navigation</h5>
+            <a href="#services">Services</a>
+            <a href="#technology">Proprietary Software</a>
+            <a href="#architecture">Architecture</a>
+            <a href="#downloads">Downloads</a>
+          </div>
+          <div class="footer-col">
+            <h5>Security</h5>
+            <a href="#">Security Scope</a>
+            <a href="#">Cryptographic Spec</a>
+            <a href="#">Privacy Policy</a>
+            <a href="#">Terms of Service</a>
+          </div>
+          <div class="footer-col">
+            <h5>Open Core</h5>
+            <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer">GitHub Repository</a>
+            <a href="#">Documentation</a>
+            <a href="#">Release Notes</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="container footer-bottom">
+        <p>&copy; 2026 FORTIQ Systems Administration Agency. All rights reserved.</p>
+        <p>Engineered with Rust, QUIC &amp; libp2p.</p>
+      </div>
+    </footer>
+
+    <!-- Download Modal Dialog -->
+    <div id="downloadModal" class="modal-overlay">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modalTitle">Download FORTIQ Agent</h3>
+          <button id="modalClose" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-icon">📦</div>
+          <p id="modalDesc">
+            Preparing your installer package for download...
+          </p>
+          <div class="modal-version-box">
+            <strong>Package:</strong> <span id="modalPackageName">fortiq-agent-v0.1.0.msi</span><br />
+            <strong>Architecture:</strong> x86_64 / Native OS<br />
+            <strong>Hash:</strong> <code>SHA256: 4f8d...c01a</code>
+          </div>
+          <p class="modal-note">
+            The installer registers <code>fortiq-service</code> as a background system daemon and generates your local persistent identity.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button id="modalDownloadBtn" class="btn btn-primary">Start Download</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
