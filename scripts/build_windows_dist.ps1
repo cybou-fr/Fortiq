@@ -69,11 +69,19 @@ $desktopCandidates = @(
     (Join-Path $rootDir "target\release\fortiq-desktop.exe"),
     (Join-Path $desktopDir "src-tauri\target\release\fortiq-desktop.exe")
 )
-$desktopExe = $desktopCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-$serviceExe = @((Join-Path $targetReleaseDir "fortiq-service.exe"), (Join-Path $rootDir "target\release\fortiq-service.exe")) |
-    Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-$cliExe = @((Join-Path $targetReleaseDir "fortiq.exe"), (Join-Path $rootDir "target\release\fortiq.exe")) |
-    Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+function Select-NewestArtifact([string[]]$Candidates) {
+    $files = $Candidates |
+        Where-Object { Test-Path -LiteralPath $_ } |
+        ForEach-Object { Get-Item -LiteralPath $_ } |
+        Sort-Object LastWriteTimeUtc -Descending
+    return $files | Select-Object -First 1 -ExpandProperty FullName
+}
+
+# `-SkipBuild` is commonly used after a normal host release build. Do not let a
+# stale target-specific artifact silently win merely because it appears first.
+$desktopExe = Select-NewestArtifact $desktopCandidates
+$serviceExe = Select-NewestArtifact @((Join-Path $targetReleaseDir "fortiq-service.exe"), (Join-Path $rootDir "target\release\fortiq-service.exe"))
+$cliExe = Select-NewestArtifact @((Join-Path $targetReleaseDir "fortiq.exe"), (Join-Path $rootDir "target\release\fortiq.exe"))
 $artifacts = @{
     "fortiq-service.exe" = $serviceExe
     "fortiq.exe" = $cliExe
