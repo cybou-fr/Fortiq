@@ -257,14 +257,36 @@ document.addEventListener("DOMContentLoaded", () => {
   const mobileDrawer = document.getElementById("mobileDrawer");
 
   if (menuToggle && mobileDrawer) {
+    menuToggle.setAttribute("aria-expanded", "false");
+    menuToggle.setAttribute("aria-controls", "mobileDrawer");
+
     menuToggle.addEventListener("click", () => {
-      mobileDrawer.classList.toggle("active");
+      const isOpen = mobileDrawer.classList.toggle("active");
+      menuToggle.classList.toggle("active", isOpen);
+      menuToggle.setAttribute("aria-expanded", String(isOpen));
+      menuToggle.setAttribute("aria-label", isOpen ? "Fermer le menu" : "Ouvrir le menu");
+      document.body.classList.toggle("menu-open", isOpen);
     });
 
     mobileDrawer.querySelectorAll("a").forEach((link) => {
       link.addEventListener("click", () => {
         mobileDrawer.classList.remove("active");
+        menuToggle.classList.remove("active");
+        menuToggle.setAttribute("aria-expanded", "false");
+        menuToggle.setAttribute("aria-label", "Ouvrir le menu");
+        document.body.classList.remove("menu-open");
       });
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && mobileDrawer.classList.contains("active")) {
+        mobileDrawer.classList.remove("active");
+        menuToggle.classList.remove("active");
+        menuToggle.setAttribute("aria-expanded", "false");
+        menuToggle.setAttribute("aria-label", "Ouvrir le menu");
+        document.body.classList.remove("menu-open");
+        menuToggle.focus();
+      }
     });
   }
 
@@ -286,19 +308,39 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  if (contactForm && formSuccess) {
+  if (contactForm) {
     contactForm.addEventListener("submit", (e) => {
       e.preventDefault();
-      const submitBtn = contactForm.querySelector("button[type='submit']");
-      if (submitBtn) {
-        submitBtn.textContent = "Envoi de votre demande en cours...";
-        submitBtn.disabled = true;
-      }
+      if (!contactForm.reportValidity()) return;
 
-      setTimeout(() => {
-        contactForm.style.display = "none";
+      const value = (id) => document.getElementById(id)?.value?.trim() || "Non renseigné";
+      const selectedText = (id) => {
+        const field = document.getElementById(id);
+        return field?.selectedOptions?.[0]?.text?.trim() || value(id);
+      };
+      const subject = `Demande de diagnostic FORTIQ — ${value("name")}`;
+      const body = [
+        "Bonjour FORTIQ,",
+        "",
+        "Je souhaite demander un diagnostic offert.",
+        "",
+        `Nom : ${value("name")}`,
+        `Entreprise : ${value("company")}`,
+        `E-mail : ${value("email")}`,
+        `Téléphone : ${value("phone")}`,
+        `Profil / parc : ${selectedText("profileType") !== "Non renseigné" ? selectedText("profileType") : selectedText("servers")}`,
+        `Besoin : ${selectedText("serviceType")}`,
+        `Message : ${value("message")}`,
+        "",
+        "Merci de me recontacter.",
+      ].join("\n");
+
+      window.location.href = `mailto:info@fortiq.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+      if (formSuccess) {
+        formSuccess.textContent = "Votre application e-mail va s’ouvrir avec la demande préremplie. Envoyez le message pour finaliser votre demande.";
         formSuccess.style.display = "block";
-      }, 800);
+      }
     });
   }
 
@@ -315,5 +357,4 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 });
-
 
