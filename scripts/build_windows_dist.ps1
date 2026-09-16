@@ -100,7 +100,10 @@ foreach ($role in @("Operator", "Client")) {
 if (-not $MakeNsisPath) {
     $nsisCandidates = @(
         "$env:ProgramFiles\NSIS\makensis.exe",
-        "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+        "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+        # Tauri downloads its own NSIS for `tauri build`; reuse it rather than
+        # requiring a second system-wide install.
+        "$env:LOCALAPPDATA\tauri\NSIS\Bin\makensis.exe"
     )
     $command = Get-Command makensis.exe -ErrorAction SilentlyContinue
     if ($command) { $MakeNsisPath = $command.Source }
