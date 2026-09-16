@@ -31,6 +31,178 @@ impl Drop for ShellSessionGuard {
     }
 }
 
+#[derive(Debug)]
+pub enum P2pCommand {
+    ListPeers {
+        reply: tokio::sync::oneshot::Sender<Vec<fortiq_core::ipc::PeerSummary>>,
+    },
+    CloseTicket {
+        peer: PeerId,
+        dial: Option<Multiaddr>,
+        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct DiscoveredPeer {
+    pub peer_id: PeerId,
+    pub name: Option<String>,
+    pub os: Option<String>,
+    pub arch: Option<String>,
+    pub version: Option<String>,
+    pub mode: Option<fortiq_core::NodeMode>,
+    pub addresses: Vec<Multiaddr>,
+    pub transport: String,
+    pub connected: bool,
+    pub last_seen: std::time::Instant,
+}
+
+#[derive(Debug, Default)]
+pub struct PeerRegistry {
+    peers: std::collections::HashMap<PeerId, DiscoveredPeer>,
+}
+
+impl PeerRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn record_connection(&mut self, peer_id: PeerId, endpoint: &libp2p::core::ConnectedPoint) {
+        let addr = endpoint.get_remote_address();
+        let is_relay = addr
+            .iter()
+            .any(|p| matches!(p, libp2p::multiaddr::Protocol::P2pCircuit));
+        let transport = if is_relay {
+            "RELAY CIRCUIT".to_string()
+        } else if addr
+            .iter()
+            .any(|p| matches!(p, libp2p::multiaddr::Protocol::QuicV1))
+        {
+            "QUIC DIRECT".to_string()
+        } else {
+            "P2P".to_string()
+        };
+
+        let entry = self.peers.entry(peer_id).or_insert_with(|| DiscoveredPeer {
+            peer_id,
+            name: None,
+            os: None,
+            arch: None,
+            version: None,
+            mode: None,
+            addresses: Vec::new(),
+            transport: transport.clone(),
+            connected: true,
+            last_seen: std::time::Instant::now(),
+        });
+        entry.connected = true;
+        entry.transport = transport;
+        entry.last_seen = std::time::Instant::now();
+        if !entry.addresses.contains(addr) {
+            entry.addresses.push(addr.clone());
+        }
+    }
+
+    pub fn record_disconnection(&mut self, peer_id: &PeerId, remaining_established: u32) {
+        if remaining_established == 0 {
+            if let Some(entry) = self.peers.get_mut(peer_id) {
+                entry.connected = false;
+                entry.last_seen = std::time::Instant::now();
+            }
+        }
+    }
+
+    pub fn record_hello(&mut self, peer_id: PeerId, info: &NodeInfo) {
+        let entry = self.peers.entry(peer_id).or_insert_with(|| DiscoveredPeer {
+            peer_id,
+            name: Some(info.name.clone()),
+            os: Some(info.os.clone()),
+            arch: Some(info.arch.clone()),
+            version: Some(info.version.clone()),
+            mode: Some(info.mode),
+            addresses: Vec::new(),
+            transport: "P2P".to_string(),
+            connected: true,
+            last_seen: std::time::Instant::now(),
+        });
+        entry.name = Some(info.name.clone());
+        entry.os = Some(info.os.clone());
+        entry.arch = Some(info.arch.clone());
+        entry.version = Some(info.version.clone());
+        entry.mode = Some(info.mode);
+        entry.last_seen = std::time::Instant::now();
+    }
+
+    pub fn record_identify(&mut self, peer_id: PeerId, info: &identify::Info) {
+        let entry = self.peers.entry(peer_id).or_insert_with(|| DiscoveredPeer {
+            peer_id,
+            name: None,
+            os: None,
+            arch: None,
+            version: Some(info.protocol_version.clone()),
+            mode: None,
+            addresses: Vec::new(),
+            transport: "P2P".to_string(),
+            connected: true,
+            last_seen: std::time::Instant::now(),
+        });
+        for addr in &info.listen_addrs {
+            if !entry.addresses.contains(addr) {
+                entry.addresses.push(addr.clone());
+            }
+        }
+    }
+
+    pub fn record_rendezvous(&mut self, peer_id: PeerId, addresses: &[Multiaddr]) {
+        let entry = self.peers.entry(peer_id).or_insert_with(|| DiscoveredPeer {
+            peer_id,
+            name: None,
+            os: None,
+            arch: None,
+            version: None,
+            mode: None,
+            addresses: Vec::new(),
+            transport: "P2P".to_string(),
+            connected: false,
+            last_seen: std::time::Instant::now(),
+        });
+        for addr in addresses {
+            if !entry.addresses.contains(addr) {
+                entry.addresses.push(addr.clone());
+            }
+        }
+    }
+
+    pub fn to_summaries(&self) -> Vec<fortiq_core::ipc::PeerSummary> {
+        let mut list: Vec<_> = self
+            .peers
+            .values()
+            .map(|p| {
+                let hostname = p.name.clone().unwrap_or_else(|| "Inconnu".to_string());
+                let os = match (&p.os, &p.arch) {
+                    (Some(os), Some(arch)) => format!("{os} ({arch})"),
+                    (Some(os), None) => os.clone(),
+                    _ => "OS Inconnu".to_string(),
+                };
+                let status = if p.connected {
+                    "CONNECTÉ".to_string()
+                } else {
+                    "DÉCOUVERT".to_string()
+                };
+                fortiq_core::ipc::PeerSummary {
+                    peer_id: p.peer_id.to_string(),
+                    hostname,
+                    os,
+                    transport: p.transport.clone(),
+                    status,
+                }
+            })
+            .collect();
+        list.sort_by(|a, b| a.hostname.cmp(&b.hostname));
+        list
+    }
+}
+
 pub struct RunOptions {
     pub config: Config,
     pub listen_address: Multiaddr,
@@ -38,6 +210,7 @@ pub struct RunOptions {
     pub shell_peer: Option<PeerId>,
     pub shell_command: Option<String>,
     pub close_ticket_peer: Option<PeerId>,
+    pub command_receiver: Option<tokio::sync::mpsc::Receiver<P2pCommand>>,
 }
 
 struct EventOptions {
@@ -48,6 +221,7 @@ struct EventOptions {
     close_ticket_peer: Option<PeerId>,
     ticket_store: TicketStore,
     active_shells: Arc<AtomicBool>,
+    command_receiver: Option<tokio::sync::mpsc::Receiver<P2pCommand>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +267,7 @@ pub async fn run(
         shell_peer,
         shell_command,
         close_ticket_peer,
+        command_receiver,
     } = options;
     let identify_config =
         identify::Config::new("/fortiq/identify/1.0".to_owned(), keypair.public());
@@ -183,6 +358,7 @@ pub async fn run(
         close_ticket_peer,
         ticket_store,
         active_shells,
+        command_receiver,
     };
     event_loop(&mut swarm, incoming_shells, shell_control, event_options).await
 }
@@ -201,16 +377,46 @@ async fn event_loop(
         close_ticket_peer,
         ticket_store,
         active_shells,
+        command_receiver,
     } = options;
     let (shell_result_sender, mut shell_result_receiver) = tokio::sync::mpsc::channel(1);
     let mut shell_started = false;
     let target_peer = shell_peer.or(close_ticket_peer);
+
+    let (dummy_tx, dummy_rx) = tokio::sync::mpsc::channel(1);
+    let mut command_receiver = command_receiver.unwrap_or(dummy_rx);
+    let _keep_dummy_alive = dummy_tx;
+
+    let mut peer_registry = PeerRegistry::new();
+    let mut pending_close_tickets: std::collections::HashMap<
+        libp2p::request_response::OutboundRequestId,
+        tokio::sync::oneshot::Sender<Result<(), String>>,
+    > = std::collections::HashMap::new();
 
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 info!("shutdown requested");
                 return Ok(());
+            }
+            Some(cmd) = command_receiver.recv() => {
+                match cmd {
+                    P2pCommand::ListPeers { reply } => {
+                        let _ = reply.send(peer_registry.to_summaries());
+                    }
+                    P2pCommand::CloseTicket { peer, dial, reply } => {
+                        if let Some(addr) = dial {
+                            if let Err(error) = swarm.dial(addr.clone()) {
+                                warn!(%addr, %error, "failed to dial target for ticket close");
+                            }
+                        }
+                        let request_id = swarm.behaviour_mut().ticket.send_request(
+                            &peer,
+                            TicketRequest::Close,
+                        );
+                        pending_close_tickets.insert(request_id, reply);
+                    }
+                }
             }
             Some((remote_peer, stream)) = incoming_shells.next() => {
                 let ticket_open = ticket_store.is_open().await.unwrap_or_else(|error| {
@@ -270,6 +476,7 @@ async fn event_loop(
                 }
                 libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                     info!(remote_peer_id = %peer_id, ?endpoint, "authenticated connection established");
+                    peer_registry.record_connection(peer_id, &endpoint);
                     if endpoint.is_dialer() {
                         swarm.behaviour_mut().hello.send_request(
                             &peer_id,
@@ -300,8 +507,11 @@ async fn event_loop(
                         }
                     }
                 }
+                libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, num_established, .. } => {
+                    peer_registry.record_disconnection(&peer_id, num_established);
+                }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::Hello(event)) => {
-                    handle_hello(event, swarm, &local_info);
+                    handle_hello(event, swarm, &local_info, &mut peer_registry);
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::Ticket(event)) => {
                     handle_ticket(
@@ -311,10 +521,11 @@ async fn event_loop(
                         &ticket_store,
                         &active_shells,
                         &shell_result_sender,
+                        &mut pending_close_tickets,
                     ).await;
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::RendezvousClient(event)) => {
-                    handle_rendezvous_client(event, swarm, target_peer);
+                    handle_rendezvous_client(event, swarm, target_peer, &mut peer_registry);
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::RendezvousServer(event)) => {
                     handle_rendezvous_server(event);
@@ -351,6 +562,7 @@ async fn event_loop(
                     identify::Event::Received { peer_id, info, .. },
                 )) => {
                     info!(remote_peer_id = %peer_id, protocol_version = %info.protocol_version, "identify received");
+                    peer_registry.record_identify(peer_id, &info);
                     if info
                         .protocols
                         .iter()
@@ -393,6 +605,7 @@ fn handle_rendezvous_client(
     event: rendezvous::client::Event,
     swarm: &mut Swarm<Behaviour>,
     target_peer: Option<PeerId>,
+    peer_registry: &mut PeerRegistry,
 ) {
     match event {
         rendezvous::client::Event::Registered {
@@ -413,6 +626,7 @@ fn handle_rendezvous_client(
                     continue;
                 }
                 let addresses = registration.record.addresses();
+                peer_registry.record_rendezvous(peer_id, addresses);
                 println!("Rendezvous discovered peer: {peer_id}");
                 for address in addresses {
                     println!("  {address}/p2p/{peer_id}");
@@ -484,6 +698,10 @@ async fn handle_ticket(
     ticket_store: &TicketStore,
     active_shells: &Arc<AtomicBool>,
     completion: &tokio::sync::mpsc::Sender<Result<()>>,
+    pending_close_tickets: &mut std::collections::HashMap<
+        request_response::OutboundRequestId,
+        tokio::sync::oneshot::Sender<Result<(), String>>,
+    >,
 ) {
     match event {
         request_response::Event::Message { peer, message, .. } => match message {
@@ -535,7 +753,17 @@ async fn handle_ticket(
                     warn!(remote_peer_id = %peer, "ticket response connection closed before sending");
                 }
             }
-            request_response::Message::Response { response, .. } => {
+            request_response::Message::Response {
+                request_id,
+                response,
+            } => {
+                if let Some(reply) = pending_close_tickets.remove(&request_id) {
+                    if response.success {
+                        let _ = reply.send(Ok(()));
+                    } else {
+                        let _ = reply.send(Err(response.message.clone()));
+                    }
+                }
                 if response.success {
                     println!("{}", response.message);
                     let _ = completion.send(Ok(())).await;
@@ -546,7 +774,15 @@ async fn handle_ticket(
                 }
             }
         },
-        request_response::Event::OutboundFailure { peer, error, .. } => {
+        request_response::Event::OutboundFailure {
+            request_id,
+            peer,
+            error,
+            ..
+        } => {
+            if let Some(reply) = pending_close_tickets.remove(&request_id) {
+                let _ = reply.send(Err(format!("ticket request to {peer} failed: {error}")));
+            }
             let _ = completion
                 .send(Err(anyhow::anyhow!(
                     "ticket request to {peer} failed: {error}"
@@ -566,6 +802,7 @@ fn handle_hello(
     event: request_response::Event<HelloRequest, HelloResponse>,
     swarm: &mut Swarm<Behaviour>,
     local_info: &NodeInfo,
+    peer_registry: &mut PeerRegistry,
 ) {
     match event {
         request_response::Event::Message { peer, message, .. } => match message {
@@ -577,6 +814,7 @@ fn handle_hello(
                     return;
                 }
                 print_remote_hello(&peer, &request.0);
+                peer_registry.record_hello(peer, &request.0);
                 if swarm
                     .behaviour_mut()
                     .hello
@@ -592,6 +830,7 @@ fn handle_hello(
                     return;
                 }
                 print_remote_hello(&peer, &response.0);
+                peer_registry.record_hello(peer, &response.0);
             }
         },
         request_response::Event::OutboundFailure { peer, error, .. } => {
@@ -680,5 +919,23 @@ mod tests {
         assert!(active
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok());
+    }
+
+    #[test]
+    fn peer_registry_tracks_peers_and_summaries() {
+        let mut registry = PeerRegistry::new();
+        let peer_id = PeerId::random();
+        let info = NodeInfo::local(peer_id, "OFFICE-PC".to_owned(), NodeMode::Managed);
+
+        registry.record_hello(peer_id, &info);
+        let summaries = registry.to_summaries();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].peer_id, peer_id.to_string());
+        assert_eq!(summaries[0].hostname, "OFFICE-PC");
+        assert_eq!(summaries[0].status, "CONNECTÉ");
+
+        registry.record_disconnection(&peer_id, 0);
+        let summaries_after = registry.to_summaries();
+        assert_eq!(summaries_after[0].status, "DÉCOUVERT");
     }
 }

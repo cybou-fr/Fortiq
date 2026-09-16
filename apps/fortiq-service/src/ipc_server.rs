@@ -2,17 +2,20 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use fortiq_core::{
-    ipc::{DaemonStatus, IpcRequest, IpcResponse, PeerSummary},
+    ipc::{DaemonStatus, IpcRequest, IpcResponse},
     Config, NodeMode, TicketStore,
 };
 use libp2p::PeerId;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+pub const MAX_IPC_LINE_BYTES: usize = 64 * 1024;
 
 pub struct IpcState {
     pub config: Config,
     pub peer_id: PeerId,
     pub listen_addresses: Vec<String>,
     pub ticket_store: TicketStore,
+    pub p2p_sender: Option<tokio::sync::mpsc::Sender<fortiq_p2p::P2pCommand>>,
 }
 
 pub async fn run_ipc_server(state: Arc<IpcState>) -> Result<()> {
@@ -67,6 +70,11 @@ async fn run_unix_socket(state: Arc<IpcState>) -> Result<()> {
         let _ = tokio::fs::create_dir_all(parent).await;
     }
     let listener = UnixListener::bind(&path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o660)).await;
+    }
     tracing::info!("Starting Unix Domain Socket IPC server at {}", path);
 
     loop {
@@ -95,7 +103,25 @@ where
     let mut reader = BufReader::new(read_half);
     let mut line = String::new();
 
-    while reader.read_line(&mut line).await? > 0 {
+    loop {
+        line.clear();
+        let bytes_read = {
+            let mut limiter = (&mut reader).take((MAX_IPC_LINE_BYTES + 1) as u64);
+            limiter.read_line(&mut line).await?
+        };
+        if bytes_read == 0 {
+            break;
+        }
+        if bytes_read > MAX_IPC_LINE_BYTES {
+            let response =
+                IpcResponse::Error("Request exceeds maximum size limit (64 KB)".to_string());
+            let mut res_bytes = serde_json::to_vec(&response)?;
+            res_bytes.push(b'\n');
+            write_half.write_all(&res_bytes).await?;
+            write_half.flush().await?;
+            break;
+        }
+
         let trimmed = line.trim();
         if !trimmed.is_empty() {
             let response = match serde_json::from_str::<IpcRequest>(trimmed) {
@@ -107,7 +133,6 @@ where
             write_half.write_all(&res_bytes).await?;
             write_half.flush().await?;
         }
-        line.clear();
     }
 
     Ok(())
@@ -140,18 +165,77 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 Err(e) => IpcResponse::Error(format!("Failed to open ticket: {e}")),
             }
         }
-        IpcRequest::CloseTicket { peer: _, dial: _ } => {
+        IpcRequest::CloseTicket { peer, dial } => {
             if state.config.mode() != NodeMode::Operator {
                 return IpcResponse::Error("Only operator can close tickets".to_string());
             }
-            IpcResponse::TicketClosed
+            let target_peer: PeerId = match peer.parse() {
+                Ok(p) => p,
+                Err(e) => return IpcResponse::Error(format!("Invalid target PeerId: {e}")),
+            };
+            let target_dial: Option<libp2p::Multiaddr> = match dial {
+                Some(d) => match d.parse() {
+                    Ok(addr) => Some(addr),
+                    Err(e) => {
+                        return IpcResponse::Error(format!("Invalid target dial multiaddr: {e}"))
+                    }
+                },
+                None => None,
+            };
+
+            if let Some(sender) = &state.p2p_sender {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                if sender
+                    .send(fortiq_p2p::P2pCommand::CloseTicket {
+                        peer: target_peer,
+                        dial: target_dial,
+                        reply: reply_tx,
+                    })
+                    .await
+                    .is_ok()
+                {
+                    match tokio::time::timeout(std::time::Duration::from_secs(10), reply_rx).await {
+                        Ok(Ok(Ok(()))) => IpcResponse::TicketClosed,
+                        Ok(Ok(Err(err))) => {
+                            IpcResponse::Error(format!("Failed to close remote ticket: {err}"))
+                        }
+                        Ok(Err(_)) => IpcResponse::Error(
+                            "P2P event loop dropped ticket reply channel".to_string(),
+                        ),
+                        Err(_) => IpcResponse::Error(
+                            "Timeout waiting for remote ticket closure".to_string(),
+                        ),
+                    }
+                } else {
+                    IpcResponse::Error("P2P subsystem channel closed".to_string())
+                }
+            } else {
+                IpcResponse::Error("P2P subsystem not running".to_string())
+            }
         }
-        IpcRequest::ListPeers => IpcResponse::Peers(vec![PeerSummary {
-            peer_id: "12D3KooWSx8m9zY24kLPq9aZ".to_string(),
-            hostname: "OFFICE-PC-01".to_string(),
-            os: "Windows 11 Pro".to_string(),
-            transport: "QUIC DIRECT".to_string(),
-            status: "Connected".to_string(),
-        }]),
+        IpcRequest::ListPeers => {
+            if let Some(sender) = &state.p2p_sender {
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                if sender
+                    .send(fortiq_p2p::P2pCommand::ListPeers { reply: reply_tx })
+                    .await
+                    .is_ok()
+                {
+                    match tokio::time::timeout(std::time::Duration::from_secs(3), reply_rx).await {
+                        Ok(Ok(peers)) => IpcResponse::Peers(peers),
+                        Ok(Err(_)) => {
+                            IpcResponse::Error("P2P event loop dropped reply channel".to_string())
+                        }
+                        Err(_) => IpcResponse::Error(
+                            "Timeout waiting for peers from P2P node".to_string(),
+                        ),
+                    }
+                } else {
+                    IpcResponse::Error("P2P subsystem channel closed".to_string())
+                }
+            } else {
+                IpcResponse::Peers(Vec::new())
+            }
+        }
     }
 }

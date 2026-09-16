@@ -198,6 +198,11 @@ body, html {
   box-shadow: 0 0 8px rgba(46, 160, 67, 0.7);
 }
 
+.status-dot.offline {
+  background-color: var(--accent-red);
+  box-shadow: 0 0 8px rgba(248, 81, 73, 0.7);
+}
+
 .user-info {
   display: flex;
   flex-direction: column;
@@ -213,6 +218,10 @@ body, html {
 .user-state {
   font-size: 11px;
   color: var(--accent-green);
+}
+
+.user-state.offline {
+  color: var(--accent-red);
 }
 
 /* Main 3-panel layout (Operator View) */
@@ -384,6 +393,72 @@ body, html {
   align-items: center;
   justify-content: center;
   gap: 8px;
+}
+
+button:disabled, .btn:disabled {
+  opacity: 0.38 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.offline-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(248, 81, 73, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.35);
+  border-radius: 8px;
+  color: #ff7b72;
+  font-size: 12px;
+  font-weight: 500;
+  margin: 12px 14px 0 14px;
+}
+
+.offline-banner i {
+  font-size: 18px;
+  flex-shrink: 0;
+  color: var(--accent-red);
+}
+
+.offline-banner code {
+  font-family: var(--font-mono);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: #fff;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+  text-align: center;
+  gap: 8px;
+}
+
+.empty-state i {
+  font-size: 36px;
+  color: var(--text-muted);
+  opacity: 0.5;
+  margin-bottom: 4px;
+}
+
+.empty-state-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.empty-state-subtitle {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  max-width: 220px;
 }
 
 .btn-primary {

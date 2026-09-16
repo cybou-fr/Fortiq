@@ -20,33 +20,22 @@
         </div>
 
         <nav class="nav-menu">
-          <button class="nav-item active" data-tab="tickets">
+          <button class="nav-item active" data-tab="tickets" id="nav-tab-tickets">
             <i class="ph ph-ticket nav-icon"></i>
-            <span>Tickets</span>
+            <span>Tickets &amp; Postes</span>
           </button>
-          <button class="nav-item" data-tab="peers">
+          <button class="nav-item" data-tab="peers" id="nav-tab-peers">
             <i class="ph ph-desktop nav-icon"></i>
-            <span>Postes &amp; Équipements</span>
-          </button>
-          <button class="nav-item" data-tab="settings">
-            <i class="ph ph-gear nav-icon"></i>
-            <span>Paramètres</span>
+            <span>Réseau P2P</span>
           </button>
         </nav>
 
-        <div class="sidebar-mode-switcher">
-          <button id="btn-toggle-mode" class="btn-mode-toggle" title="Basculer entre la console Opérateur et la vue Client Managé">
-            <i class="ph ph-swap"></i>
-            <span id="toggle-mode-label">Vue: Opérateur</span>
-          </button>
-        </div>
-
         <div class="sidebar-footer">
           <div class="user-badge">
-            <span class="status-dot online"></span>
+            <span id="status-dot" class="status-dot offline"></span>
             <div class="user-info">
-              <span id="user-role" class="user-role">OPERATEUR</span>
-              <span id="agent-state" class="user-state">En Ligne (P2P)</span>
+              <span id="user-role" class="user-role">DÉCONNECTÉ</span>
+              <span id="agent-state" class="user-state">Service Hors-Ligne</span>
             </div>
           </div>
         </div>
@@ -57,24 +46,20 @@
         <!-- Panel 1: Tickets List -->
         <section class="panel panel-list">
           <div class="panel-header">
-            <h2>Tickets Ouverts</h2>
+            <div>
+              <h2 id="panel-list-title">Postes Connectés</h2>
+              <span class="panel-subtitle" id="panel-list-subtitle">Réseau P2P Souverain</span>
+            </div>
             <div class="panel-actions">
-              <span id="tickets-count-badge" class="badge open">1 Actif</span>
+              <span id="tickets-count-badge" class="badge">0 Postes</span>
             </div>
           </div>
+          <div id="operator-offline-alert" class="offline-banner" style="display: none;">
+            <i class="ph ph-warning-circle"></i>
+            <span>Service FORTIQ hors-ligne. Lancez <code>fortiq-service</code>.</span>
+          </div>
           <div class="ticket-list" id="operator-ticket-list">
-            <div class="ticket-card active" id="sample-ticket-card">
-              <div class="ticket-card-header">
-                <span class="ticket-badge open">OUVERT</span>
-                <span class="ticket-id" id="card-ticket-id">#FT-7842</span>
-              </div>
-              <div class="ticket-card-title">Demande de Dépannage Réseau</div>
-              <div class="ticket-card-meta">
-                <span>OFFICE-PC-01</span>
-                <span>•</span>
-                <span>À l'instant</span>
-              </div>
-            </div>
+            <!-- Dynamic peers list rendered by main.ts -->
           </div>
         </section>
 
@@ -82,41 +67,37 @@
         <section class="panel panel-detail">
           <div class="panel-header">
             <div>
-              <h2 id="detail-ticket-title">Ticket #FT-7842</h2>
-              <span class="panel-subtitle">Détails de Session Distante</span>
+              <h2 id="detail-ticket-title">Détails de Session</h2>
+              <span class="panel-subtitle">Poste Distant P2P</span>
             </div>
-            <button id="btn-close-ticket" class="btn btn-secondary">Clôturer Ticket</button>
+            <button id="btn-close-ticket" class="btn btn-secondary" disabled>Clôturer Ticket</button>
           </div>
 
           <div class="detail-card">
             <div class="detail-row">
               <span class="detail-label">Poste Client (Hostname)</span>
-              <span class="detail-value">OFFICE-PC-01</span>
+              <span class="detail-value" id="detail-hostname">—</span>
             </div>
             <div class="detail-row">
               <span class="detail-label">Peer ID Client</span>
-              <span class="detail-value code" id="detail-peer-id">12D3KooWSx8m9zY24kLPq9aZ</span>
+              <span class="detail-value code" id="detail-peer-id">—</span>
             </div>
             <div class="detail-row">
               <span class="detail-label">Système d'Exploitation</span>
-              <span class="detail-value">Windows 11 Pro (x86_64)</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Moteur de Shell Détecté</span>
-              <span class="detail-value">PowerShell (pwsh.exe)</span>
+              <span class="detail-value" id="detail-os">—</span>
             </div>
             <div class="detail-row">
               <span class="detail-label">Transport Réseau</span>
-              <span class="detail-value"><span class="badge transport">QUIC DIRECT P2P</span></span>
+              <span class="detail-value" id="detail-transport">—</span>
             </div>
             <div class="detail-row">
               <span class="detail-label">État de Connexion</span>
-              <span class="detail-value"><span class="badge online" id="detail-connection-badge">Connecté &amp; Prêt</span></span>
+              <span class="detail-value"><span class="badge" id="detail-connection-badge">Non sélectionné</span></span>
             </div>
           </div>
 
           <div class="detail-actions">
-            <button id="btn-connect" class="btn btn-primary">
+            <button id="btn-connect" class="btn btn-primary" disabled>
               <i class="ph ph-terminal-window"></i>
               <span>Ouvrir Terminal d'Assistance</span>
             </button>
@@ -127,8 +108,8 @@
         <section class="panel panel-terminal">
           <div class="panel-header terminal-header">
             <div class="terminal-title">
-              <span class="status-dot online"></span>
-              <span>Terminal — OFFICE-PC-01</span>
+              <span class="status-dot" id="terminal-dot"></span>
+              <span id="terminal-title-text">Terminal P2P</span>
             </div>
             <div class="terminal-actions">
               <button class="btn-icon" id="btn-term-clear" title="Effacer l'écran">
@@ -140,18 +121,8 @@
             </div>
           </div>
           <div class="terminal-body" id="terminal-view">
-            <div class="terminal-line banner">FORTIQ Session SRE Distante (libp2p QUIC Direct)</div>
-            <div class="terminal-line banner">Cible: OFFICE-PC-01 | Shell: pwsh.exe | Authentification Ed25519: OK</div>
-            <div class="terminal-line">&nbsp;</div>
-            <div class="terminal-line prompt">PS C:\Users\support&gt; whoami</div>
-            <div class="terminal-line output">office-pc-01\administrateur</div>
-            <div class="terminal-line prompt">PS C:\Users\support&gt; Get-Service fortiq-service</div>
-            <div class="terminal-line output">Status   Name               DisplayName</div>
-            <div class="terminal-line output">------   ----               -----------</div>
-            <div class="terminal-line output">Running  fortiq-service     FORTIQ Agent de Maintenance Souverain</div>
-            <div class="terminal-line prompt">PS C:\Users\support&gt; Test-NetConnection -Port 4001 -InformationLevel Quiet</div>
-            <div class="terminal-line output">True</div>
-            <div class="terminal-line prompt">PS C:\Users\support&gt; <span class="cursor">_</span></div>
+            <div class="terminal-line banner">Terminal P2P — En attente de session (M12 ConPTY/xterm)</div>
+            <div class="terminal-line banner">Sélectionnez un poste client connecté pour initialiser la liaison directe.</div>
           </div>
         </section>
       </main>
@@ -161,10 +132,15 @@
         <div class="managed-card">
           <div class="managed-card-header">
             <div class="managed-beacon">
-              <span class="status-dot online"></span>
-              <span class="managed-beacon-text">Service Agent Actif · Réseau P2P Sécurisé</span>
+              <span id="managed-beacon-dot" class="status-dot offline"></span>
+              <span id="managed-beacon-text" class="managed-beacon-text">Service Agent Actif · Réseau P2P Sécurisé</span>
             </div>
             <span class="badge transport">SOUVERAIN</span>
+          </div>
+
+          <div id="managed-offline-alert" class="offline-banner" style="display: none;">
+            <i class="ph ph-warning-circle"></i>
+            <span>Démon FORTIQ hors-ligne. Le service local d'arrière-plan n'est pas démarré.</span>
           </div>
 
           <div class="managed-hero">
@@ -194,7 +170,7 @@
             <div id="managed-state-open" class="ticket-state-box" style="display: none;">
               <div class="ticket-active-badge">
                 <span class="ticket-badge open">TICKET ACTIF</span>
-                <span id="managed-ticket-id" class="ticket-id">#FT-7842</span>
+                <span id="managed-ticket-id" class="ticket-id">—</span>
               </div>
               <div class="ticket-waiting-msg">
                 <span class="pulse-ring"></span>
@@ -203,7 +179,7 @@
               <div class="ticket-managed-details">
                 <div class="detail-row">
                   <span class="detail-label">Opérateur autorisé</span>
-                  <span id="managed-operator-id" class="detail-value code">12D3KooW_OPERATOR_REFERENT</span>
+                  <span id="managed-operator-id" class="detail-value code">—</span>
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Sécurité &amp; Confidentialité</span>

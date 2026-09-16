@@ -13,7 +13,15 @@
 - Milestone 8: optional rendezvous server capability plus client registration/discovery in the private `fortiq` namespace.
 - Milestone 9: optional Circuit Relay v2 service, client reservations, relayed dialing, and shell operation through a relay.
 - Milestone 10: automatic DCUtR direct-upgrade attempts on relayed connections with explicit, non-disruptive relay fallback.
-- Milestone 11: Local daemon IPC server (Windows Named Pipes, Linux Unix Domain Sockets) and dual-mode Tauri desktop client (`fortiq-desktop`) presenting the 3-panel Operator Console and Managed support card with vector icons.
+
+## In Progress
+
+- Milestone 11: Local daemon IPC server (Windows Named Pipes, Unix Domain Sockets) and dual-mode Tauri desktop client (`fortiq-desktop`).
+  - Implemented: Internal `P2pCommand` channel bridging IPC server to the live libp2p Swarm event loop (`ListPeers`, `CloseTicket`).
+  - Implemented: In-memory `PeerRegistry` tracking discovered peers, hostnames, OS, transports, and connection states from HELLO, Identify, and rendezvous.
+  - Implemented: Real P2P remote ticket closure via `/fortiq/ticket/1.0` correlated via `OutboundRequestId`.
+  - Implemented: IPC hardening with `MAX_IPC_LINE_BYTES = 64 KB` and Unix socket permissions (`0660`).
+  - Implemented: Honest desktop UI without mock fallbacks, explicit `SERVICE HORS LIGNE` state with action guards, and dynamic peer list rendering.
 
 ## WSL to VPS smoke test
 

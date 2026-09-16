@@ -148,11 +148,14 @@ async fn main() -> Result<()> {
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
     let local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
 
+    let (p2p_cmd_tx, p2p_cmd_rx) = tokio::sync::mpsc::channel(32);
+
     let ipc_state = Arc::new(ipc_server::IpcState {
         config: config.clone(),
         peer_id,
         listen_addresses: vec![listen_address.to_string()],
         ticket_store,
+        p2p_sender: Some(p2p_cmd_tx),
     });
     tokio::spawn(async move {
         if let Err(e) = ipc_server::run_ipc_server(ipc_state).await {
@@ -167,6 +170,7 @@ async fn main() -> Result<()> {
         shell_peer: args.shell,
         shell_command: args.shell_command,
         close_ticket_peer,
+        command_receiver: Some(p2p_cmd_rx),
     };
     fortiq_p2p::run(keypair, local_info, options).await
 }
