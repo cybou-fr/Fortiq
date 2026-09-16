@@ -139,6 +139,23 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
 
     tracing::info!("FORTIQ Service starting: mode={mode}, peer_id={peer_id}");
 
+    // Lab and infrastructure nodes (our relay VPS, the WSL test peer) opt in
+    // locally to staying reachable across restarts. The flag lives in this
+    // machine's own config: an operator can never set it remotely, and a client
+    // machine leaves it off so the ticket stays the user's consent gesture.
+    if config.ticket.auto_open {
+        if mode != NodeMode::Managed {
+            tracing::warn!("ticket.auto_open ignored: tickets exist only on managed nodes");
+        } else {
+            match ticket_store.open().await {
+                Ok(ticket) => {
+                    tracing::info!(ticket_id = %ticket.id, "ticket auto-opened at service start")
+                }
+                Err(error) => tracing::warn!(%error, "failed to auto-open ticket at start"),
+            }
+        }
+    }
+
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
     let local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
 
