@@ -130,6 +130,27 @@
         </section>
       </main>
 
+      <!-- Operator P2P network inventory (separate from support tickets) -->
+      <main id="peers-view" class="network-layout" style="display: none;">
+        <section class="panel network-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Réseau P2P</h2>
+              <span class="panel-subtitle">Inventaire technique des pairs connus</span>
+            </div>
+            <span id="network-count-badge" class="badge">0 Pair</span>
+          </div>
+          <div class="network-security-note">
+            <i class="ph ph-shield-check"></i>
+            <div>
+              <strong>Transport authentifié et chiffré</strong>
+              <span>QUIC pour les liaisons directes · Noise + Yamux pour les circuits relay</span>
+            </div>
+          </div>
+          <div id="network-peer-list" class="network-peer-grid"></div>
+        </section>
+      </main>
+
       <!-- Main Content Area: Managed Support View (Minimalist Customer Card) -->
       <main id="managed-view" class="managed-layout" style="display: none;">
         <div class="managed-card">
@@ -186,7 +207,7 @@
                 </div>
                 <div class="detail-row">
                   <span class="detail-label">Sécurité &amp; Confidentialité</span>
-                  <span class="detail-value">Chiffrement direct Ed25519 · Zéro cloud intermédiaire</span>
+                  <span class="detail-value">Transport P2P authentifié et chiffré · Zéro cloud intermédiaire</span>
                 </div>
               </div>
             </div>

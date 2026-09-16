@@ -27,6 +27,7 @@ let selectedPeerId: string | null = null;
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let isTerminalActive = false;
+let activeOperatorTab: "tickets" | "peers" = "tickets";
 
 function escapeHtml(text: string): string {
   const div = document.createElement("div");
@@ -36,21 +37,35 @@ function escapeHtml(text: string): string {
 
 function applyMode(mode: "operator" | "managed", isOnline: boolean) {
   const operatorView = document.getElementById("operator-view");
+  const peersView = document.getElementById("peers-view");
   const managedView = document.getElementById("managed-view");
+  const navMenu = document.querySelector(".nav-menu") as HTMLElement | null;
   const brandModeEl = document.getElementById("brand-mode");
   const userRoleEl = document.getElementById("user-role");
 
   if (mode === "operator") {
-    if (operatorView) operatorView.style.display = "grid";
+    if (operatorView) operatorView.style.display = activeOperatorTab === "tickets" ? "grid" : "none";
+    if (peersView) peersView.style.display = activeOperatorTab === "peers" ? "grid" : "none";
     if (managedView) managedView.style.display = "none";
+    if (navMenu) navMenu.style.display = "flex";
     if (brandModeEl) brandModeEl.textContent = "CONSOLE OPÉRATEUR";
     if (userRoleEl) userRoleEl.textContent = isOnline ? "OPÉRATEUR" : "DÉCONNECTÉ";
   } else {
     if (operatorView) operatorView.style.display = "none";
+    if (peersView) peersView.style.display = "none";
     if (managedView) managedView.style.display = "flex";
+    if (navMenu) navMenu.style.display = "none";
     if (brandModeEl) brandModeEl.textContent = "CLIENT MANAGÉ";
     if (userRoleEl) userRoleEl.textContent = isOnline ? "CLIENT MANAGÉ" : "DÉCONNECTÉ";
   }
+}
+
+function setOperatorTab(tab: "tickets" | "peers") {
+  activeOperatorTab = tab;
+  const operatorView = document.getElementById("operator-view");
+  const peersView = document.getElementById("peers-view");
+  if (operatorView) operatorView.style.display = tab === "tickets" ? "grid" : "none";
+  if (peersView) peersView.style.display = tab === "peers" ? "grid" : "none";
 }
 
 function updateStatusBadge(isOnline: boolean, stateText: string) {
@@ -254,6 +269,41 @@ function renderPeerList(peers: DesktopPeer[], isOnline: boolean) {
   }
 }
 
+function renderNetworkPeers(peers: DesktopPeer[], isOnline: boolean) {
+  const container = document.getElementById("network-peer-list");
+  const countBadge = document.getElementById("network-count-badge");
+  if (!container) return;
+
+  if (countBadge) {
+    countBadge.textContent = `${peers.length} Pair${peers.length > 1 ? "s" : ""}`;
+    countBadge.className = peers.length > 0 ? "badge open" : "badge";
+  }
+
+  if (!isOnline || peers.length === 0) {
+    container.innerHTML = `<div class="empty-state network-empty">
+      <i class="ph ph-network-slash"></i>
+      <div class="empty-state-title">${isOnline ? "Aucun pair connu" : "Service déconnecté"}</div>
+      <div class="empty-state-subtitle">${isOnline ? "Les pairs apparaîtront après leur enregistrement rendezvous." : "Le service FORTIQ doit être actif."}</div>
+    </div>`;
+    return;
+  }
+
+  container.innerHTML = peers.map((peer) => {
+    const connected = peer.status.toLowerCase() === "connected";
+    return `<article class="network-peer-card">
+      <div class="network-peer-heading">
+        <i class="ph ph-desktop-tower"></i>
+        <div><strong>${escapeHtml(peer.hostname || "Pair inconnu")}</strong><span>${escapeHtml(peer.os || "OS inconnu")}</span></div>
+        <span class="ticket-badge ${connected ? "open" : ""}">${connected ? "CONNECTÉ" : escapeHtml(peer.status.toUpperCase())}</span>
+      </div>
+      <dl>
+        <div><dt>Peer ID</dt><dd class="code" title="${escapeHtml(peer.peerId)}">${escapeHtml(peer.peerId)}</dd></div>
+        <div><dt>Transport</dt><dd>${escapeHtml(peer.transport || "P2P")}</dd></div>
+      </dl>
+    </article>`;
+  }).join("");
+}
+
 async function refresh() {
   try {
     const status = await invoke<DesktopStatus>("desktop_status");
@@ -274,15 +324,18 @@ async function refresh() {
         try {
           const peers = await invoke<DesktopPeer[]>("list_peers");
           renderPeerList(peers, true);
+          renderNetworkPeers(peers, true);
         } catch (err) {
           console.warn("Failed to fetch peers:", err);
           renderPeerList([], true);
+          renderNetworkPeers([], true);
         }
       }
     } else {
       applyMode(status.mode === "managed" ? "managed" : "operator", false);
       updateManagedTicketUI(null, null, false);
       renderPeerList([], false);
+      renderNetworkPeers([], false);
     }
   } catch (err) {
     console.warn("Daemon unreachable:", err);
@@ -290,6 +343,7 @@ async function refresh() {
     applyMode("operator", false);
     updateManagedTicketUI(null, null, false);
     renderPeerList([], false);
+    renderNetworkPeers([], false);
   }
 }
 
@@ -381,6 +435,10 @@ function initEventListeners() {
     btn.addEventListener("click", () => {
       navItems.forEach((item) => item.classList.remove("active"));
       btn.classList.add("active");
+      const tab = (btn as HTMLElement).dataset.tab;
+      if (tab === "tickets" || tab === "peers") {
+        setOperatorTab(tab);
+      }
     });
   });
 }
