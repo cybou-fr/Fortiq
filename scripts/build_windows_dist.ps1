@@ -22,15 +22,37 @@ $distRoot = Join-Path $rootDir "target\dist"
 $payloadDir = Join-Path $distRoot "windows-payload"
 $installerDir = Join-Path $distRoot "installers"
 
+# Windows PowerShell 5.1 turns every stderr line from a native command into a
+# NativeCommandError while $ErrorActionPreference is "Stop", so cargo's ordinary
+# progress output aborted the script. Run native tools with the preference
+# relaxed and judge them by their exit code instead.
+function Invoke-NativeCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$FailureMessage,
+        [Parameter(Mandatory = $true)][scriptblock]$Command
+    )
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Command
+        if ($LASTEXITCODE -ne 0) { throw $FailureMessage }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 if (-not $SkipBuild) {
-    & $cargoPath build --release --target $Target -p fortiq-service -p fortiq-cli
-    if ($LASTEXITCODE -ne 0) { throw "Backend build failed." }
+    Invoke-NativeCommand -FailureMessage "Backend build failed." -Command {
+        & $cargoPath build --release --target $Target -p fortiq-service -p fortiq-cli
+    }
     Push-Location $desktopDir
     try {
-        npm.cmd run build
-        if ($LASTEXITCODE -ne 0) { throw "Desktop frontend build failed." }
-        & $cargoPath build --release --target $Target --manifest-path src-tauri/Cargo.toml
-        if ($LASTEXITCODE -ne 0) { throw "Desktop executable build failed." }
+        Invoke-NativeCommand -FailureMessage "Desktop frontend build failed." -Command {
+            npm.cmd run build
+        }
+        Invoke-NativeCommand -FailureMessage "Desktop executable build failed." -Command {
+            & $cargoPath build --release --target $Target --manifest-path src-tauri/Cargo.toml
+        }
     } finally {
         Pop-Location
     }
