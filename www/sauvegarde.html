@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sauvegarde 3-2-1 &amp; Protection Anti-Ransomware — FORTIQ</title>
+    <meta
+      name="description"
+      content="Une sauvegarde non testée n'est pas fiable. Mise en place de la règle 3-2-1, chiffrement étanche, copie isolée hors ligne et tests réguliers de restauration de vos données."
+    />
+    <link rel="canonical" href="https://fortiq.fr/sauvegarde.html" />
+    <link rel="icon" type="image/png" href="assets/logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet" />
+
+    <meta property="og:title" content="Sauvegarde 3-2-1 &amp; Protection Anti-Ransomware — FORTIQ" />
+    <meta property="og:description" content="Sécurisez vos données avec la règle 3-2-1 et des tests de restauration périodiques." />
+    <meta property="og:url" content="https://fortiq.fr/sauvegarde.html" />
+    <meta property="og:type" content="website" />
+
+    <!-- Schema.org JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Service",
+      "name": "Supervision des Sauvegardes et Reprise d'Activité 3-2-1",
+      "provider": {
+        "@type": "Organization",
+        "name": "FORTIQ",
+        "url": "https://fortiq.fr"
+      },
+      "areaServed": "France",
+      "description": "Mise en place de la stratégie 3-2-1, supervision quotidienne des sauvegardes, chiffrement des données et tests réguliers de restauration pour TPE et PME."
+    }
+    </script>
+  </head>
+  <body>
+    <canvas id="particleCanvas" class="particle-canvas"></canvas>
+    <div class="glow-bg top-glow"></div>
+
+    <!-- Header Navigation -->
+    <header class="site-header">
+      <div class="container nav-container">
+        <a href="index.html" class="nav-brand">
+          <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+          <span class="brand-name">FORTIQ</span>
+          <span class="brand-tag">SAUVEGARDES 3-2-1</span>
+        </a>
+
+        <nav class="nav-links">
+          <a href="index.html">Accueil</a>
+          <a href="tarifs.html">Tarifs</a>
+          <a href="particuliers.html">Particuliers</a>
+          <a href="tpe-pme.html">TPE &amp; PME</a>
+          <a href="cybersecurite.html">Cybersécurité</a>
+          <a href="sauvegarde.html" class="active">Sauvegardes</a>
+          <a href="technologie-fortiq.html">Technologie</a>
+          <a href="faq.html">FAQ</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer" class="btn btn-secondary nav-github-btn">
+            <i class="ri-github-fill" style="font-size: 1.2rem; vertical-align: -2px; margin-right: 4px;"></i>
+            <span>GitHub</span>
+          </a>
+          <a href="contact.html" class="btn btn-primary">Diagnostic Offert</a>
+        </div>
+
+        <button class="mobile-menu-toggle" id="menuToggle" aria-label="Ouvrir le menu">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile Drawer -->
+    <div class="mobile-drawer" id="mobileDrawer">
+      <nav class="mobile-nav">
+        <a href="index.html" class="mobile-link">Accueil</a>
+        <a href="tarifs.html" class="mobile-link">Tarifs 2026</a>
+        <a href="particuliers.html" class="mobile-link">Particuliers</a>
+        <a href="tpe-pme.html" class="mobile-link">TPE &amp; PME</a>
+        <a href="cybersecurite.html" class="mobile-link">Cybersécurité</a>
+        <a href="sauvegarde.html" class="mobile-link active" style="color: var(--accent-cyan);">Sauvegardes</a>
+        <a href="technologie-fortiq.html" class="mobile-link">Technologie FORTIQ</a>
+        <a href="faq.html" class="mobile-link">FAQ</a>
+        <a href="contact.html" class="btn btn-primary mobile-cta">Demander un Diagnostic</a>
+      </nav>
+    </div>
+
+    <!-- Subpage Hero -->
+    <section class="page-hero">
+      <div class="container">
+        <div class="breadcrumb">
+          <a href="index.html">Accueil</a>
+          <span>/</span>
+          <span>Sauvegardes 3-2-1</span>
+        </div>
+        <h1 class="page-hero-title">
+          Une Sauvegarde qui n'a Jamais Été Testée <span class="gradient-text">N'est Pas Encore une Sauvegarde Fiable</span>
+        </h1>
+        <p class="page-hero-subtitle">
+          Disque dur en panne, suppression accidentelle d'un dossier clé, vol ou rançongiciel : la question n'est pas de savoir si un incident surviendra, mais à quelle vitesse vous pourrez reprendre votre activité. FORTIQ sécurise, supervise et teste vos sauvegardes au quotidien.
+        </p>
+        <div class="hero-cta-group" style="justify-content: center;">
+          <a href="contact.html" class="btn btn-primary btn-lg">Faire Tester Vos Sauvegardes</a>
+          <a href="tarifs.html" class="btn btn-secondary btn-lg">Voir Nos Forfaits avec Sauvegarde</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Règle 3-2-1 Visuelle -->
+    <section class="section">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">LE MODÈLE RECOMMANDÉ PAR L'ANSSI</span>
+          <h2 class="section-title">La Stratégie de Sauvegarde 3-2-1 en Pratique</h2>
+          <p class="section-subtitle">
+            Une méthode éprouvée pour garantir qu'aucune panne matérielle ni aucun sinistre physique ne puisse anéantir vos données d'entreprise ou vos souvenirs précieux.
+          </p>
+        </div>
+
+        <div class="backup-rule-grid reveal">
+          <div class="backup-rule-card">
+            <div class="backup-digit">3</div>
+            <h4>Copies de Vos Fichiers</h4>
+            <p>
+              Conserver au moins 3 exemplaires de vos données : la copie de travail sur votre poste, plus 2 copies de sécurité indépendantes créées automatiquement.
+            </p>
+          </div>
+
+          <div class="backup-rule-card">
+            <div class="backup-digit">2</div>
+            <h4>Supports Distincts</h4>
+            <p>
+              Ne jamais stocker vos sauvegardes sur le même support physique. Nous combinons par exemple un serveur NAS local sécurisé (Synology/QNAP) et un disque ou espace distant chiffré.
+            </p>
+          </div>
+
+          <div class="backup-rule-card">
+            <div class="backup-digit">1</div>
+            <h4>Copie Isolée Hors Ligne</h4>
+            <p>
+              Indispensable contre les rançongiciels : au moins une copie doit être isolée ou immuable, déconnectée du réseau local pour rester hors de portée des pirates.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout-box reveal">
+          <h4><i class="ri-check-double-line" style="color: var(--accent-cyan);"></i> Pourquoi le Test de Restauration Est Crucial ?</h4>
+          <p>
+            Beaucoup d'entreprises pensent être protégées parce qu'un disque externe est branché sur un ordinateur. Mais le jour du drame, elles découvrent que la tâche échouait depuis six mois ou que les fichiers sont illisibles. Chez FORTIQ, <strong>nous réalisons des simulations réelles de restauration</strong> pour vérifier que vos devis, factures, bases comptables et contrats s'ouvrent parfaitement.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Les 5 Étapes FORTIQ -->
+    <section class="section" style="background: rgba(10, 16, 26, 0.3);">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">MÉTHODOLOGIE</span>
+          <h2 class="section-title">Comment Nous Protégeons Vos Données Pas à Pas</h2>
+          <p class="section-subtitle">
+            Une mise en place sans stress et un suivi rigoureux par votre technicien.
+          </p>
+        </div>
+
+        <div class="grid grid-3">
+          <div class="feature-card reveal reveal-delay-1">
+            <div class="feature-icon"><i class="ri-search-eye-line"></i></div>
+            <h3>1. Cartographie des Données</h3>
+            <p>
+              Nous identifions ensemble ce qui est réellement vital : comptabilité, devis en cours, fichiers clients, dossiers personnels, boîte mail et bases métiers.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-2">
+            <div class="feature-icon"><i class="ri-settings-4-line"></i></div>
+            <h3>2. Automatisation Invisible</h3>
+            <p>
+              Configuration de sauvegardes automatiques quotidiennes sans ralentir le travail de vos collaborateurs. Vous n'avez plus besoin d'y penser.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-3">
+            <div class="feature-icon"><i class="ri-lock-line"></i></div>
+            <h3>3. Chiffrement Robuste</h3>
+            <p>
+              Vos sauvegardes sont chiffrées de bout en bout. Même si un disque dur ou un support est volé, personne ne peut en lire le contenu.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-1">
+            <div class="feature-icon"><i class="ri-radar-line"></i></div>
+            <h3>4. Surveillance Quotidienne</h3>
+            <p>
+              Nous vérifions chaque matin les journaux d'exécution. Si une sauvegarde échoue ou si l'espace disque s'amenuise, nous intervenons immédiatement.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-2">
+            <div class="feature-icon"><i class="ri-restart-line"></i></div>
+            <h3>5. Tests de Restauration Périodiques</h3>
+            <p>
+              Nous restaurons des fichiers au hasard pour certifier l'intégrité de la chaîne de sauvegarde et valider le temps réel de reprise d'activité.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-3">
+            <div class="feature-icon"><i class="ri-lifebuoy-line"></i></div>
+            <h3>6. Récupération d'Urgence Immédiate</h3>
+            <p>
+              En cas de panne matérielle ou de vol, votre technicien FORTIQ réinjecte vos données sur une nouvelle machine configurée en un temps record.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="container footer-container">
+        <div class="footer-left">
+          <div class="footer-brand">
+            <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+            <span class="brand-name">FORTIQ</span>
+          </div>
+          <p class="footer-desc">
+            Sauvegardes souveraines 3-2-1, assistance informatique et infogérance pour professionnels et particuliers en France.
+          </p>
+        </div>
+
+        <div class="footer-links-group">
+          <div class="footer-col">
+            <h5>Prestations</h5>
+            <a href="sauvegarde.html">Sauvegardes 3-2-1</a>
+            <a href="cybersecurite.html">Cybersécurité ANSSI</a>
+            <a href="tpe-pme.html">TPE &amp; PME</a>
+            <a href="particuliers.html">Particuliers</a>
+            <a href="tarifs.html">Grille Tarifaire</a>
+          </div>
+          <div class="footer-col">
+            <h5>Sécurité &amp; Confiance</h5>
+            <a href="technologie-fortiq.html">Technologie P2P Souveraine</a>
+            <a href="faq.html">Foire Aux Questions</a>
+            <a href="contact.html">Diagnostic Sauvegardes Offert</a>
+          </div>
+          <div class="footer-col">
+            <h5>Open Source</h5>
+            <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer">
+              <i class="ri-github-fill" style="vertical-align: -1px; margin-right: 4px;"></i> GitHub
+            </a>
+            <a href="contact.html">Support Client</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="container footer-bottom">
+        <p>&copy; 2026 FORTIQ. Tous droits réservés.</p>
+        <p>Sauvegardes fiables &amp; Infogérance souveraine · Conçue en France.</p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

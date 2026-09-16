@@ -3,22 +3,46 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FORTIQ — Support &amp; Infogérance Informatique Souveraine pour TPE &amp; PME</title>
+    <title>FORTIQ — Assistance Informatique, Cybersécurité &amp; Sauvegarde Partout en France</title>
     <meta
       name="description"
-      content="Maintenance, dépannage et sécurisation de votre parc informatique (PC, Mac, réseaux, sauvegardes). Un service souverain 100% pair-à-pair, sans cloud tiers ni fuite de données."
+      content="FORTIQ accompagne particuliers, indépendants, TPE et PME dans la maintenance de leurs ordinateurs, la protection des données, les sauvegardes 3-2-1 et l'assistance à distance partout en France."
     />
+    <link rel="canonical" href="https://fortiq.fr/" />
     <link rel="icon" type="image/png" href="assets/logo.png" />
     <link rel="stylesheet" href="styles.css" />
-    <!-- Google Fonts for sleek tech typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <!-- Remix Icon font for clean tech vector icons -->
     <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet" />
+
+    <!-- OpenGraph -->
+    <meta property="og:title" content="FORTIQ — Assistance Informatique, Cybersécurité &amp; Sauvegarde Partout en France" />
+    <meta property="og:description" content="Maintenance d'ordinateurs, protection de vos données, sauvegardes 3-2-1 et assistance rapide à distance pour particuliers et entreprises." />
+    <meta property="og:url" content="https://fortiq.fr/" />
+    <meta property="og:type" content="website" />
+
+    <!-- Schema.org Organization & Service Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "FORTIQ",
+      "url": "https://fortiq.fr",
+      "logo": "https://fortiq.fr/assets/logo.png",
+      "description": "Assistance informatique, cybersécurité, sauvegarde et maintenance à distance pour particuliers, TPE et PME en France.",
+      "areaServed": "France",
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "email": "contact@fortiq.net",
+        "contactType": "customer service",
+        "availableLanguage": "French"
+      }
+    }
+    </script>
   </head>
   <body>
     <!-- Interactive P2P Particle Canvas Background -->
@@ -31,18 +55,22 @@
     <!-- Navigation Header -->
     <header class="site-header">
       <div class="container nav-container">
-        <a href="#" class="nav-brand">
+        <a href="index.html" class="nav-brand">
           <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
           <span class="brand-name">FORTIQ</span>
-          <span class="brand-tag">SUPPORT IT</span>
+          <span class="brand-tag">ASSISTANCE &amp; SÉCURITÉ</span>
         </a>
 
         <nav class="nav-links">
-          <a href="#services">Nos Services</a>
-          <a href="#souverainete">Souveraineté P2P</a>
-          <a href="#tpe-pme">TPE &amp; PME</a>
-          <a href="#fonctionnement">Fonctionnement</a>
-          <a href="#contact">Contact</a>
+          <a href="index.html" class="active">Accueil</a>
+          <a href="tarifs.html">Tarifs</a>
+          <a href="particuliers.html">Particuliers</a>
+          <a href="tpe-pme.html">TPE &amp; PME</a>
+          <a href="cybersecurite.html">Cybersécurité</a>
+          <a href="sauvegarde.html">Sauvegardes</a>
+          <a href="technologie-fortiq.html">Technologie</a>
+          <a href="faq.html">FAQ</a>
+          <a href="contact.html">Contact</a>
         </nav>
 
         <div class="nav-actions">
@@ -50,7 +78,7 @@
             <i class="ri-github-fill" style="font-size: 1.2rem; vertical-align: -2px; margin-right: 4px;"></i>
             <span>GitHub</span>
           </a>
-          <a href="#contact" class="btn btn-primary">Diagnostic Offert</a>
+          <a href="contact.html" class="btn btn-primary">Diagnostic Offert</a>
         </div>
 
         <button class="mobile-menu-toggle" id="menuToggle" aria-label="Ouvrir le menu">
@@ -62,14 +90,15 @@
     <!-- Mobile Drawer -->
     <div class="mobile-drawer" id="mobileDrawer">
       <nav class="mobile-nav">
-        <a href="#services" class="mobile-link">Nos Services</a>
-        <a href="#souverainete" class="mobile-link">Souveraineté P2P</a>
-        <a href="#tpe-pme" class="mobile-link">TPE &amp; PME</a>
-        <a href="#fonctionnement" class="mobile-link">Fonctionnement</a>
-        <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer" class="mobile-link" style="color: #58a6ff;">
-          <i class="ri-github-fill" style="vertical-align: -2px; margin-right: 6px;"></i> Code Source (GitHub)
-        </a>
-        <a href="#contact" class="btn btn-primary mobile-cta">Demander un Diagnostic</a>
+        <a href="index.html" class="mobile-link active" style="color: var(--accent-cyan);">Accueil</a>
+        <a href="tarifs.html" class="mobile-link">Tarifs 2026</a>
+        <a href="particuliers.html" class="mobile-link">Particuliers (dès 39 €)</a>
+        <a href="tpe-pme.html" class="mobile-link">TPE &amp; PME (dès 39 € HT)</a>
+        <a href="cybersecurite.html" class="mobile-link">Cybersécurité ANSSI</a>
+        <a href="sauvegarde.html" class="mobile-link">Sauvegardes 3-2-1</a>
+        <a href="technologie-fortiq.html" class="mobile-link">Technologie FORTIQ</a>
+        <a href="faq.html" class="mobile-link">FAQ &amp; Réponses</a>
+        <a href="contact.html" class="btn btn-primary mobile-cta">Demander un Diagnostic</a>
       </nav>
     </div>
 
@@ -78,29 +107,34 @@
       <div class="container hero-container">
         <div class="hero-badge">
           <span class="badge-dot"></span>
-          <span><i class="ri-shield-check-line" style="margin-right: 4px; vertical-align: -1px;"></i> Informatique Souveraine · Assistance de Proximité · Zéro Cloud Tiers</span>
+          <span><i class="ri-shield-check-line" style="margin-right: 4px; vertical-align: -1px;"></i> Maintenance · Cybersécurité · Sauvegarde · Partout en France</span>
         </div>
 
         <h1 class="hero-title">
-          Votre parc informatique géré en toute sérénité, <span class="gradient-text">sans dépendre des géants du cloud</span>
+          Assistance informatique, cybersécurité et sauvegarde à distance <span class="gradient-text">partout en France</span>
         </h1>
 
         <p class="hero-subtitle">
-          Nous accompagnons les TPE, PME, artisans et professions libérales au quotidien. 
-          Dépannage rapide de vos ordinateurs Windows et Mac, sécurisation de votre réseau de bureau et sauvegardes automatiques anti-ransomware — le tout propulsé par notre technologie souveraine 100% pair-à-pair.
+          FORTIQ accompagne particuliers, indépendants, TPE et PME dans la maintenance de leurs ordinateurs, la protection de leurs données, les sauvegardes et l'assistance quotidienne — à distance, rapidement et en toute transparence.
         </p>
 
         <div class="hero-cta-group">
-          <a href="#contact" class="btn btn-primary btn-lg">
-            <span>Faire le point sur mon informatique</span>
-            <span class="btn-subtext">Échange direct &amp; diagnostic offert</span>
+          <a href="tarifs.html" class="btn btn-primary btn-lg">
+            <span>Découvrir les Tarifs 2026</span>
+            <span class="btn-subtext">Dès 39 € / mois · Sans surprise</span>
           </a>
-          <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer" class="btn btn-secondary btn-lg">
-            <span><i class="ri-github-fill" style="vertical-align: -2px; margin-right: 6px;"></i> Explorer sur GitHub</span>
-            <span class="btn-subtext">Code source souverain 100% Rust</span>
+          <a href="contact.html" class="btn btn-secondary btn-lg">
+            <span>Demander un Diagnostic Offert</span>
+            <span class="btn-subtext">Échange direct de 20 min sans engagement</span>
           </a>
         </div>
 
+        <div style="font-size: 13.5px; color: var(--text-muted); margin-top: 14px; text-align: center;">
+          <i class="ri-shield-keyhole-line" style="color: var(--accent-cyan); vertical-align: -1px; margin-right: 4px;"></i>
+          Notre technologie souveraine FORTIQ permet une administration distante sécurisée <strong>sans exposer de port d'administration permanent</strong>.
+        </div>
+
+        <!-- Hero Stats -->
         <div class="hero-stats reveal">
           <div class="stat-item">
             <span class="stat-value">100% Souverain</span>
@@ -108,15 +142,15 @@
           </div>
           <div class="stat-item">
             <span class="stat-value">&lt; 30 min</span>
-            <span class="stat-label">Réactivité d'assistance aux utilisateurs</span>
+            <span class="stat-label">Réactivité d'assistance sous contrat</span>
           </div>
           <div class="stat-item">
             <span class="stat-value">PC · Mac · Linux</span>
-            <span class="stat-label">Prise en charge de tout votre matériel</span>
+            <span class="stat-label">Prise en charge de tout votre parc</span>
           </div>
           <div class="stat-item">
-            <span class="stat-value">RGPD Garanti</span>
-            <span class="stat-label">Vos données restent chez vous</span>
+            <span class="stat-value">Sauvegardes 3-2-1</span>
+            <span class="stat-label">Données chiffrées &amp; tests de restauration</span>
           </div>
         </div>
 
@@ -138,9 +172,7 @@
               <div class="dash-metrics-grid">
                 <div class="dash-metric-card">
                   <div class="dash-metric-top">
-                    <span class="dash-metric-icon">
-                      <i class="ri-computer-line"></i>
-                    </span>
+                    <span class="dash-metric-icon"><i class="ri-computer-line"></i></span>
                     <span class="dash-metric-badge">En Ligne</span>
                   </div>
                   <div class="dash-metric-title">Postes Entreprise</div>
@@ -150,21 +182,17 @@
 
                 <div class="dash-metric-card">
                   <div class="dash-metric-top">
-                    <span class="dash-metric-icon">
-                      <i class="ri-database-2-line"></i>
-                    </span>
+                    <span class="dash-metric-icon"><i class="ri-database-2-line"></i></span>
                     <span class="dash-metric-badge">Vérifiée</span>
                   </div>
                   <div class="dash-metric-title">Sauvegardes Données</div>
-                  <div class="dash-metric-val">100% À Jour</div>
+                  <div class="dash-metric-val">Règle 3-2-1 Active</div>
                   <div class="dash-metric-sub">Dernière synchro : ce matin 04:00</div>
                 </div>
 
                 <div class="dash-metric-card">
                   <div class="dash-metric-top">
-                    <span class="dash-metric-icon">
-                      <i class="ri-wifi-line"></i>
-                    </span>
+                    <span class="dash-metric-icon"><i class="ri-wifi-line"></i></span>
                     <span class="dash-metric-badge">Actif</span>
                   </div>
                   <div class="dash-metric-title">Réseau &amp; Wi-Fi</div>
@@ -174,13 +202,11 @@
 
                 <div class="dash-metric-card">
                   <div class="dash-metric-top">
-                    <span class="dash-metric-icon">
-                      <i class="ri-shield-check-line"></i>
-                    </span>
+                    <span class="dash-metric-icon"><i class="ri-shield-check-line"></i></span>
                     <span class="dash-metric-badge">Sain</span>
                   </div>
-                  <div class="dash-metric-title">Sécurité &amp; Antivirus</div>
-                  <div class="dash-metric-val">Aucune Menace</div>
+                  <div class="dash-metric-title">Sécurité &amp; ANSSI</div>
+                  <div class="dash-metric-val">MFA &amp; Correctifs OK</div>
                   <div class="dash-metric-sub">Mises à jour appliquées</div>
                 </div>
               </div>
@@ -199,12 +225,10 @@
                   <div class="dash-list">
                     <div class="dash-device-row">
                       <div class="dash-device-left">
-                        <span class="dash-device-icon">
-                          <i class="ri-windows-fill"></i>
-                        </span>
+                        <span class="dash-device-icon"><i class="ri-windows-fill"></i></span>
                         <div>
                           <div class="dash-device-name">PC-Direction</div>
-                          <div class="dash-device-detail">Windows 11 Pro · Espace disque sain</div>
+                          <div class="dash-device-detail">Windows 11 Pro · BitLocker Actif</div>
                         </div>
                       </div>
                       <div class="dash-device-status"><i class="ri-checkbox-circle-fill"></i> Sauvegardé</div>
@@ -212,12 +236,10 @@
 
                     <div class="dash-device-row">
                       <div class="dash-device-left">
-                        <span class="dash-device-icon">
-                          <i class="ri-apple-fill"></i>
-                        </span>
+                        <span class="dash-device-icon"><i class="ri-apple-fill"></i></span>
                         <div>
                           <div class="dash-device-name">MacBook-Compta</div>
-                          <div class="dash-device-detail">macOS Sequoia · Système à jour</div>
+                          <div class="dash-device-detail">macOS Sequoia · FileVault Actif</div>
                         </div>
                       </div>
                       <div class="dash-device-status"><i class="ri-checkbox-circle-fill"></i> Sécurisé</div>
@@ -225,12 +247,10 @@
 
                     <div class="dash-device-row">
                       <div class="dash-device-left">
-                        <span class="dash-device-icon">
-                          <i class="ri-computer-line"></i>
-                        </span>
+                        <span class="dash-device-icon"><i class="ri-computer-line"></i></span>
                         <div>
                           <div class="dash-device-name">Poste-Facturation</div>
-                          <div class="dash-device-detail">Windows 10 · Logiciel métier actif</div>
+                          <div class="dash-device-detail">Windows 10 · Logiciel métier à jour</div>
                         </div>
                       </div>
                       <div class="dash-device-status"><i class="ri-checkbox-circle-fill"></i> Opérationnel</div>
@@ -238,12 +258,10 @@
 
                     <div class="dash-device-row">
                       <div class="dash-device-left">
-                        <span class="dash-device-icon">
-                          <i class="ri-server-line"></i>
-                        </span>
+                        <span class="dash-device-icon"><i class="ri-server-line"></i></span>
                         <div>
                           <div class="dash-device-name">NAS-Fichiers-Bureau</div>
-                          <div class="dash-device-detail">Synology 4 To · Disques RAID 1 vérifiés</div>
+                          <div class="dash-device-detail">Synology 4 To · RAID 1 vérifié &amp; copie distante</div>
                         </div>
                       </div>
                       <div class="dash-device-status"><i class="ri-checkbox-circle-fill"></i> 100% Intègre</div>
@@ -264,7 +282,7 @@
                     <div class="dash-activity-row">
                       <span class="dash-act-icon"><i class="ri-checkbox-circle-line"></i></span>
                       <div class="dash-act-text">
-                        <strong>Mises à jour système appliquées</strong> sans coupure pour les collaborateurs en dehors des heures de bureau.
+                        <strong>Mises à jour de sécurité appliquées</strong> sans coupure pour les collaborateurs en dehors des heures de bureau.
                       </div>
                       <div class="dash-act-time">Hier</div>
                     </div>
@@ -288,7 +306,7 @@
                     <div class="dash-activity-row">
                       <span class="dash-act-icon"><i class="ri-checkbox-circle-line"></i></span>
                       <div class="dash-act-text">
-                        <strong>Assistance utilisateur :</strong> configuration de la nouvelle imprimante partagée sur 3 postes résolue en 12 min.
+                        <strong>Assistance utilisateur :</strong> configuration de la nouvelle imprimante partagée résolue en 12 minutes.
                       </div>
                       <div class="dash-act-time">12 Sep</div>
                     </div>
@@ -298,6 +316,19 @@
             </div>
           </div>
         </div>
+
+      </div>
+    </section>
+
+    <!-- Distinction Box -->
+    <section class="section" style="padding-top: 0;">
+      <div class="container">
+        <div class="callout-box reveal">
+          <h4><i class="ri-compass-3-line" style="color: var(--accent-cyan);"></i> Notre Engagement &amp; Notre Différence</h4>
+          <p>
+            <strong>FORTIQ est notre technologie souveraine d'assistance distante</strong> (zéro port ouvert permanent, flux chiffrés de bout en bout). <strong>Nos services IT vont bien au-delà</strong> : infogérance complète de vos postes et serveurs, application des règles d'hygiène numérique de l'ANSSI, politique de sauvegarde 3-2-1 et disponibilité humaine sans intermédiaire.
+          </p>
+        </div>
       </div>
     </section>
 
@@ -305,60 +336,216 @@
     <section id="services" class="section services-section">
       <div class="container">
         <div class="section-header reveal">
-          <span class="section-tag">NOS PRESTATIONS</span>
-          <h2 class="section-title">Des Services Informatiques Concrets pour Votre Quotidien</h2>
+          <span class="section-tag">SERVICES CONCRETS</span>
+          <h2 class="section-title">Ce Que Nous Faisons au Quotidien</h2>
           <p class="section-subtitle">
-            Fini le jargon technique incompréhensible et les tickets d'assistance sans réponse. Nous prenons en charge les vrais besoins informatiques de votre entreprise.
+            Fini les tickets sans réponse et le jargon incompréhensible. Nous prenons en charge les vrais besoins informatiques de votre quotidien.
           </p>
         </div>
 
         <div class="grid grid-3">
           <div class="feature-card reveal reveal-delay-1">
             <div class="feature-icon"><i class="ri-customer-service-2-line"></i></div>
-            <h3>Dépannage &amp; Assistance Rapide (PC &amp; Mac)</h3>
+            <h3>Assistance &amp; Dépannage Rapide</h3>
             <p>
-              Ordinateur au ralenti, boîte mail Outlook ou Mac Mail bloquée, mise à jour en échec, écran bleu ou logiciel professionnel qui refuse de s'ouvrir. Nous prenons la main à distance pour vous débloquer rapidement.
+              PC lent ou instable, problème Windows ou macOS, logiciel professionnel qui refuse de s'ouvrir, boîte mail bloquée, imprimante invisible. Nous prenons la main à distance pour vous débloquer rapidement.
             </p>
-          </div>
-
-          <div class="feature-card reveal reveal-delay-2">
-            <div class="feature-icon"><i class="ri-save-3-line"></i></div>
-            <h3>Sauvegardes Automatiques &amp; Anti-Ransomware</h3>
-            <p>
-              Mise en place de sauvegardes automatiques chiffrées sur votre NAS local ou disque dédié. Nous testons régulièrement la restauration pour garantir que vos devis, factures et fichiers clients sont toujours récupérables en cas de coup dur.
-            </p>
-          </div>
-
-          <div class="feature-card reveal reveal-delay-3">
-            <div class="feature-icon"><i class="ri-router-line"></i></div>
-            <h3>Réseau de Bureau, Wi-Fi &amp; Télétravail Sécurisé</h3>
-            <p>
-              Configuration de votre box internet, routeur et switchs, couverture Wi-Fi professionnelle stable, imprimantes partagées et connexion VPN chiffrée pour travailler de chez vous en toute sécurité.
-            </p>
-          </div>
-
-          <div class="feature-card reveal reveal-delay-1">
-            <div class="feature-icon"><i class="ri-hard-drive-2-line"></i></div>
-            <h3>Serveurs de Fichiers &amp; NAS (Synology / QNAP)</h3>
-            <p>
-              Centralisation de vos documents avec gestion des droits d'accès par employé. Vos données restent dans vos locaux, sur votre matériel, protégées contre les pannes de disque grâce aux configurations RAID.
-            </p>
+            <a href="particuliers.html" style="color: var(--accent-cyan); font-size: 13.5px; font-weight: 600; text-decoration: none; margin-top: 10px; display: inline-block;">En savoir plus &rarr;</a>
           </div>
 
           <div class="feature-card reveal reveal-delay-2">
             <div class="feature-icon"><i class="ri-shield-keyhole-line"></i></div>
-            <h3>Sécurité, Antivirus &amp; Hygiène Numérique</h3>
+            <h3>Cybersécurité &amp; Règles ANSSI</h3>
             <p>
-              Protection antivirus managée, filtrage contre les e-mails piégés (phishing), nettoyage régulier des programmes inutiles et conseils simples pour éviter les pièges sur internet.
+              Pas de fausses promesses : nous appliquons les règles d'or de l'ANSSI. Authentification multifacteur (MFA), patch management, chiffrement BitLocker, antivirus/EDR managé et principe du moindre privilège.
+            </p>
+            <a href="cybersecurite.html" style="color: var(--accent-cyan); font-size: 13.5px; font-weight: 600; text-decoration: none; margin-top: 10px; display: inline-block;">En savoir plus &rarr;</a>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-3">
+            <div class="feature-icon"><i class="ri-database-2-line"></i></div>
+            <h3>Sauvegardes 3-2-1 &amp; Anti-Ransomware</h3>
+            <p>
+              Une sauvegarde qui n'a jamais été testée n'est pas encore une sauvegarde fiable. Nous mettons en place des sauvegardes automatisées sur NAS et stockage isolé, et nous testons régulièrement la restauration réelle.
+            </p>
+            <a href="sauvegarde.html" style="color: var(--accent-cyan); font-size: 13.5px; font-weight: 600; text-decoration: none; margin-top: 10px; display: inline-block;">En savoir plus &rarr;</a>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-1">
+            <div class="feature-icon"><i class="ri-building-line"></i></div>
+            <h3>Infogérance TPE &amp; PME</h3>
+            <p>
+              Un interlocuteur unique qui connaît votre parc de 1 à 30+ postes. Maintenance préventive, suivi des serveurs NAS Synology/QNAP, administration Microsoft 365 et intégration de vos nouveaux collaborateurs.
+            </p>
+            <a href="tpe-pme.html" style="color: var(--accent-cyan); font-size: 13.5px; font-weight: 600; text-decoration: none; margin-top: 10px; display: inline-block;">En savoir plus &rarr;</a>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-2">
+            <div class="feature-icon"><i class="ri-router-line"></i></div>
+            <h3>Réseau de Bureau &amp; Wi-Fi Pro</h3>
+            <p>
+              Optimisation de votre box internet, switchs et couverture Wi-Fi professionnelle. Configuration de VPN sécurisés pour permettre à votre équipe de télétravailler en toute sécurité.
             </p>
           </div>
 
           <div class="feature-card reveal reveal-delay-3">
             <div class="feature-icon"><i class="ri-cpu-line"></i></div>
-            <h3>Conseil, Achat &amp; Préparation de Matériel</h3>
+            <h3>Conseil Matériel &amp; Achats Neutres</h3>
             <p>
-              Besoin de remplacer un ordinateur ou d'équiper une nouvelle recrue ? Nous vous conseillons le bon matériel selon votre budget sans surfacturation commerciale, et nous le configurons prêt à l'emploi.
+              Besoin de renouveler un poste ou un serveur ? Nous vous conseillons la configuration adaptée à vos usages réels, sans surfacturation commerciale ni marge cachée sur le matériel.
             </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Aperçu des Tarifs 2026 -->
+    <section class="section" style="background: rgba(10, 16, 26, 0.4);">
+      <div class="container">
+        <!-- Launch Banner -->
+        <div class="launch-banner reveal">
+          <span class="launch-banner-badge">Offre de Lancement 2026</span>
+          <span>
+            <i class="ri-gift-line" style="margin-right: 4px; vertical-align: -1px; color: var(--accent-cyan);"></i>
+            <strong>Frais de mise en service offerts</strong> pour les 20 premiers contrats professionnels souscrits !
+          </span>
+        </div>
+
+        <div class="section-header reveal">
+          <span class="section-tag">GRILLE TARIFAIRE 2026</span>
+          <h2 class="section-title">Des Tarifs Clairs, Prévus pour Votre Budget</h2>
+          <p class="section-subtitle">
+            Pas d'honoraires obscurs. Choisissez la formule qui correspond à votre situation.
+          </p>
+        </div>
+
+        <div class="pricing-grid pricing-grid-3">
+          <!-- Particulier Sérénité -->
+          <div class="price-card reveal reveal-delay-1">
+            <div class="price-header">
+              <div class="price-target">Particuliers &amp; Télétravail</div>
+              <h3 class="price-title">Assistance Sérénité</h3>
+              <p class="price-desc">PC ou Mac nettoyé, sécurisé et dépanné à distance dès qu'un problème survient.</p>
+            </div>
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">39 €</span>
+                <span class="price-unit">TTC / mois</span>
+              </div>
+              <div class="price-setup">Mise en service : 59 € TTC</div>
+            </div>
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span>Diagnostic initial approfondi</span></li>
+              <li><i class="ri-check-line"></i> <span>Installation sécurisée FORTIQ</span></li>
+              <li><i class="ri-check-line"></i> <span>Mises à jour Windows / macOS</span></li>
+              <li><i class="ri-check-line"></i> <span>Contrôle sauvegardes de photos</span></li>
+              <li><i class="ri-check-line"></i> <span>Assistance à distance réactive</span></li>
+            </ul>
+            <a href="particuliers.html" class="btn btn-secondary price-cta">Découvrir l'Offre Particulier</a>
+            <div class="price-note">12 mois puis résiliable mensuellement</div>
+          </div>
+
+          <!-- TPE Sécurité -->
+          <div class="price-card featured reveal reveal-delay-2">
+            <span class="price-badge">Le Plus Populaire</span>
+            <div class="price-header">
+              <div class="price-target">TPE &amp; Cabinets · 3 à 15 Postes</div>
+              <h3 class="price-title">TPE Sécurité</h3>
+              <p class="price-desc">Support réactif, politique de sauvegarde 3-2-1 et renforcement cybersécurité ANSSI.</p>
+            </div>
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">59 €</span>
+                <span class="price-unit">HT / poste / mois</span>
+              </div>
+              <div class="price-setup">Mise en service : 290 € HT</div>
+              <div class="price-minimum">Forfait minimum : 249 € HT / mois</div>
+            </div>
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span>Support distant &lt; 30 min pour vos équipes</span></li>
+              <li><i class="ri-check-line"></i> <span><strong>Sauvegardes supervisées</strong> &amp; tests réguliers</span></li>
+              <li><i class="ri-check-line"></i> <span>Protection <strong>MFA</strong> &amp; patch management</span></li>
+              <li><i class="ri-check-line"></i> <span>Supervision <strong>Antivirus / EDR</strong> managé</span></li>
+              <li><i class="ri-check-line"></i> <span>Chiffrement <strong>BitLocker / FileVault</strong></span></li>
+            </ul>
+            <a href="tpe-pme.html" class="btn btn-primary price-cta">Découvrir TPE Sécurité</a>
+            <div class="price-note">Engagement annuel · Protection recommandée</div>
+          </div>
+
+          <!-- PME Sérénité -->
+          <div class="price-card reveal reveal-delay-3">
+            <div class="price-header">
+              <div class="price-target">PME · 10 à 30 Postes</div>
+              <h3 class="price-title">PME Sérénité</h3>
+              <p class="price-desc">Infogérance complète de vos postes, serveurs NAS, réseau et outils cloud Microsoft 365.</p>
+            </div>
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">69 €</span>
+                <span class="price-unit">HT / poste / mois</span>
+              </div>
+              <div class="price-setup">Mise en service : dès 490 € HT</div>
+              <div class="price-minimum">Sur devis selon parc serveurs &amp; cloud</div>
+            </div>
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span>Tout le forfait Sécurité inclus</span></li>
+              <li><i class="ri-check-line"></i> <span>Supervision serveurs NAS Synology/QNAP</span></li>
+              <li><i class="ri-check-line"></i> <span>Sauvegarde <strong>3-2-1 avec copie isolée</strong></span></li>
+              <li><i class="ri-check-line"></i> <span>Administration Microsoft 365 &amp; comptes</span></li>
+              <li><i class="ri-check-line"></i> <span>Interlocuteur dédié &amp; audit offert</span></li>
+            </ul>
+            <a href="tpe-pme.html" class="btn btn-secondary price-cta">Découvrir PME Sérénité</a>
+            <div class="price-note">Audit initial offert avant signature</div>
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 30px;">
+          <a href="tarifs.html" class="btn btn-secondary btn-lg">Voir la Grille Complète &amp; les Conditions &rarr;</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Environnements Modernes -->
+    <section class="section">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">STANDARDS DU MARCHÉ</span>
+          <h2 class="section-title">Nous Accompagnons Vos Outils Professionnels</h2>
+          <p class="section-subtitle">
+            Aucun matériel n'est laissé pour compte. Nous intervenons sur les environnements modernes de bureau.
+          </p>
+        </div>
+
+        <div class="env-grid reveal">
+          <div class="env-card">
+            <i class="ri-windows-fill"></i>
+            <h5>Windows 10 &amp; 11</h5>
+            <span>PC fixes &amp; portables</span>
+          </div>
+          <div class="env-card">
+            <i class="ri-apple-fill"></i>
+            <h5>macOS Sequoia / Sonoma</h5>
+            <span>MacBook &amp; Mac mini</span>
+          </div>
+          <div class="env-card">
+            <i class="ri-ubuntu-fill"></i>
+            <h5>Linux &amp; Serveurs</h5>
+            <span>Debian, Ubuntu, Alma</span>
+          </div>
+          <div class="env-card">
+            <i class="ri-microsoft-fill"></i>
+            <h5>Microsoft 365</h5>
+            <span>Teams, Outlook, OneDrive</span>
+          </div>
+          <div class="env-card">
+            <i class="ri-server-line"></i>
+            <h5>NAS Synology / QNAP</h5>
+            <span>Partage fichiers &amp; RAID</span>
+          </div>
+          <div class="env-card">
+            <i class="ri-wifi-line"></i>
+            <h5>Wi-Fi &amp; Routeurs</h5>
+            <span>Box, VPN, switchs</span>
           </div>
         </div>
       </div>
@@ -369,9 +556,9 @@
       <div class="container">
         <div class="section-header reveal">
           <span class="section-tag">SOUVERAINETÉ &amp; PROTECTION DES DONNÉES</span>
-          <h2 class="section-title">Pourquoi Choisir un Service IT Souverain ?</h2>
+          <h2 class="section-title">Pourquoi Notre Téléassistance Est Plus Sûre</h2>
           <p class="section-subtitle">
-            La plupart des prestataires informatiques utilisent des logiciels américains comme TeamViewer ou AnyDesk. Ces outils font transiter vos flux par des serveurs clouds étrangers qui ont déjà subi de graves piratages. Chez FORTIQ, nous faisons le choix de la souveraineté.
+            La plupart des prestataires utilisent des logiciels américains comme TeamViewer ou AnyDesk qui font transiter vos flux par des clouds étrangers vulnérables. Chez FORTIQ, nous faisons le choix de la souveraineté.
           </p>
         </div>
 
@@ -381,7 +568,7 @@
             <div class="tech-content">
               <h3>Connexion Directe Poste à Poste (P2P)</h3>
               <p>
-                Lorsque notre technicien vous assiste, la connexion s'établit directement entre son poste et le vôtre via un tunnel chiffré. Aucun serveur cloud intermédiaire ne stocke ni ne relaie vos données.
+                Lorsque notre technicien vous assiste, la connexion s'établit directement entre son poste et le vôtre via un tunnel chiffré. Aucun cloud tiers ne stocke vos données.
               </p>
             </div>
           </div>
@@ -389,9 +576,9 @@
           <div class="tech-item reveal reveal-delay-2">
             <div class="tech-num">02</div>
             <div class="tech-content">
-              <h3>Zéro Mot de Passe Maître sur le Cloud</h3>
+              <h3>Zéro Mot de Passe Maître sur un Serveur Cloud</h3>
               <p>
-                Pas de compte central sur un portail web susceptible d'être compromis. L'authentification repose sur des clés cryptographiques sécurisées (Ed25519) uniques à chaque machine.
+                Pas de compte central sur un portail web susceptible d'être piraté. L'authentification repose sur des clés cryptographiques Ed25519 infalsifiables.
               </p>
             </div>
           </div>
@@ -401,7 +588,7 @@
             <div class="tech-content">
               <h3>Vous Gardez le Contrôle Total des Accès</h3>
               <p>
-                Aucune connexion "fantôme" à votre insu. Pour que nous puissions intervenir, vous ouvrez un ticket directement depuis votre ordinateur. Une fois l'intervention finie, la session se ferme immédiatement.
+                Aucune connexion "fantôme" à votre insu. Pour intervenir, vous ouvrez un ticket directement sur votre machine. Une fois terminé, la session se coupe définitivement.
               </p>
             </div>
           </div>
@@ -409,16 +596,16 @@
           <div class="tech-item reveal reveal-delay-4">
             <div class="tech-num">04</div>
             <div class="tech-content">
-              <h3>Logiciel Souverain Conçu en Interne</h3>
+              <h3>Logiciel Souverain Conçu en Rust</h3>
               <p>
-                Développé en Rust avec les standards ouverts du Web3 (libp2p, QUIC), notre logiciel FORTIQ garantit votre indépendance technologique et une stricte conformité au RGPD.
+                Développé avec les standards ouverts (libp2p, QUIC) dans un langage garantissant la sécurité de la mémoire. Code auditable publiquement sur GitHub.
               </p>
             </div>
           </div>
         </div>
 
         <!-- Comparison Table -->
-        <div class="table-responsive reveal" style="margin-top: 20px;">
+        <div class="table-responsive reveal" style="margin-top: 40px;">
           <table class="comp-table">
             <thead>
               <tr>
@@ -429,14 +616,14 @@
             </thead>
             <tbody>
               <tr>
-                <td><strong>Chemin de vos données</strong></td>
+                <td><strong>Chemin de vos flux</strong></td>
                 <td>Transite par des serveurs clouds tiers à l'étranger</td>
                 <td class="highlight">Directement de poste à poste (Pair-à-pair chiffré)</td>
               </tr>
               <tr>
                 <td><strong>Sécurité des accès</strong></td>
                 <td>Identifiant &amp; mot de passe stockés sur un cloud externe</td>
-                <td class="highlight">Clés cryptographiques locales infalsifiables</td>
+                <td class="highlight">Clés cryptographiques locales uniques</td>
               </tr>
               <tr>
                 <td><strong>Consentement d'intervention</strong></td>
@@ -444,14 +631,14 @@
                 <td class="highlight">Ticket d'intervention déclenché par vous-même</td>
               </tr>
               <tr>
-                <td><strong>Conformité RGPD &amp; Données</strong></td>
-                <td>Données techniques et de session soumises aux lois étrangères</td>
+                <td><strong>Conformité RGPD &amp; Secret</strong></td>
+                <td>Données techniques soumises aux législations étrangères</td>
                 <td class="highlight">100% Souverain, données hébergées chez vous</td>
               </tr>
               <tr>
                 <td><strong>Accompagnement</strong></td>
                 <td>Centres d'appels impersonnels et changements fréquents</td>
-                <td class="highlight">Un technicien dédié qui connaît votre entreprise</td>
+                <td class="highlight">Un technicien dédié qui connaît votre historique</td>
               </tr>
             </tbody>
           </table>
@@ -460,7 +647,7 @@
     </section>
 
     <!-- Secteurs TPE & PME -->
-    <section id="tpe-pme" class="section">
+    <section class="section">
       <div class="container">
         <div class="section-header reveal">
           <span class="section-tag">SUR MESURE POUR VOTRE MÉTIER</span>
@@ -484,11 +671,6 @@
               <li><span class="bullet"><i class="ri-check-line"></i></span> Sauvegardes étanches de vos dossiers confidentiels</li>
               <li><span class="bullet"><i class="ri-check-line"></i></span> Réactivité maximale lors des périodes de bilan ou de plaidoiries</li>
             </ul>
-            <div class="tech-tags">
-              <span class="tech-tag">Secret Client</span>
-              <span class="tech-tag">Sauvegardes Chiffrées</span>
-              <span class="tech-tag">Mac &amp; PC</span>
-            </div>
           </div>
 
           <div class="competency-card reveal reveal-delay-2">
@@ -504,11 +686,6 @@
               <li><span class="bullet"><i class="ri-check-line"></i></span> Dépannage rapide à distance pour ne jamais bloquer un chantier</li>
               <li><span class="bullet"><i class="ri-check-line"></i></span> Protection contre les virus et fausses factures reçues par mail</li>
             </ul>
-            <div class="tech-tags">
-              <span class="tech-tag">Devis &amp; Factures</span>
-              <span class="tech-tag">Dépannage Express</span>
-              <span class="tech-tag">Zéro Prise de Tête</span>
-            </div>
           </div>
 
           <div class="competency-card reveal reveal-delay-3">
@@ -524,18 +701,13 @@
               <li><span class="bullet"><i class="ri-check-line"></i></span> Réseau Wi-Fi performant et VPN sécurisé pour la maison</li>
               <li><span class="bullet"><i class="ri-check-line"></i></span> Un interlocuteur technique unique qui connaît votre historique</li>
             </ul>
-            <div class="tech-tags">
-              <span class="tech-tag">Télétravail Sécurisé</span>
-              <span class="tech-tag">Wi-Fi Bureau</span>
-              <span class="tech-tag">NAS Synology</span>
-            </div>
           </div>
         </div>
       </div>
     </section>
 
     <!-- Fonctionnement Section -->
-    <section id="fonctionnement" class="section onboarding-section">
+    <section class="section onboarding-section">
       <div class="container">
         <div class="section-header reveal">
           <span class="section-tag">FONCTIONNEMENT SIMPLE</span>
@@ -558,7 +730,7 @@
             <div class="step-number">02</div>
             <h4>Mise en Place Discrète</h4>
             <p>
-              Nous installons notre petit outil souverain sur vos postes en quelques minutes, sans bloquer le travail de votre équipe, et configurons vos sauvegardes.
+              Nous installons notre outil sécurisé sur vos postes en quelques minutes, sans bloquer le travail de votre équipe, et configurons vos sauvegardes.
             </p>
           </div>
 
@@ -602,48 +774,50 @@
           <h3>Demander un Diagnostic Offert</h3>
           <form id="contactForm" class="contact-form">
             <div class="form-group">
-              <label for="name">Votre Nom &amp; Fonction</label>
+              <label for="name">Votre Nom &amp; Fonction *</label>
               <input type="text" id="name" required placeholder="Ex. Sophie Martin, Gérante" />
             </div>
             <div class="form-group">
-              <label for="company">Nom de Votre Entreprise</label>
-              <input type="text" id="company" required placeholder="Ex. Cabinet Martin &amp; Associés" />
+              <label for="company">Nom de Votre Entreprise ou Cabinet</label>
+              <input type="text" id="company" placeholder="Ex. Cabinet Martin (laisser vide si particulier)" />
             </div>
             <div class="form-group">
-              <label for="email">Adresse E-mail Professionnelle</label>
+              <label for="email">Adresse E-mail *</label>
               <input type="email" id="email" required placeholder="sophie@martin-cabinet.fr" />
             </div>
             <div class="form-group">
-              <label for="phone">Numéro de Téléphone</label>
-              <input type="tel" id="phone" placeholder="06 12 34 56 78" />
+              <label for="phone">Numéro de Téléphone *</label>
+              <input type="tel" id="phone" required placeholder="06 12 34 56 78" />
             </div>
             <div class="form-group">
-              <label for="servers">Nombre d'Ordinateurs / Postes</label>
+              <label for="servers">Nombre d'Ordinateurs / Postes *</label>
               <select id="servers">
+                <option value="particulier">1 poste (Particulier / Famille)</option>
                 <option value="1-3">1 à 3 postes (Indépendant, artisan, libéral)</option>
-                <option value="4-10">4 à 10 postes (Petite entreprise, cabinet)</option>
+                <option value="4-10" selected>4 à 10 postes (Petite entreprise, cabinet)</option>
                 <option value="11-25">11 à 25 postes (PME établie)</option>
                 <option value="25+">Plus de 25 postes</option>
               </select>
             </div>
             <div class="form-group">
-              <label for="serviceType">Votre Besoin Principal</label>
+              <label for="serviceType">Votre Besoin Principal *</label>
               <select id="serviceType">
-                <option value="assistance">Dépannage &amp; assistance pour mes salariés</option>
-                <option value="sauvegardes">Sauvegardes fiables &amp; protection anti-ransomware</option>
                 <option value="infogerance">Infogérance complète &amp; sérénité informatique</option>
-                <option value="reseau">Amélioration du Wi-Fi, box &amp; télétravail</option>
-                <option value="materiel">Conseil pour renouveler mon matériel</option>
+                <option value="sauvegardes">Sauvegardes 3-2-1 fiables &amp; anti-ransomware</option>
+                <option value="assistance">Dépannage &amp; assistance pour mes salariés</option>
+                <option value="particulier">Souscription forfait Particulier (39 € TTC/mois)</option>
+                <option value="cyber">Audit de cybersécurité &amp; règles ANSSI</option>
               </select>
             </div>
             <div class="form-group">
               <label for="message">Décrivez Brièvement Votre Situation</label>
-              <textarea id="message" rows="3" placeholder="Ex. Nous avons 5 PC Windows et 2 Mac. Nous aimerions sécuriser nos sauvegardes et avoir quelqu'un de réactif en cas de problème..."></textarea>
+              <textarea id="message" rows="3" placeholder="Ex. Nous avons 6 PC Windows et nous voulons fiabiliser nos sauvegardes et avoir un technicien disponible..."></textarea>
             </div>
             <button type="submit" class="btn btn-primary btn-block btn-lg">Envoyer Ma Demande d'Échange</button>
           </form>
           <div id="formSuccess" class="form-success" style="display: none;">
-            <i class="ri-checkbox-circle-fill" style="margin-right: 6px; vertical-align: -1px;"></i> Merci ! Votre demande a bien été reçue. Un technicien vous recontactera très rapidement.
+            <i class="ri-checkbox-circle-fill" style="margin-right: 6px; vertical-align: -1px;"></i>
+            Merci ! Votre demande a bien été reçue. Un technicien vous recontactera sous 24 heures.
           </div>
         </div>
       </div>
@@ -658,40 +832,40 @@
             <span class="brand-name">FORTIQ</span>
           </div>
           <p class="footer-desc">
-            Support et infogérance informatique de proximité pour TPE, PME et indépendants. Solution souveraine, directe et respectueuse de vos données professionnelles.
+            Assistance informatique, cybersécurité et sauvegarde à distance pour particuliers, indépendants, TPE et PME partout en France.
           </p>
         </div>
 
         <div class="footer-links-group">
           <div class="footer-col">
-            <h5>Navigation</h5>
-            <a href="#services">Nos Services</a>
-            <a href="#souverainete">Souveraineté P2P</a>
-            <a href="#tpe-pme">TPE &amp; PME</a>
-            <a href="#fonctionnement">Fonctionnement</a>
-            <a href="#contact">Diagnostic Offert</a>
+            <h5>Prestations</h5>
+            <a href="tarifs.html">Tarifs 2026</a>
+            <a href="particuliers.html">Particuliers (39 € TTC)</a>
+            <a href="tpe-pme.html">TPE &amp; PME (39 € HT)</a>
+            <a href="cybersecurite.html">Cybersécurité ANSSI</a>
+            <a href="sauvegarde.html">Sauvegardes 3-2-1</a>
           </div>
           <div class="footer-col">
-            <h5>Souveraineté &amp; Sécurité</h5>
-            <a href="#souverainete">Zéro Cloud Tiers</a>
-            <a href="#souverainete">Modèle Cryptographique</a>
-            <a href="#services">Sauvegardes Anti-Ransomware</a>
-            <a href="#">Conformité RGPD</a>
+            <h5>Sécurité &amp; Confiance</h5>
+            <a href="technologie-fortiq.html">Technologie P2P Souveraine</a>
+            <a href="technologie-fortiq.html#rgpd">Conformité RGPD</a>
+            <a href="faq.html">Foire Aux Questions</a>
+            <a href="contact.html">Diagnostic Offert</a>
           </div>
           <div class="footer-col">
             <h5>Technologie Ouverte</h5>
             <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer">
-              <i class="ri-github-fill" style="vertical-align: -1px; margin-right: 4px;"></i> Projet Open Source (GitHub)
+              <i class="ri-github-fill" style="vertical-align: -1px; margin-right: 4px;"></i> Projet GitHub (Rust)
             </a>
-            <a href="#souverainete">Technologie Rust &amp; P2P</a>
-            <a href="#contact">Nous Contacter</a>
+            <a href="technologie-fortiq.html">Architecture Souveraine</a>
+            <a href="contact.html">Nous Contacter</a>
           </div>
         </div>
       </div>
 
       <div class="container footer-bottom">
         <p>&copy; 2026 FORTIQ. Tous droits réservés.</p>
-        <p>Informatique d'entreprise souveraine · Conçue en France avec Rust, QUIC &amp; libp2p.</p>
+        <p>Assistance &amp; Infogérance souveraine · Conçue en France avec Rust, QUIC &amp; libp2p.</p>
       </div>
     </footer>
 

@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+
+# Allow OpenAI Search for real-time web citations (ChatGPT Search)
+User-agent: OAI-SearchBot
+Allow: /
+
+# Disallow mass training crawling
+User-agent: GPTBot
+Disallow: /
+
+Sitemap: https://fortiq.fr/sitemap.xml

@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Technologie Souveraine &amp; Architecture P2P — FORTIQ</title>
+    <meta
+      name="description"
+      content="Découvrez la technologie FORTIQ : téléassistance sécurisée développée en Rust, sans port permanent ouvert sur Internet, sans cloud tiers et 100% conforme RGPD."
+    />
+    <link rel="canonical" href="https://fortiq.fr/technologie-fortiq.html" />
+    <link rel="icon" type="image/png" href="assets/logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet" />
+
+    <meta property="og:title" content="Technologie Souveraine &amp; Architecture P2P — FORTIQ" />
+    <meta property="og:description" content="Une téléassistance moderne sans exposer votre parc informatique aux géants du cloud." />
+    <meta property="og:url" content="https://fortiq.fr/technologie-fortiq.html" />
+    <meta property="og:type" content="website" />
+
+    <!-- Schema.org JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "FORTIQ",
+      "operatingSystem": "Windows, macOS, Linux",
+      "applicationCategory": "RemoteAdministrationApplication",
+      "description": "Logiciel souverain d'administration distante en Rust sans exposition de port permanent, basé sur libp2p et le protocole QUIC.",
+      "author": {
+        "@type": "Organization",
+        "name": "FORTIQ",
+        "url": "https://fortiq.fr"
+      }
+    }
+    </script>
+  </head>
+  <body>
+    <canvas id="particleCanvas" class="particle-canvas"></canvas>
+    <div class="glow-bg top-glow"></div>
+
+    <!-- Header Navigation -->
+    <header class="site-header">
+      <div class="container nav-container">
+        <a href="index.html" class="nav-brand">
+          <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+          <span class="brand-name">FORTIQ</span>
+          <span class="brand-tag">TECHNOLOGIE SOUVERAINE</span>
+        </a>
+
+        <nav class="nav-links">
+          <a href="index.html">Accueil</a>
+          <a href="tarifs.html">Tarifs</a>
+          <a href="particuliers.html">Particuliers</a>
+          <a href="tpe-pme.html">TPE &amp; PME</a>
+          <a href="cybersecurite.html">Cybersécurité</a>
+          <a href="sauvegarde.html">Sauvegardes</a>
+          <a href="technologie-fortiq.html" class="active">Technologie</a>
+          <a href="faq.html">FAQ</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer" class="btn btn-secondary nav-github-btn">
+            <i class="ri-github-fill" style="font-size: 1.2rem; vertical-align: -2px; margin-right: 4px;"></i>
+            <span>GitHub</span>
+          </a>
+          <a href="contact.html" class="btn btn-primary">Diagnostic Offert</a>
+        </div>
+
+        <button class="mobile-menu-toggle" id="menuToggle" aria-label="Ouvrir le menu">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile Drawer -->
+    <div class="mobile-drawer" id="mobileDrawer">
+      <nav class="mobile-nav">
+        <a href="index.html" class="mobile-link">Accueil</a>
+        <a href="tarifs.html" class="mobile-link">Tarifs 2026</a>
+        <a href="particuliers.html" class="mobile-link">Particuliers</a>
+        <a href="tpe-pme.html" class="mobile-link">TPE &amp; PME</a>
+        <a href="cybersecurite.html" class="mobile-link">Cybersécurité</a>
+        <a href="sauvegarde.html" class="mobile-link">Sauvegardes</a>
+        <a href="technologie-fortiq.html" class="mobile-link active" style="color: var(--accent-cyan);">Technologie FORTIQ</a>
+        <a href="faq.html" class="mobile-link">FAQ</a>
+        <a href="contact.html" class="btn btn-primary mobile-cta">Demander un Diagnostic</a>
+      </nav>
+    </div>
+
+    <!-- Subpage Hero -->
+    <section class="page-hero">
+      <div class="container">
+        <div class="breadcrumb">
+          <a href="index.html">Accueil</a>
+          <span>/</span>
+          <span>Technologie</span>
+        </div>
+        <h1 class="page-hero-title">
+          Pourquoi Notre Technologie de Téléassistance <span class="gradient-text">Ne Ressemble à Aucune Autre</span>
+        </h1>
+        <p class="page-hero-subtitle">
+          Contrairement aux outils d’assistance génériques qui imposent des serveurs clouds intermédiaires et des failles d'accès permanentes, nous avons développé FORTIQ en Rust : une solution souveraine, directe et contrôlée par ticket.
+        </p>
+        <div class="hero-cta-group" style="justify-content: center;">
+          <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer" class="btn btn-secondary btn-lg">
+            <i class="ri-github-fill" style="vertical-align: -2px; margin-right: 6px;"></i> Explorer le Code Source sur GitHub
+          </a>
+          <a href="tarifs.html" class="btn btn-primary btn-lg">Découvrir Nos Services</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Les 4 Différenciateurs Techniques -->
+    <section class="section">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">ARCHITECTURE DE CONFIANCE</span>
+          <h2 class="section-title">Les 4 Piliers de l'Architecture FORTIQ</h2>
+          <p class="section-subtitle">
+            Conçue dès le départ pour éliminer les risques inhérents aux logiciels de prise en main à distance traditionnels.
+          </p>
+        </div>
+
+        <div class="grid grid-2 tech-grid">
+          <div class="tech-item reveal reveal-delay-1">
+            <div class="tech-num">01</div>
+            <div class="tech-content">
+              <h3>Zéro Port d'Écoute Permanent Exposé</h3>
+              <p>
+                Votre machine n'écoute pas passivement sur Internet. Aucun pirate ne peut scanner un port RDP ou VNC ouvert. La liaison ne s'établit que sortante lors d'une demande d'aide autorisée.
+              </p>
+            </div>
+          </div>
+
+          <div class="tech-item reveal reveal-delay-2">
+            <div class="tech-num">02</div>
+            <div class="tech-content">
+              <h3>Authentification Cryptographique Ed25519</h3>
+              <p>
+                Pas de mot de passe à 6 chiffres vulnérable au vol de session. Chaque nœud dispose d'une identité cryptographique forte. Seul l'administrateur expressément autorisé par sa clé publique peut interagir.
+              </p>
+            </div>
+          </div>
+
+          <div class="tech-item reveal reveal-delay-3">
+            <div class="tech-num">03</div>
+            <div class="tech-content">
+              <h3>Consentement Strict par Ticket Local</h3>
+              <p>
+                Pas de connexion discrète en arrière-plan. L'accès administrateur distant est conditionné à l'existence d'un ticket de support actif ouvert sur votre poste. Dès que le ticket est fermé, l'accès est révoqué.
+              </p>
+            </div>
+          </div>
+
+          <div class="tech-item reveal reveal-delay-4">
+            <div class="tech-num">04</div>
+            <div class="tech-content">
+              <h3>Conception en Rust avec Libp2p &amp; QUIC</h3>
+              <p>
+                Développé dans un langage garantissant la sécurité de la mémoire (zéro dépassement de tampon). Le protocole QUIC assure un chiffrement bout en bout natif (TLS 1.3) et une réactivité optimale.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tableau Comparatif -->
+        <div class="table-responsive reveal" style="margin-top: 50px;">
+          <table class="comp-table">
+            <thead>
+              <tr>
+                <th>Critère Technique</th>
+                <th>Logiciels SaaS Américains (TeamViewer, AnyDesk)</th>
+                <th class="highlight">Technologie Souveraine FORTIQ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Hébergement des relais</strong></td>
+                <td>Serveurs clouds mutualisés soumis au Cloud Act</td>
+                <td class="highlight">Relais souverains en France / Connexions directes P2P</td>
+              </tr>
+              <tr>
+                <td><strong>Surface d'attaque</strong></td>
+                <td>Comptes maîtres centralisés, cibles d'attaques massives</td>
+                <td class="highlight">Zéro compte central, clés locales uniques Ed25519</td>
+              </tr>
+              <tr>
+                <td><strong>Contrôle utilisateur</strong></td>
+                <td>Accès souvent laissé résident en tâche de fond</td>
+                <td class="highlight">Session conditionnée par ticket d'assistance révocable</td>
+              </tr>
+              <tr>
+                <td><strong>Transparence logicielle</strong></td>
+                <td>Code propriétaire opaque et fermé</td>
+                <td class="highlight">Code source ouvert, auditable publiquement sur GitHub</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout-box reveal" id="rgpd" style="margin-top: 40px;">
+          <h4><i class="ri-shield-check-line" style="color: var(--accent-cyan);"></i> Conformité RGPD &amp; Secret Professionnel</h4>
+          <p>
+            En éliminant tout intermédiaire cloud étranger, FORTIQ offre une garantie totale d'étanchéité pour les professions réglementées (avocats, experts-comptables, professionnels de santé) ainsi que pour les PME soucieuses de leur secret des affaires. Vos données ne franchissent jamais les frontières européennes.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="container footer-container">
+        <div class="footer-left">
+          <div class="footer-brand">
+            <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+            <span class="brand-name">FORTIQ</span>
+          </div>
+          <p class="footer-desc">
+            Technologie souveraine d'assistance distante et services informatiques de proximité partout en France.
+          </p>
+        </div>
+
+        <div class="footer-links-group">
+          <div class="footer-col">
+            <h5>Prestations</h5>
+            <a href="tarifs.html">Tarifs 2026</a>
+            <a href="tpe-pme.html">TPE &amp; PME</a>
+            <a href="cybersecurite.html">Cybersécurité ANSSI</a>
+            <a href="sauvegarde.html">Sauvegardes 3-2-1</a>
+            <a href="particuliers.html">Particuliers</a>
+          </div>
+          <div class="footer-col">
+            <h5>Technologie &amp; Éthique</h5>
+            <a href="technologie-fortiq.html">Architecture Souveraine</a>
+            <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer">Code Source Rust (GitHub)</a>
+            <a href="faq.html">Foire Aux Questions</a>
+            <a href="contact.html">Diagnostic Offert</a>
+          </div>
+          <div class="footer-col">
+            <h5>Contact</h5>
+            <a href="contact.html">Prendre Rendez-vous</a>
+            <a href="contact.html#contact-direct">Coordonnées</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="container footer-bottom">
+        <p>&copy; 2026 FORTIQ. Tous droits réservés.</p>
+        <p>Téléassistance souveraine en Rust · Hébergement en France.</p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

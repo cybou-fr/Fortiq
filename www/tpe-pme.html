@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Infogérance &amp; Maintenance Informatique TPE &amp; PME — FORTIQ</title>
+    <meta
+      name="description"
+      content="Maintenance, cybersécurité et support informatique pour cabinets, artisans, TPE et PME en France. Dès 39 € HT/poste/mois. Réactivité sous 30 min et sauvegardes 3-2-1."
+    />
+    <link rel="canonical" href="https://fortiq.fr/tpe-pme.html" />
+    <link rel="icon" type="image/png" href="assets/logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet" />
+
+    <meta property="og:title" content="Infogérance &amp; Maintenance Informatique TPE &amp; PME — FORTIQ" />
+    <meta property="og:description" content="Libérez votre équipe des tracas informatiques dès 39 € HT/poste/mois avec un partenaire IT souverain." />
+    <meta property="og:url" content="https://fortiq.fr/tpe-pme.html" />
+    <meta property="og:type" content="website" />
+
+    <!-- Schema.org JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Service",
+      "name": "Infogérance et Support Informatique TPE & PME",
+      "provider": {
+        "@type": "Organization",
+        "name": "FORTIQ",
+        "url": "https://fortiq.fr"
+      },
+      "areaServed": "France",
+      "description": "Maintenance de parcs informatiques (Windows, Mac, Linux), infogérance de serveurs et NAS, cybersécurité ANSSI et sauvegardes 3-2-1 pour entreprises de 1 à 30+ postes.",
+      "offers": {
+        "@type": "Offer",
+        "price": "39",
+        "priceCurrency": "EUR",
+        "eligibleRegion": "FR"
+      }
+    }
+    </script>
+  </head>
+  <body>
+    <canvas id="particleCanvas" class="particle-canvas"></canvas>
+    <div class="glow-bg top-glow"></div>
+
+    <!-- Header Navigation -->
+    <header class="site-header">
+      <div class="container nav-container">
+        <a href="index.html" class="nav-brand">
+          <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+          <span class="brand-name">FORTIQ</span>
+          <span class="brand-tag">INFOGÉRANCE B2B</span>
+        </a>
+
+        <nav class="nav-links">
+          <a href="index.html">Accueil</a>
+          <a href="tarifs.html">Tarifs</a>
+          <a href="particuliers.html">Particuliers</a>
+          <a href="tpe-pme.html" class="active">TPE &amp; PME</a>
+          <a href="cybersecurite.html">Cybersécurité</a>
+          <a href="sauvegarde.html">Sauvegardes</a>
+          <a href="technologie-fortiq.html">Technologie</a>
+          <a href="faq.html">FAQ</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer" class="btn btn-secondary nav-github-btn">
+            <i class="ri-github-fill" style="font-size: 1.2rem; vertical-align: -2px; margin-right: 4px;"></i>
+            <span>GitHub</span>
+          </a>
+          <a href="contact.html" class="btn btn-primary">Diagnostic Offert</a>
+        </div>
+
+        <button class="mobile-menu-toggle" id="menuToggle" aria-label="Ouvrir le menu">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile Drawer -->
+    <div class="mobile-drawer" id="mobileDrawer">
+      <nav class="mobile-nav">
+        <a href="index.html" class="mobile-link">Accueil</a>
+        <a href="tarifs.html" class="mobile-link">Tarifs 2026</a>
+        <a href="particuliers.html" class="mobile-link">Particuliers</a>
+        <a href="tpe-pme.html" class="mobile-link active" style="color: var(--accent-cyan);">TPE &amp; PME</a>
+        <a href="cybersecurite.html" class="mobile-link">Cybersécurité</a>
+        <a href="sauvegarde.html" class="mobile-link">Sauvegardes</a>
+        <a href="technologie-fortiq.html" class="mobile-link">Technologie FORTIQ</a>
+        <a href="faq.html" class="mobile-link">FAQ</a>
+        <a href="contact.html" class="btn btn-primary mobile-cta">Demander un Diagnostic</a>
+      </nav>
+    </div>
+
+    <!-- Subpage Hero -->
+    <section class="page-hero">
+      <div class="container">
+        <div class="breadcrumb">
+          <a href="index.html">Accueil</a>
+          <span>/</span>
+          <span>TPE &amp; PME</span>
+        </div>
+        <h1 class="page-hero-title">
+          Votre Parc Informatique Managé, Sécurisé &amp; <span class="gradient-text">Toujours Opérationnel</span>
+        </h1>
+        <p class="page-hero-subtitle">
+          Un interlocuteur informatique de confiance qui connaît votre entreprise. Nous prenons en charge le support de vos collaborateurs, la maintenance de vos postes, vos serveurs et vos sauvegardes sans interruption de votre activité.
+        </p>
+
+        <!-- Launch Offer Banner -->
+        <div class="launch-banner reveal">
+          <span class="launch-banner-badge">Offre de Lancement 2026</span>
+          <span>
+            <i class="ri-gift-line" style="margin-right: 4px; vertical-align: -1px; color: var(--accent-cyan);"></i>
+            <strong>Frais de mise en service offerts</strong> pour les 20 premiers contrats professionnels !
+          </span>
+        </div>
+
+        <div class="hero-cta-group" style="justify-content: center;">
+          <a href="#forfaits" class="btn btn-primary btn-lg">Découvrir les Forfaits TPE/PME</a>
+          <a href="contact.html" class="btn btn-secondary btn-lg">Demander un Audit Gratuit</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Environnements Modernes Pris en Charge -->
+    <section class="section">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">COMPATIBILITÉ ÉTENDUE</span>
+          <h2 class="section-title">Nous Accompagnons Vos Environnements Modernes</h2>
+          <p class="section-subtitle">
+            PC Windows, Mac Apple Silicon, serveurs de fichiers, outils collaboratifs et réseau de bureau.
+          </p>
+        </div>
+
+        <div class="env-grid reveal">
+          <div class="env-card">
+            <i class="ri-windows-fill"></i>
+            <h5>Windows 10 &amp; 11 Pro</h5>
+            <span>Postes fixes &amp; portables</span>
+          </div>
+          <div class="env-card">
+            <i class="ri-apple-fill"></i>
+            <h5>macOS Sequoia / Sonoma</h5>
+            <span>MacBook, iMac, Mac mini</span>
+          </div>
+          <div class="env-card">
+            <i class="ri-ubuntu-fill"></i>
+            <h5>Linux &amp; Serveurs</h5>
+            <span>Debian, Ubuntu, RHEL</span>
+          </div>
+          <div class="env-card">
+            <i class="ri-microsoft-fill"></i>
+            <h5>Microsoft 365</h5>
+            <span>Exchange, Teams, SharePoint</span>
+          </div>
+          <div class="env-card">
+            <i class="ri-server-line"></i>
+            <h5>NAS Synology &amp; QNAP</h5>
+            <span>Partage fichiers &amp; RAID</span>
+          </div>
+          <div class="env-card">
+            <i class="ri-wifi-line"></i>
+            <h5>Réseaux &amp; VPN</h5>
+            <span>Box, switchs, Wi-Fi pro</span>
+          </div>
+        </div>
+
+        <div class="callout-box reveal">
+          <h4><i class="ri-information-line" style="color: var(--accent-cyan);"></i> Notre Distinction Technologique &amp; Métier</h4>
+          <p>
+            <strong>FORTIQ est notre technologie souveraine d'assistance distante</strong> (zéro port ouvert, P2P chiffré, développée en Rust). <strong>Nos services d'infogérance vont bien au-delà</strong> : maintenance globale, sécurisation des comptes, politique de sauvegarde 3-2-1, assistance directe aux salariés et conseil stratégique pour vos investissements.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Les 4 Piliers B2B -->
+    <section class="section" style="background: rgba(10, 16, 26, 0.3);">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">SERVICES MANAGÉS</span>
+          <h2 class="section-title">Les 4 Piliers de Votre Sérénité Numérique</h2>
+          <p class="section-subtitle">
+            Une approche complète pour prévenir les pannes avant qu'elles ne coûtent du temps ou de l'argent.
+          </p>
+        </div>
+
+        <div class="grid grid-2">
+          <div class="feature-card reveal reveal-delay-1">
+            <div class="feature-icon"><i class="ri-customer-service-2-line"></i></div>
+            <h3>1. Support Utilisateur &amp; Dépannage Réactif</h3>
+            <p>
+              Vos salariés ne perdent plus des heures à chercher sur Google ou à déranger leur collègue. En cas de blocage (Outlook, logiciel comptable, imprimante, lenteur), nous prenons la main à distance sous 30 minutes.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-2">
+            <div class="feature-icon"><i class="ri-refresh-line"></i></div>
+            <h3>2. Maintenance Préventive &amp; Mises à Jour</h3>
+            <p>
+              Les failles de sécurité proviennent à 80% de logiciels non mis à jour. Nous appliquons les correctifs Windows, macOS et logiciels tiers hors des heures de travail de vos équipes pour zéro interruption de productivité.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-3">
+            <div class="feature-icon"><i class="ri-shield-keyhole-line"></i></div>
+            <h3>3. Cybersécurité &amp; Conformité ANSSI</h3>
+            <p>
+              Protection antivirus/EDR managée, généralisation de l'authentification multifacteur (MFA), chiffrement BitLocker des ordinateurs portables nomades et application du principe du moindre privilège administrateur.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-4">
+            <div class="feature-icon"><i class="ri-database-2-line"></i></div>
+            <h3>4. Sauvegardes 3-2-1 Supervisées &amp; Testées</h3>
+            <p>
+              Une sauvegarde non testée n'est pas une sauvegarde. Nous mettons en place des sauvegardes locales chiffrées sur votre NAS et une copie externe étanche. Nous réalisons des tests périodiques de restauration de fichiers.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Forfaits B2B -->
+    <section id="forfaits" class="section pricing-section">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">GRILLE TARIFAIRE B2B 2026</span>
+          <h2 class="section-title">Des Forfaits Adaptés à la Taille de Votre Entreprise</h2>
+          <p class="section-subtitle">
+            Tarifs transparents en Hors Taxes (HT) par poste et par mois.
+          </p>
+        </div>
+
+        <div class="pricing-grid pricing-grid-3">
+          <!-- TPE Essentiel -->
+          <div class="price-card reveal reveal-delay-1">
+            <div class="price-header">
+              <div class="price-target">TPE · 1 à 5 Postes</div>
+              <h3 class="price-title">TPE Essentiel</h3>
+              <p class="price-desc">Support réactif et maintenance pour les petites structures ayant besoin d'un dépannage rapide.</p>
+            </div>
+
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">39 €</span>
+                <span class="price-unit">HT / poste / mois</span>
+              </div>
+              <div class="price-setup">Mise en service : 149 € HT</div>
+              <div class="price-minimum">Forfait minimum : 149 € HT / mois</div>
+            </div>
+
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span>Assistance à distance réactive</span></li>
+              <li><i class="ri-check-line"></i> <span>Mises à jour Windows / macOS régulières</span></li>
+              <li><i class="ri-check-line"></i> <span>Nettoyage préventif des postes</span></li>
+              <li><i class="ri-check-line"></i> <span>Supervision basique du parc</span></li>
+              <li><i class="ri-check-line"></i> <span>Conseils d'hygiène numérique</span></li>
+            </ul>
+
+            <a href="contact.html?plan=tpe-essentiel" class="btn btn-secondary price-cta">Choisir TPE Essentiel</a>
+            <div class="price-note">Engagement annuel · Facturation mensuelle</div>
+          </div>
+
+          <!-- TPE Sécurité -->
+          <div class="price-card featured reveal reveal-delay-2">
+            <span class="price-badge">Le Plus Populaire</span>
+            <div class="price-header">
+              <div class="price-target">TPE &amp; Cabinets · 3 à 15 Postes</div>
+              <h3 class="price-title">TPE Sécurité</h3>
+              <p class="price-desc">La formule recommandée : support complet, sauvegardes supervisées et sécurité active.</p>
+            </div>
+
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">59 €</span>
+                <span class="price-unit">HT / poste / mois</span>
+              </div>
+              <div class="price-setup">Mise en service : 290 € HT</div>
+              <div class="price-minimum">Forfait minimum : 249 € HT / mois</div>
+            </div>
+
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span><strong>Tout le forfait Essentiel inclus</strong></span></li>
+              <li><i class="ri-check-line"></i> <span><strong>Sauvegardes supervisées</strong> &amp; tests réguliers</span></li>
+              <li><i class="ri-check-line"></i> <span>Configuration &amp; contrôle <strong>MFA</strong></span></li>
+              <li><i class="ri-check-line"></i> <span>Supervision <strong>Antivirus / EDR</strong> managé</span></li>
+              <li><i class="ri-check-line"></i> <span>Chiffrement <strong>BitLocker / FileVault</strong></span></li>
+              <li><i class="ri-check-line"></i> <span>Contrôle des privilèges administrateur</span></li>
+            </ul>
+
+            <a href="contact.html?plan=tpe-securite" class="btn btn-primary price-cta">Choisir TPE Sécurité</a>
+            <div class="price-note">Engagement annuel · Sécurité renforcée</div>
+          </div>
+
+          <!-- PME Sérénité -->
+          <div class="price-card reveal reveal-delay-3">
+            <div class="price-header">
+              <div class="price-target">PME &amp; Multi-sites · 10 à 30 Postes</div>
+              <h3 class="price-title">PME Sérénité</h3>
+              <p class="price-desc">Infogérance complète de votre infrastructure : postes, serveurs NAS, réseau et cloud.</p>
+            </div>
+
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">69 €</span>
+                <span class="price-unit">HT / poste / mois</span>
+              </div>
+              <div class="price-setup">Mise en service : dès 490 € HT</div>
+              <div class="price-minimum">Selon infrastructure serveurs/cloud</div>
+            </div>
+
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span><strong>Tout le forfait Sécurité inclus</strong></span></li>
+              <li><i class="ri-check-line"></i> <span>Supervision serveurs &amp; NAS Synology/QNAP</span></li>
+              <li><i class="ri-check-line"></i> <span>Stratégie de sauvegarde <strong>3-2-1 avec copie isolée</strong></span></li>
+              <li><i class="ri-check-line"></i> <span>Administration Microsoft 365 &amp; comptes</span></li>
+              <li><i class="ri-check-line"></i> <span>Interlocuteur dédié &amp; SLA &lt; 30 min</span></li>
+            </ul>
+
+            <a href="contact.html?plan=pme-serenite" class="btn btn-secondary price-cta">Demander un Devis PME</a>
+            <div class="price-note">Audit de sécurité initial offert</div>
+          </div>
+        </div>
+
+        <div class="callout-box reveal">
+          <h4><i class="ri-price-tag-3-line" style="color: var(--accent-cyan);"></i> Précision sur les Licences Éventuelles</h4>
+          <p>
+            Afin de préserver votre indépendance financière, les licences logicielles tierces (abonnements Microsoft 365, solution EDR spécialisée, gigaoctets de stockage cloud de sauvegarde) ne sont pas margées par FORTIQ : elles sont souscrites directement par votre entreprise ou refacturées à prix coûtant sans surprise.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Secteurs d'activité -->
+    <section class="section">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">VOTRE SECTEUR</span>
+          <h2 class="section-title">Nous Comprenons les Enjeux de Votre Métier</h2>
+          <p class="section-subtitle">
+            Que vous soyez artisan sur le terrain ou avocat en plaidoirie, votre informatique doit être infaillible.
+          </p>
+        </div>
+
+        <div class="grid grid-3">
+          <div class="competency-card reveal reveal-delay-1">
+            <div class="competency-header">
+              <div class="competency-icon"><i class="ri-scales-3-line"></i></div>
+              <h3>Professions Juridiques &amp; Santé</h3>
+            </div>
+            <p class="competency-desc">Avocats, notaires, experts-comptables, médecins, infirmiers.</p>
+            <ul class="competency-points">
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Secret professionnel et confidentialité des dossiers protégés</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Zéro exposition de vos pièces sur des serveurs clouds douteux</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Disponibilité sans faille lors des échéances fiscales ou d'audiences</li>
+            </ul>
+          </div>
+
+          <div class="competency-card reveal reveal-delay-2">
+            <div class="competency-header">
+              <div class="competency-icon"><i class="ri-tools-line"></i></div>
+              <h3>Artisans, BTP &amp; Commerces</h3>
+            </div>
+            <p class="competency-desc">Plombiers, électriciens, maçons, boutiques, ateliers de fabrication.</p>
+            <ul class="competency-points">
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Logiciels de devis, métrés et facturation toujours accessibles</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Dépannage express pour ne jamais bloquer la sortie d'un chantier</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Protection contre les fausses factures et pièces jointes piégées</li>
+            </ul>
+          </div>
+
+          <div class="competency-card reveal reveal-delay-3">
+            <div class="competency-header">
+              <div class="competency-icon"><i class="ri-building-4-line"></i></div>
+              <h3>PME de Services &amp; Bureaux</h3>
+            </div>
+            <p class="competency-desc">Cabinets de conseil, agences, bureaux d'études, sociétés en télétravail.</p>
+            <ul class="competency-points">
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Intégration fluide et rapide des nouveaux collaborateurs</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Partage de fichiers sur NAS local et accès télétravail par VPN</li>
+              <li><span class="bullet"><i class="ri-check-line"></i></span> Vision claire et pilotage simplifié de votre budget informatique</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="container footer-container">
+        <div class="footer-left">
+          <div class="footer-brand">
+            <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+            <span class="brand-name">FORTIQ</span>
+          </div>
+          <p class="footer-desc">
+            Infogérance, maintenance informatique et cybersécurité de proximité pour TPE et PME partout en France.
+          </p>
+        </div>
+
+        <div class="footer-links-group">
+          <div class="footer-col">
+            <h5>Prestations</h5>
+            <a href="tpe-pme.html">Forfaits TPE &amp; PME</a>
+            <a href="cybersecurite.html">Cybersécurité ANSSI</a>
+            <a href="sauvegarde.html">Sauvegardes 3-2-1</a>
+            <a href="particuliers.html">Particuliers</a>
+            <a href="tarifs.html">Grille Tarifaire 2026</a>
+          </div>
+          <div class="footer-col">
+            <h5>Sécurité &amp; Confiance</h5>
+            <a href="technologie-fortiq.html">Technologie P2P Souveraine</a>
+            <a href="faq.html">Foire Aux Questions</a>
+            <a href="contact.html">Demander un Audit</a>
+          </div>
+          <div class="footer-col">
+            <h5>Open Source</h5>
+            <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer">
+              <i class="ri-github-fill" style="vertical-align: -1px; margin-right: 4px;"></i> GitHub
+            </a>
+            <a href="contact.html">Nous Contacter</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="container footer-bottom">
+        <p>&copy; 2026 FORTIQ. Tous droits réservés.</p>
+        <p>Infogérance &amp; Téléassistance souveraine · Conçue en France.</p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

@@ -287,5 +287,19 @@ document.addEventListener("DOMContentLoaded", () => {
       }, 800);
     });
   }
+
+  // FAQ Accordion Handler (Accessible with ARIA)
+  const faqButtons = document.querySelectorAll(".faq-button");
+  faqButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const item = btn.closest(".faq-item");
+      if (!item) return;
+      const isExpanded = btn.getAttribute("aria-expanded") === "true";
+      
+      btn.setAttribute("aria-expanded", String(!isExpanded));
+      item.classList.toggle("active");
+    });
+  });
 });
+
 

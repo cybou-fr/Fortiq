@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Assistance Informatique Particuliers à Distance — FORTIQ</title>
+    <meta
+      name="description"
+      content="Dépannage, sécurité et entretien de votre PC ou Mac à distance : forfait Sérénité à 39 € TTC/mois. Un technicien dédié qui prend soin de votre ordinateur partout en France."
+    />
+    <link rel="canonical" href="https://fortiq.fr/particuliers.html" />
+    <link rel="icon" type="image/png" href="assets/logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet" />
+
+    <meta property="og:title" content="Assistance Informatique Particuliers à Distance — FORTIQ" />
+    <meta property="og:description" content="Prenez soin de votre ordinateur en toute sérénité dès 39 € TTC/mois avec un technicien à votre écoute." />
+    <meta property="og:url" content="https://fortiq.fr/particuliers.html" />
+    <meta property="og:type" content="website" />
+
+    <!-- Schema.org JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Service",
+      "name": "Assistance Informatique Particuliers Sérénité",
+      "provider": {
+        "@type": "Organization",
+        "name": "FORTIQ",
+        "url": "https://fortiq.fr"
+      },
+      "areaServed": "France",
+      "description": "Dépannage à distance, nettoyage PC/Mac, sécurisation des données, vérification des sauvegardes et assistance utilisateur bienveillante.",
+      "offers": {
+        "@type": "Offer",
+        "price": "39",
+        "priceCurrency": "EUR",
+        "eligibleRegion": "FR"
+      }
+    }
+    </script>
+  </head>
+  <body>
+    <canvas id="particleCanvas" class="particle-canvas"></canvas>
+    <div class="glow-bg top-glow"></div>
+
+    <!-- Header Navigation -->
+    <header class="site-header">
+      <div class="container nav-container">
+        <a href="index.html" class="nav-brand">
+          <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+          <span class="brand-name">FORTIQ</span>
+          <span class="brand-tag">ASSISTANCE PARTICULIERS</span>
+        </a>
+
+        <nav class="nav-links">
+          <a href="index.html">Accueil</a>
+          <a href="tarifs.html">Tarifs</a>
+          <a href="particuliers.html" class="active">Particuliers</a>
+          <a href="tpe-pme.html">TPE &amp; PME</a>
+          <a href="cybersecurite.html">Cybersécurité</a>
+          <a href="sauvegarde.html">Sauvegardes</a>
+          <a href="technologie-fortiq.html">Technologie</a>
+          <a href="faq.html">FAQ</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer" class="btn btn-secondary nav-github-btn">
+            <i class="ri-github-fill" style="font-size: 1.2rem; vertical-align: -2px; margin-right: 4px;"></i>
+            <span>GitHub</span>
+          </a>
+          <a href="contact.html" class="btn btn-primary">Diagnostic Offert</a>
+        </div>
+
+        <button class="mobile-menu-toggle" id="menuToggle" aria-label="Ouvrir le menu">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile Drawer -->
+    <div class="mobile-drawer" id="mobileDrawer">
+      <nav class="mobile-nav">
+        <a href="index.html" class="mobile-link">Accueil</a>
+        <a href="tarifs.html" class="mobile-link">Tarifs 2026</a>
+        <a href="particuliers.html" class="mobile-link active" style="color: var(--accent-cyan);">Particuliers</a>
+        <a href="tpe-pme.html" class="mobile-link">TPE &amp; PME</a>
+        <a href="cybersecurite.html" class="mobile-link">Cybersécurité</a>
+        <a href="sauvegarde.html" class="mobile-link">Sauvegardes</a>
+        <a href="technologie-fortiq.html" class="mobile-link">Technologie FORTIQ</a>
+        <a href="faq.html" class="mobile-link">FAQ</a>
+        <a href="contact.html" class="btn btn-primary mobile-cta">Demander un Diagnostic</a>
+      </nav>
+    </div>
+
+    <!-- Subpage Hero -->
+    <section class="page-hero">
+      <div class="container">
+        <div class="breadcrumb">
+          <a href="index.html">Accueil</a>
+          <span>/</span>
+          <span>Particuliers</span>
+        </div>
+        <h1 class="page-hero-title">
+          Votre Ordinateur Fonctionne, Vos Photos Restent Sûres, <span class="gradient-text">Un Technicien Vous Aide</span>
+        </h1>
+        <p class="page-hero-subtitle">
+          Fini le stress des pannes solitaires, des faux messages d'arnaques ou des lenteurs qui vous gâchent la vie. Avec FORTIQ Sérénité, vous bénéficiez d'une assistance à distance bienveillante et d'un ordinateur entretenu toute l'année.
+        </p>
+        <div class="hero-cta-group" style="justify-content: center;">
+          <a href="#offres" class="btn btn-primary btn-lg">Voir les Forfaits Particuliers</a>
+          <a href="contact.html" class="btn btn-secondary btn-lg">Faire Tester Mon Ordinateur</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Situations Concrètes -->
+    <section class="section">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">PROBLÈMES RÉSOLUS</span>
+          <h2 class="section-title">Des Pannes Fréquentes Résolues Rapidement à Distance</h2>
+          <p class="section-subtitle">
+            Pas besoin de débrancher votre ordinateur ni de le transporter en boutique : nous prenons la main à distance avec votre autorisation expresse.
+          </p>
+        </div>
+
+        <div class="grid grid-3">
+          <div class="feature-card reveal reveal-delay-1">
+            <div class="feature-icon"><i class="ri-speed-up-line"></i></div>
+            <h3>Ordinateur Lent ou Bloqué</h3>
+            <p>
+              Démarrage interminable, roue qui tourne, programmes qui ne répondent plus. Nous nettoyons les logiciels parasites, optimisons les services et redonnons de la fluidité à votre machine.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-2">
+            <div class="feature-icon"><i class="ri-shield-flash-line"></i></div>
+            <h3>Faux Alertes Virus &amp; Arnaques</h3>
+            <p>
+              Un message alarmant vous demande d'appeler un numéro d'urgence ou de payer ? Nous vous rassurons, bloquons les faux pop-ups et vérifions l'intégrité réelle de votre système.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-3">
+            <div class="feature-icon"><i class="ri-printer-line"></i></div>
+            <h3>Imprimante &amp; Périphériques</h3>
+            <p>
+              L'imprimante n'est plus reconnue en Wi-Fi, le scanner refuse de numériser ou le son ne fonctionne plus après une mise à jour. Nous réinstallons les pilotes sains et rétablissons la connexion.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-1">
+            <div class="feature-icon"><i class="ri-mail-line"></i></div>
+            <h3>Messagerie &amp; Comptes E-mail</h3>
+            <p>
+              Impossible d'envoyer vos e-mails, mot de passe perdu, boîte pleine ou logiciel de messagerie (Outlook, Thunderbird, Apple Mail) corrompu. Nous remettons tout en ordre de marche.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-2">
+            <div class="feature-icon"><i class="ri-hard-drive-line"></i></div>
+            <h3>Sauvegardes de Vos Souvenirs</h3>
+            <p>
+              Vos photos de famille, démarches administratives et documents précieux sont-ils en sécurité ? Nous configurons une sauvegarde automatique sur disque externe ou espace sécurisé.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-3">
+            <div class="feature-icon"><i class="ri-computer-line"></i></div>
+            <h3>Installation d'un Nouvel Ordinateur</h3>
+            <p>
+              Vous venez d'acheter un nouveau PC ou Mac ? Nous transférons vos fichiers, réinstallons vos programmes essentiels et sécurisons l'appareil avant toute utilisation.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pricing Particuliers -->
+    <section id="offres" class="section pricing-section">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">NOS FORFAITS PARTICULIERS</span>
+          <h2 class="section-title">La Sérénité Informatique à Portée de Main</h2>
+          <p class="section-subtitle">
+            Une formule simple, claire et sans engagement abusif. Tarifs exprimés en TTC.
+          </p>
+        </div>
+
+        <div class="pricing-grid pricing-grid-2">
+          <!-- Card Sérénité -->
+          <div class="price-card featured reveal reveal-delay-1">
+            <span class="price-badge">Formule Recommandée</span>
+            <div class="price-header">
+              <div class="price-target">Particulier · 1 Poste (PC ou Mac)</div>
+              <h3 class="price-title">Assistance Sérénité</h3>
+              <p class="price-desc">L'accompagnement parfait pour naviguer, travailler et profiter de son ordinateur sans anxiété.</p>
+            </div>
+
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">39 €</span>
+                <span class="price-unit">TTC / mois</span>
+              </div>
+              <div class="price-setup">Mise en service initiale : 59 € TTC</div>
+            </div>
+
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span><strong>Bilan initial complet :</strong> vérification santé du disque, mémoire, logiciels et virus</span></li>
+              <li><i class="ri-check-line"></i> <span><strong>Installation sécurisée</strong> de l'outil d'assistance FORTIQ</span></li>
+              <li><i class="ri-check-line"></i> <span>Mises à jour Windows / macOS, navigateurs et composants de sécurité</span></li>
+              <li><i class="ri-check-line"></i> <span>Contrôle et fiabilisation de vos sauvegardes locales</span></li>
+              <li><i class="ri-check-line"></i> <span>Assistance à distance en cas de bug, lenteur ou question quotidienne</span></li>
+              <li><i class="ri-check-line"></i> <span>Conseils personnalisés de prévention contre les arnaques numériques</span></li>
+            </ul>
+
+            <a href="contact.html?plan=particulier-serenite" class="btn btn-primary price-cta">Souscrire au Forfait Sérénité</a>
+            <div class="price-note">12 mois d'engagement, puis résiliable mensuellement</div>
+          </div>
+
+          <!-- Card Sérénité Plus -->
+          <div class="price-card reveal reveal-delay-2">
+            <div class="price-header">
+              <div class="price-target">Particulier Exigeant &amp; Télétravail</div>
+              <h3 class="price-title">Sérénité Plus</h3>
+              <p class="price-desc">Pour les personnes dépendantes de leur informatique au quotidien qui exigent une priorité absolue.</p>
+            </div>
+
+            <div class="price-amount-box">
+              <div class="price-num-row">
+                <span class="price-amount">49 €</span>
+                <span class="price-unit">TTC / mois</span>
+              </div>
+              <div class="price-setup">Mise en service initiale : 79 € TTC</div>
+            </div>
+
+            <ul class="price-features">
+              <li><i class="ri-check-line"></i> <span><strong>Tout le forfait Sérénité inclus</strong></span></li>
+              <li><i class="ri-check-line"></i> <span><strong>Priorité d'intervention</strong> immédiate</span></li>
+              <li><i class="ri-check-line"></i> <span>Assistance étendue : smartphone, tablette, box internet &amp; imprimantes</span></li>
+              <li><i class="ri-check-line"></i> <span>Maintenance préventive approfondie tous les trimestres</span></li>
+              <li><i class="ri-check-line"></i> <span>Aide à la configuration de vos nouveaux matériels ou comptes</span></li>
+            </ul>
+
+            <a href="contact.html?plan=particulier-serenite-plus" class="btn btn-secondary price-cta">Choisir Sérénité Plus</a>
+            <div class="price-note">12 mois d'engagement, puis résiliable mensuellement</div>
+          </div>
+        </div>
+
+        <div class="callout-box reveal">
+          <h4><i class="ri-shield-check-line" style="color: var(--accent-cyan);"></i> Respect du Code de la Consommation &amp; Transparence</h4>
+          <p>
+            Chez FORTIQ, votre liberté est respectée. Conformément à la législation française, nos abonnements particuliers comportent un engagement initial de 12 mois pour amortir le travail de diagnostic approfondi, puis deviennent <strong>résiliables chaque mois sur simple demande</strong>. Pas de reconduction tacite obscure ni de démarches compliquées.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="container footer-container">
+        <div class="footer-left">
+          <div class="footer-brand">
+            <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+            <span class="brand-name">FORTIQ</span>
+          </div>
+          <p class="footer-desc">
+            Assistance informatique et protection numérique à distance pour particuliers et entreprises partout en France.
+          </p>
+        </div>
+
+        <div class="footer-links-group">
+          <div class="footer-col">
+            <h5>Prestations</h5>
+            <a href="particuliers.html">Particuliers (39 € TTC)</a>
+            <a href="tpe-pme.html">TPE &amp; PME (39 € HT)</a>
+            <a href="cybersecurite.html">Cybersécurité ANSSI</a>
+            <a href="sauvegarde.html">Sauvegardes 3-2-1</a>
+            <a href="tarifs.html">Grille Tarifaire 2026</a>
+          </div>
+          <div class="footer-col">
+            <h5>Sécurité &amp; Confiance</h5>
+            <a href="technologie-fortiq.html">Technologie P2P Souveraine</a>
+            <a href="faq.html">Foire Aux Questions</a>
+            <a href="contact.html">Diagnostic Offert</a>
+          </div>
+          <div class="footer-col">
+            <h5>Open Source</h5>
+            <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer">
+              <i class="ri-github-fill" style="vertical-align: -1px; margin-right: 4px;"></i> GitHub
+            </a>
+            <a href="contact.html">Nous Contacter</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="container footer-bottom">
+        <p>&copy; 2026 FORTIQ. Tous droits réservés.</p>
+        <p>Assistance &amp; Infogérance souveraine · Conçue en France.</p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

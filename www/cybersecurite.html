@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cybersécurité &amp; Hygiène Numérique ANSSI pour TPE &amp; PME — FORTIQ</title>
+    <meta
+      name="description"
+      content="Protégez votre entreprise avec bon sens : application des règles de l'ANSSI (MFA, correctifs, sauvegardes 3-2-1, chiffrement BitLocker, antivirus/EDR et moindre privilège)."
+    />
+    <link rel="canonical" href="https://fortiq.fr/cybersecurite.html" />
+    <link rel="icon" type="image/png" href="assets/logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet" />
+
+    <meta property="og:title" content="Cybersécurité &amp; Hygiène Numérique ANSSI pour TPE &amp; PME — FORTIQ" />
+    <meta property="og:description" content="Une sécurité informatique réaliste, robuste et adaptée à la taille de votre entreprise." />
+    <meta property="og:url" content="https://fortiq.fr/cybersecurite.html" />
+    <meta property="og:type" content="website" />
+
+    <!-- Schema.org JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Service",
+      "name": "Cybersécurité et Hygiène Numérique TPE/PME",
+      "provider": {
+        "@type": "Organization",
+        "name": "FORTIQ",
+        "url": "https://fortiq.fr"
+      },
+      "areaServed": "France",
+      "description": "Protection des postes, déploiement MFA, chiffrement des disques BitLocker, gestion des vulnérabilités et sauvegardes anti-ransomware alignées ANSSI."
+    }
+    </script>
+  </head>
+  <body>
+    <canvas id="particleCanvas" class="particle-canvas"></canvas>
+    <div class="glow-bg top-glow"></div>
+
+    <!-- Header Navigation -->
+    <header class="site-header">
+      <div class="container nav-container">
+        <a href="index.html" class="nav-brand">
+          <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+          <span class="brand-name">FORTIQ</span>
+          <span class="brand-tag">CYBERSÉCURITÉ</span>
+        </a>
+
+        <nav class="nav-links">
+          <a href="index.html">Accueil</a>
+          <a href="tarifs.html">Tarifs</a>
+          <a href="particuliers.html">Particuliers</a>
+          <a href="tpe-pme.html">TPE &amp; PME</a>
+          <a href="cybersecurite.html" class="active">Cybersécurité</a>
+          <a href="sauvegarde.html">Sauvegardes</a>
+          <a href="technologie-fortiq.html">Technologie</a>
+          <a href="faq.html">FAQ</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer" class="btn btn-secondary nav-github-btn">
+            <i class="ri-github-fill" style="font-size: 1.2rem; vertical-align: -2px; margin-right: 4px;"></i>
+            <span>GitHub</span>
+          </a>
+          <a href="contact.html" class="btn btn-primary">Diagnostic Offert</a>
+        </div>
+
+        <button class="mobile-menu-toggle" id="menuToggle" aria-label="Ouvrir le menu">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile Drawer -->
+    <div class="mobile-drawer" id="mobileDrawer">
+      <nav class="mobile-nav">
+        <a href="index.html" class="mobile-link">Accueil</a>
+        <a href="tarifs.html" class="mobile-link">Tarifs 2026</a>
+        <a href="particuliers.html" class="mobile-link">Particuliers</a>
+        <a href="tpe-pme.html" class="mobile-link">TPE &amp; PME</a>
+        <a href="cybersecurite.html" class="mobile-link active" style="color: var(--accent-cyan);">Cybersécurité</a>
+        <a href="sauvegarde.html" class="mobile-link">Sauvegardes</a>
+        <a href="technologie-fortiq.html" class="mobile-link">Technologie FORTIQ</a>
+        <a href="faq.html" class="mobile-link">FAQ</a>
+        <a href="contact.html" class="btn btn-primary mobile-cta">Demander un Diagnostic</a>
+      </nav>
+    </div>
+
+    <!-- Subpage Hero -->
+    <section class="page-hero">
+      <div class="container">
+        <div class="breadcrumb">
+          <a href="index.html">Accueil</a>
+          <span>/</span>
+          <span>Cybersécurité</span>
+        </div>
+        <h1 class="page-hero-title">
+          Cybersécurité Pragmatique &amp; <span class="gradient-text">Hygiène Numérique Alignée ANSSI</span>
+        </h1>
+        <p class="page-hero-subtitle">
+          Pas de promesses fantaisistes de « protection absolue », mais une discipline technique rigoureuse. Nous vous aidons à maintenir un niveau de sécurité adapté à vos usages réels : correctifs réguliers, protection des postes, MFA, chiffrement et isolation des sauvegardes.
+        </p>
+        <div class="hero-cta-group" style="justify-content: center;">
+          <a href="contact.html?plan=audit-cyber" class="btn btn-primary btn-lg">Demander un Audit de Vulnérabilités</a>
+          <a href="tarifs.html" class="btn btn-secondary btn-lg">Consulter Nos Tarifs Sécurité</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Recommandations ANSSI Section -->
+    <section class="section">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">LE BON SENS DE LA SÉCURITÉ</span>
+          <h2 class="section-title">Les Fondamentaux qui Bloquent 90% des Attaques</h2>
+          <p class="section-subtitle">
+            L'Agence Nationale de la Sécurité des Systèmes d'Information (ANSSI) rappelle constamment que la grande majorité des piratages exploitent des failles simples : des mots de passe sans double facteur, des logiciels non mis à jour et des sauvegardes connectées.
+          </p>
+        </div>
+
+        <div class="anssi-grid reveal">
+          <div class="anssi-card">
+            <div class="anssi-icon"><i class="ri-refresh-line"></i></div>
+            <h4>1. Patch Management Actif</h4>
+            <p>Application systématique des correctifs Windows, macOS et logiciels métiers pour combler les failles connues avant qu'elles ne soient exploitées.</p>
+          </div>
+
+          <div class="anssi-card">
+            <div class="anssi-icon"><i class="ri-shield-keyhole-line"></i></div>
+            <h4>2. Authentification Multifacteur (MFA)</h4>
+            <p>Activation obligatoire de la double validation (application d'authentification) sur Microsoft 365, vos e-mails et vos accès distants.</p>
+          </div>
+
+          <div class="anssi-card">
+            <div class="anssi-icon"><i class="ri-database-2-line"></i></div>
+            <h4>3. Sauvegardes 3-2-1 Isolées</h4>
+            <p>Trois copies, deux supports différents et au moins une copie hors ligne ou immuable pour résister aux attaques par rançongiciel (ransomware).</p>
+          </div>
+
+          <div class="anssi-card">
+            <div class="anssi-icon"><i class="ri-lock-password-line"></i></div>
+            <h4>4. Chiffrement des Disques (BitLocker / FileVault)</h4>
+            <p>En cas de vol ou de perte d'un ordinateur portable, vos données restent illisibles sans votre clé de déchiffrement.</p>
+          </div>
+
+          <div class="anssi-card">
+            <div class="anssi-icon"><i class="ri-user-settings-line"></i></div>
+            <h4>5. Principe du Moindre Privilège</h4>
+            <p>Séparation stricte des comptes utilisateurs standards et des comptes d'administration afin de limiter l'impact d'un clic malencontreux.</p>
+          </div>
+
+          <div class="anssi-card">
+            <div class="anssi-icon"><i class="ri-bug-line"></i></div>
+            <h4>6. Antivirus &amp; EDR Managés</h4>
+            <p>Supervision d'une solution de détection proactive des comportements suspects, bien plus efficace qu'un antivirus traditionnel figé.</p>
+          </div>
+        </div>
+
+        <!-- Callout Box -->
+        <div class="callout-box reveal">
+          <h4><i class="ri-shield-check-line" style="color: var(--accent-cyan);"></i> Notre Différenciateur : Zéro Port d'Administration Permanent Exposé</h4>
+          <p>
+            Contrairement aux solutions de téléassistance classiques (TeamViewer, RDP exposé sur Internet, VNC) qui créent une surface d'attaque permanente sur vos machines, <strong>notre technologie FORTIQ ne laisse aucun port d'écoute ouvert sur Internet</strong>. Les sessions de maintenance s'effectuent en pair-à-pair chiffré à la demande, uniquement après l'ouverture d'un ticket de support par votre entreprise.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Conseils Pratiques -->
+    <section class="section" style="background: rgba(10, 16, 26, 0.3);">
+      <div class="container">
+        <div class="section-header reveal">
+          <span class="section-tag">GUIDE PRATIQUE</span>
+          <h2 class="section-title">Que Faire Immédiatement en Cas de Doute ou de Phishing ?</h2>
+          <p class="section-subtitle">
+            Un de vos collaborateurs a cliqué sur un lien suspect ou saisi son mot de passe sur une fausse page ?
+          </p>
+        </div>
+
+        <div class="grid grid-3">
+          <div class="feature-card reveal reveal-delay-1">
+            <div class="feature-icon"><i class="ri-wifi-off-line"></i></div>
+            <h3>1. Déconnecter l'Ordinateur</h3>
+            <p>
+              Débranchez le câble réseau ou coupez le Wi-Fi de la machine sans éteindre l'ordinateur. Cela stoppe immédiatement toute propagation sur le réseau du bureau.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-2">
+            <div class="feature-icon"><i class="ri-key-2-line"></i></div>
+            <h3>2. Changer le Mot de Passe</h3>
+            <p>
+              Depuis un autre appareil sain (votre smartphone par exemple), modifiez sans attendre le mot de passe de la boîte mail ou du compte compromis et révoquez les sessions actives.
+            </p>
+          </div>
+
+          <div class="feature-card reveal reveal-delay-3">
+            <div class="feature-icon"><i class="ri-phone-line"></i></div>
+            <h3>3. Contacter Votre Technicien FORTIQ</h3>
+            <p>
+              Appelez directement notre support. Nous intervenons en priorité pour analyser les traces, isoler les menaces et vérifier si des règles de redirection mail ont été créées.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="section text-center" style="padding: 80px 0;">
+      <div class="container reveal">
+        <h2 class="section-title">Sécurisez Dès Aujourd'hui le Quotidien de Votre Entreprise</h2>
+        <p class="section-subtitle" style="margin: 16px auto 32px;">
+          Découvrez notre forfait <strong>TPE Sécurité à 59 € HT / poste / mois</strong>, incluant le support distant, la supervision des sauvegardes et le renforcement des accès.
+        </p>
+        <div class="hero-cta-group" style="justify-content: center;">
+          <a href="contact.html?plan=tpe-securite" class="btn btn-primary btn-lg">Prendre Contact pour un Diagnostic Offert</a>
+          <a href="tarifs.html" class="btn btn-secondary btn-lg">Voir Tous les Forfaits</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="container footer-container">
+        <div class="footer-left">
+          <div class="footer-brand">
+            <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+            <span class="brand-name">FORTIQ</span>
+          </div>
+          <p class="footer-desc">
+            Cybersécurité, infogérance et sauvegarde à distance pour entreprises et particuliers partout en France.
+          </p>
+        </div>
+
+        <div class="footer-links-group">
+          <div class="footer-col">
+            <h5>Prestations</h5>
+            <a href="cybersecurite.html">Cybersécurité ANSSI</a>
+            <a href="sauvegarde.html">Sauvegardes 3-2-1</a>
+            <a href="tpe-pme.html">TPE &amp; PME</a>
+            <a href="particuliers.html">Particuliers</a>
+            <a href="tarifs.html">Grille Tarifaire</a>
+          </div>
+          <div class="footer-col">
+            <h5>Sécurité &amp; Confiance</h5>
+            <a href="technologie-fortiq.html">Technologie P2P Souveraine</a>
+            <a href="faq.html">Foire Aux Questions</a>
+            <a href="contact.html">Demander un Audit</a>
+          </div>
+          <div class="footer-col">
+            <h5>Open Source</h5>
+            <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer">
+              <i class="ri-github-fill" style="vertical-align: -1px; margin-right: 4px;"></i> GitHub
+            </a>
+            <a href="contact.html">Support Client</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="container footer-bottom">
+        <p>&copy; 2026 FORTIQ. Tous droits réservés.</p>
+        <p>Cybersécurité &amp; Sauvegardes souveraines · Conçues en France.</p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

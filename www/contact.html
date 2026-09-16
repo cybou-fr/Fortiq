@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Contact &amp; Diagnostic Informatique Offert — FORTIQ</title>
+    <meta
+      name="description"
+      content="Prenez contact avec un spécialiste FORTIQ : diagnostic offert de votre informatique, devis personnalisé ou question sur nos forfaits partout en France."
+    />
+    <link rel="canonical" href="https://fortiq.fr/contact.html" />
+    <link rel="icon" type="image/png" href="assets/logo.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet" />
+
+    <meta property="og:title" content="Contact &amp; Diagnostic Informatique Offert — FORTIQ" />
+    <meta property="og:description" content="Un échange direct de 20 minutes pour faire le point sur vos ordinateurs et vos sauvegardes." />
+    <meta property="og:url" content="https://fortiq.fr/contact.html" />
+    <meta property="og:type" content="website" />
+
+    <!-- Schema.org JSON-LD -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "ContactPage",
+      "name": "Contactez FORTIQ",
+      "description": "Formulaire de contact et demande de diagnostic informatique offert pour particuliers, TPE et PME.",
+      "url": "https://fortiq.fr/contact.html",
+      "mainEntity": {
+        "@type": "Organization",
+        "name": "FORTIQ",
+        "email": "contact@fortiq.net",
+        "url": "https://fortiq.fr",
+        "areaServed": "France"
+      }
+    }
+    </script>
+  </head>
+  <body>
+    <canvas id="particleCanvas" class="particle-canvas"></canvas>
+    <div class="glow-bg top-glow"></div>
+
+    <!-- Header Navigation -->
+    <header class="site-header">
+      <div class="container nav-container">
+        <a href="index.html" class="nav-brand">
+          <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+          <span class="brand-name">FORTIQ</span>
+          <span class="brand-tag">ASSISTANCE &amp; SÉCURITÉ</span>
+        </a>
+
+        <nav class="nav-links">
+          <a href="index.html">Accueil</a>
+          <a href="tarifs.html">Tarifs</a>
+          <a href="particuliers.html">Particuliers</a>
+          <a href="tpe-pme.html">TPE &amp; PME</a>
+          <a href="cybersecurite.html">Cybersécurité</a>
+          <a href="sauvegarde.html">Sauvegardes</a>
+          <a href="technologie-fortiq.html">Technologie</a>
+          <a href="faq.html">FAQ</a>
+          <a href="contact.html" class="active">Contact</a>
+        </nav>
+
+        <div class="nav-actions">
+          <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer" class="btn btn-secondary nav-github-btn">
+            <i class="ri-github-fill" style="font-size: 1.2rem; vertical-align: -2px; margin-right: 4px;"></i>
+            <span>GitHub</span>
+          </a>
+          <a href="contact.html" class="btn btn-primary">Diagnostic Offert</a>
+        </div>
+
+        <button class="mobile-menu-toggle" id="menuToggle" aria-label="Ouvrir le menu">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile Drawer -->
+    <div class="mobile-drawer" id="mobileDrawer">
+      <nav class="mobile-nav">
+        <a href="index.html" class="mobile-link">Accueil</a>
+        <a href="tarifs.html" class="mobile-link">Tarifs 2026</a>
+        <a href="particuliers.html" class="mobile-link">Particuliers</a>
+        <a href="tpe-pme.html" class="mobile-link">TPE &amp; PME</a>
+        <a href="cybersecurite.html" class="mobile-link">Cybersécurité</a>
+        <a href="sauvegarde.html" class="mobile-link">Sauvegardes</a>
+        <a href="technologie-fortiq.html" class="mobile-link">Technologie FORTIQ</a>
+        <a href="faq.html" class="mobile-link">FAQ</a>
+        <a href="contact.html" class="mobile-link active" style="color: var(--accent-cyan);">Contact</a>
+      </nav>
+    </div>
+
+    <!-- Subpage Hero -->
+    <section class="page-hero">
+      <div class="container">
+        <div class="breadcrumb">
+          <a href="index.html">Accueil</a>
+          <span>/</span>
+          <span>Contact</span>
+        </div>
+        <h1 class="page-hero-title">
+          Faisons le Point sur <span class="gradient-text">Votre Informatique</span>
+        </h1>
+        <p class="page-hero-subtitle">
+          Un court échange de 20 minutes (par téléphone ou visio) pour faire le point sur l'état de vos ordinateurs, vos sauvegardes et vos besoins. C'est offert, sans jargon et sans aucun engagement commercial forcé.
+        </p>
+      </div>
+    </section>
+
+    <!-- Contact Form & Info -->
+    <section class="section" style="padding-top: 20px; padding-bottom: 100px;">
+      <div class="container contact-container">
+        <div class="contact-info reveal" id="contact-direct">
+          <span class="section-tag">ÉCHANGE DIRECT</span>
+          <h2>Parlez à un Technicien Réel</h2>
+          <p>
+            Pas de boîte vocale impersonnelle ni de formulaire perdu dans les limbes. Vous échangez avec un professionnel qui comprend votre métier et vos contraintes.
+          </p>
+
+          <div class="contact-details">
+            <div class="contact-row">
+              <span class="contact-icon"><i class="ri-map-pin-2-line"></i></span>
+              <div>
+                <strong>Interventions partout en France</strong>
+                <div style="font-size: 13px; color: var(--text-muted);">Assistance distante sécurisée &amp; interventions locales sur site selon secteur</div>
+              </div>
+            </div>
+
+            <div class="contact-row">
+              <span class="contact-icon"><i class="ri-mail-send-line"></i></span>
+              <div>
+                <strong>contact@fortiq.net</strong>
+                <div style="font-size: 13px; color: var(--text-muted);">Réponse sous 24h ouvrées</div>
+              </div>
+            </div>
+
+            <div class="contact-row">
+              <span class="contact-icon"><i class="ri-time-line"></i></span>
+              <div>
+                <strong>Réactivité sous contrat</strong>
+                <div style="font-size: 13px; color: var(--text-muted);">Moins de 30 minutes pour les urgences bloquantes</div>
+              </div>
+            </div>
+
+            <div class="contact-row">
+              <span class="contact-icon"><i class="ri-shield-check-line"></i></span>
+              <div>
+                <strong>Confidentialité garantie</strong>
+                <div style="font-size: 13px; color: var(--text-muted);">Zéro revente de données, respect strict du RGPD</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="contact-form-card reveal">
+          <h3>Demander un Diagnostic Offert</h3>
+          <form id="contactForm" class="contact-form">
+            <div class="form-group">
+              <label for="profileType">Votre Profil *</label>
+              <select id="profileType" required>
+                <option value="particulier">Particulier (ordinateur personnel / famille)</option>
+                <option value="liberal">Indépendant / Profession libérale (1 à 2 postes)</option>
+                <option value="tpe" selected>TPE / Cabinet / Artisan (3 à 10 postes)</option>
+                <option value="pme">PME (11 à 30 postes et plus)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="name">Votre Nom &amp; Prénom *</label>
+              <input type="text" id="name" required placeholder="Ex. Sophie Martin" />
+            </div>
+
+            <div class="form-group">
+              <label for="company">Nom de Votre Entreprise ou Cabinet</label>
+              <input type="text" id="company" placeholder="Ex. Cabinet Martin &amp; Associés (laisser vide si particulier)" />
+            </div>
+
+            <div class="form-group">
+              <label for="email">Adresse E-mail *</label>
+              <input type="email" id="email" required placeholder="sophie@exemple.fr" />
+            </div>
+
+            <div class="form-group">
+              <label for="phone">Numéro de Téléphone *</label>
+              <input type="tel" id="phone" required placeholder="06 12 34 56 78" />
+            </div>
+
+            <div class="form-group">
+              <label for="serviceType">Votre Besoin Prioritaire *</label>
+              <select id="serviceType" required>
+                <option value="tpe-securite">Forfait TPE Sécurité (59 € HT/poste/mois)</option>
+                <option value="tpe-essentiel">Forfait TPE Essentiel (39 € HT/poste/mois)</option>
+                <option value="pme-serenite">Forfait PME Sérénité (69 € HT/poste/mois)</option>
+                <option value="particulier-serenite">Forfait Particulier Sérénité (39 € TTC/mois)</option>
+                <option value="sauvegardes">Audit et fiabilisation des sauvegardes 3-2-1</option>
+                <option value="depannage">Dépannage d'un problème urgent</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="message">Dites-nous en Plus sur Votre Situation</label>
+              <textarea id="message" rows="3" placeholder="Ex. Nous avons 6 PC Windows et un NAS. Nous voulons fiabiliser nos sauvegardes et avoir un technicien disponible quand un bug survient..."></textarea>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block btn-lg">
+              Envoyer Ma Demande de Diagnostic Offert
+            </button>
+            <div style="font-size: 12px; color: var(--text-muted); text-align: center; margin-top: 8px;">
+              Échange sans engagement · Vos informations restent strictement confidentielles.
+            </div>
+          </form>
+
+          <div id="formSuccess" class="form-success" style="display: none;">
+            <i class="ri-checkbox-circle-fill" style="margin-right: 6px; vertical-align: -1px;"></i>
+            Merci ! Votre demande a bien été reçue. Un technicien vous recontactera sous 24 heures pour convenir d'un échange.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="container footer-container">
+        <div class="footer-left">
+          <div class="footer-brand">
+            <img src="assets/logo.png" alt="Logo FORTIQ" class="brand-logo" />
+            <span class="brand-name">FORTIQ</span>
+          </div>
+          <p class="footer-desc">
+            Assistance informatique, cybersécurité et sauvegarde à distance partout en France.
+          </p>
+        </div>
+
+        <div class="footer-links-group">
+          <div class="footer-col">
+            <h5>Prestations</h5>
+            <a href="tarifs.html">Tarifs 2026</a>
+            <a href="tpe-pme.html">TPE &amp; PME</a>
+            <a href="particuliers.html">Particuliers</a>
+            <a href="cybersecurite.html">Cybersécurité ANSSI</a>
+            <a href="sauvegarde.html">Sauvegardes 3-2-1</a>
+          </div>
+          <div class="footer-col">
+            <h5>Sécurité &amp; Confiance</h5>
+            <a href="technologie-fortiq.html">Technologie P2P Souveraine</a>
+            <a href="faq.html">Foire Aux Questions</a>
+            <a href="contact.html">Demander un Diagnostic</a>
+          </div>
+          <div class="footer-col">
+            <h5>Open Source</h5>
+            <a href="https://github.com/cybou-fr/Fortiq" target="_blank" rel="noreferrer">
+              <i class="ri-github-fill" style="vertical-align: -1px; margin-right: 4px;"></i> GitHub
+            </a>
+            <a href="contact.html">Contact</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="container footer-bottom">
+        <p>&copy; 2026 FORTIQ. Tous droits réservés.</p>
+        <p>Assistance &amp; Infogérance souveraine · Conçue en France.</p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
