@@ -5,6 +5,38 @@ use tauri::{
     Manager, WindowEvent,
 };
 
+fn get_log_path() -> std::path::PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".fortiq")))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    base.join("FORTIQ").join("desktop.log")
+}
+
+pub fn log_diagnostic(msg: &str) {
+    let now = std::time::SystemTime::now();
+    let dur = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = dur.as_secs();
+    let millis = dur.subsec_millis();
+    let line = format!("[{secs}.{millis:03}] {msg}\n");
+    print!("{line}");
+    let path = get_log_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write;
+        let _ = f.write_all(line.as_bytes());
+        let _ = f.flush();
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopStatus {
@@ -107,6 +139,7 @@ async fn send_ipc_request(
 
 #[tauri::command]
 async fn desktop_status() -> DesktopStatus {
+    log_diagnostic("[FRONTEND] desktop_status IPC invoked");
     if let Some(fortiq_core::ipc::IpcResponse::Status(status)) =
         send_ipc_request(&fortiq_core::ipc::IpcRequest::GetStatus).await
     {
@@ -336,33 +369,54 @@ async fn close_terminal_session(state: tauri::State<'_, TerminalState>) -> Resul
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
+    log_diagnostic("[ACTION] show_main_window triggered");
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
+        match window.show() {
+            Ok(_) => log_diagnostic("[ACTION] window.show() success"),
+            Err(e) => log_diagnostic(&format!("[ACTION ERROR] window.show() failed: {e}")),
+        }
         let _ = window.unminimize();
         let _ = window.set_focus();
+        log_diagnostic("[ACTION] window unminimized and focused");
+    } else {
+        log_diagnostic("[ACTION ERROR] 'main' window not found!");
     }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    log_diagnostic("=== FORTIQ Desktop starting ===");
+    log_diagnostic(&format!("Log file path: {}", get_log_path().display()));
+
     tauri::Builder::default()
         .manage(TerminalState(tokio::sync::Mutex::new(None)))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            log_diagnostic("[SETUP] Beginning application setup...");
+
             let open = MenuItem::with_id(app, "open", "Ouvrir FORTIQ", true, None::<&str>)?;
             let status = MenuItem::with_id(app, "status", "Statut : Prêt", false, None::<&str>)?;
             let separator = PredefinedMenuItem::separator(app)?;
             let quit = MenuItem::with_id(app, "quit", "Quitter FORTIQ", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &status, &separator, &quit])?;
+            log_diagnostic("[SETUP] Tray menu created");
 
             let mut tray = TrayIconBuilder::with_id("fortiq")
                 .tooltip("FORTIQ · Supervision P2P Souveraine")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "open" => show_main_window(app),
-                    "quit" => app.exit(0),
-                    _ => {}
+                    "open" => {
+                        log_diagnostic("[TRAY] Menu event 'open' clicked");
+                        show_main_window(app);
+                    }
+                    "quit" => {
+                        log_diagnostic("[TRAY] Menu event 'quit' clicked, exiting app");
+                        app.exit(0);
+                    }
+                    other => {
+                        log_diagnostic(&format!("[TRAY] Menu event '{other}' clicked"));
+                    }
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
@@ -371,22 +425,63 @@ pub fn run() {
                         ..
                     } = event
                     {
+                        log_diagnostic("[TRAY] Tray icon Left-Click detected, showing window");
                         show_main_window(tray.app_handle());
                     }
                 });
 
-            let icon = app
-                .default_window_icon()
-                .cloned()
-                .unwrap_or_else(|| tauri::include_image!("icons/32x32.png"));
+            let icon = match app.default_window_icon() {
+                Some(icon) => {
+                    log_diagnostic("[SETUP] Using default_window_icon for tray");
+                    icon.clone()
+                }
+                None => {
+                    log_diagnostic(
+                        "[SETUP] default_window_icon is None, using embedded 32x32 icon",
+                    );
+                    tauri::include_image!("icons/32x32.png")
+                }
+            };
             tray = tray.icon(icon);
-            let _ = tray.build(app);
 
-            show_main_window(app.handle());
+            log_diagnostic("[SETUP] Building tray icon...");
+            match tray.build(app) {
+                Ok(_) => {
+                    log_diagnostic("[SETUP] Tray icon registered successfully in Windows tray!");
+                }
+                Err(e) => {
+                    log_diagnostic(&format!("[SETUP ERROR] Failed to build tray icon: {e}"));
+                    eprintln!("FATAL: Failed to build tray icon: {e}");
+                    return Err(Box::new(e));
+                }
+            }
+
+            log_diagnostic("[SETUP] Querying 'main' WebviewWindow...");
+            match app.get_webview_window("main") {
+                Some(window) => {
+                    log_diagnostic("[SETUP] 'main' window found in app registry");
+                    match window.show() {
+                        Ok(_) => log_diagnostic("[SETUP] Initial window.show() succeeded"),
+                        Err(e) => {
+                            log_diagnostic(&format!("[SETUP ERROR] window.show() failed: {e}"))
+                        }
+                    }
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+                None => {
+                    log_diagnostic("[SETUP ERROR] 'main' window NOT FOUND in app registry!");
+                }
+            }
+
+            log_diagnostic("[SETUP] Setup completed successfully");
             Ok(())
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
+                log_diagnostic(
+                    "[WINDOW] CloseRequested received -> preventing close, hiding to tray",
+                );
                 api.prevent_close();
                 let _ = window.hide();
             }
