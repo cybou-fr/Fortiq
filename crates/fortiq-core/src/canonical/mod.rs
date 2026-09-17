@@ -6,6 +6,7 @@
 pub mod codec;
 pub mod control;
 pub mod control_store;
+pub mod crypto;
 pub mod records;
 pub mod signing;
 pub mod types;
