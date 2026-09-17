@@ -1,0 +1,20 @@
+{
+  "name": "FORTIQ Canonical Architecture v3",
+  "date": "2026-09-17",
+  "status": "active-design-source-of-truth",
+  "supersedes": [
+    "FORTIQ_CANONICAL_ARCH_v2",
+    "all earlier architecture packs"
+  ],
+  "major_resolutions": [
+    "Per-client operator HPKE keys; no universal owner support-data HPKE key",
+    "EventPacks amortize PQ HPKE/signature overhead",
+    "Tiered storage: control replication, small-state bounded replication, RS for large state/blobs",
+    "Client-owned Ticket AccessEpoch cannot be revived by admin override",
+    "Tombstone separated from physical purge",
+    "Placement separated from immutable content identity",
+    "Snapshots and writer heads solve cold-start and anti-entropy",
+    "Strict deterministic CBOR arrays and parser limits",
+    "One payload, N recipient key envelopes"
+  ]
+}

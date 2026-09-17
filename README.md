@@ -28,16 +28,60 @@ a client, or fork it and take ownership of the changes.
 
 ---
 
-FORTIQ is a ticket-centric peer-to-peer support platform written in Rust. A ticket
-contains chat, file attachments, remote-access consent, shell sessions, and an
-activity history. The managed client owns the canonical ticket and revision; the
-operator keeps a synchronized mirror.
+FORTIQ is a sovereign support network composed of ordinary P2P nodes. Its application state is an immutable signed object graph, encrypted end-to-end with post-quantum algorithms, erasure-coded where appropriate, and distributed across storage-capable peers.
 
-Every machine runs the same `fortiq-service`. Peers communicate over authenticated
-QUIC or Circuit Relay v2, discover one another through rendezvous, and authorize
-operations using the authenticated libp2p PeerId. Shell access additionally
-requires an active ticket and explicit remote-access consent from its managed
-client.
+The operator is not a machine. The network owner/operator authority is rooted in Genesis and is portable through a 24-word BIP-39 mnemonic.
+
+```text
+Existing libp2p transport (QUIC, Relay v2, Rendezvous, DCUtR)
+        ↓
+Genesis / Owner Root / Network Policy
+        ↓
+Entity + Segment membership
+        ↓
+Immutable logical events
+        ↓
+EventPacks / Blob Manifests
+        ↓
+PQ-resistant encryption (FORTIQ-PQ1: ML-KEM-768 hybrid, ML-DSA-65)
+        ↓
+Ciphertext storage objects
+        ↓
+Replication or Reed–Solomon shards
+        ↓
+Anti-entropy / repair / GC
+        ↓
+Reducers / encrypted snapshots
+        ↓
+Tickets / Chat / Files / Shell / UI
+```
+
+### Hard Invariants
+
+1. **Node PeerId is transport identity only.**
+2. **Owner/Admin/Operator authority is rooted in signed Genesis.**
+3. **No permanent operator machine exists.**
+4. **A 24-word mnemonic unlocks temporary Operator Authority on any FORTIQ node without changing its PeerId.**
+5. **Each client has an independent cryptographic Segment.**
+6. **The operator uses a different deterministic HPKE recipient key for every client Segment.**
+7. **A Segment key leak for Client A MUST NOT decrypt Client B.**
+8. **One logical payload is encrypted once; recipients receive independent key envelopes.**
+9. **High-volume chat/state is batched into small immutable EventPacks to amortize PQ signature and HPKE overhead.**
+10. **Nobody edits an object in place, including Admin.**
+11. **Ordinary actors create successor events/versions.**
+12. **Admin may publish authoritative presentation overrides and tombstones, but cannot use them to bypass a client's local shell revocation.**
+13. **Ticket access is controlled by a client-owned access epoch.**
+14. **A client-signed close/revoke invalidates shell access immediately on that client, before distributed convergence.**
+15. **Control-plane objects are highly replicated because they are tiny and needed for bootstrapping.**
+16. **Large state packs and blobs are encrypted first and Reed–Solomon encoded second.**
+17. **Shard integrity is verified independently before RS reconstruction.**
+18. **No plaintext operator-wide database is canonical or required.**
+19. **Local materialized views are disposable caches.**
+20. **Protocol and cryptographic profiles are explicitly versioned and fail closed on downgrade.**
+
+The complete Canonical Architecture v3 specification suite and ADRs are published in [`docs/`](docs/README.md).
+See also the [Architecture Specification](docs/architecture.md), [Protocol Specification](docs/protocol.md), [Architecture Decision Records (ADRs)](docs/adr/ADR-001-genesis-owner-signing-only.md), [Detailed Specifications](docs/spec/00-architecture-review.md), and [Implementation Roadmap](docs/milestones.md).
+
 
 ## Prerequisites
 
@@ -169,10 +213,12 @@ fortiq ticket set-status FTQ_TICKET_ID RESOLVED
 fortiq ticket set-status FTQ_TICKET_ID CLOSED
 ```
 
-After closure, chat, file transfer, and new shell streams are rejected. Tickets,
-messages, attachments, events, sessions, and durable outbox records are stored in
-SQLite. A configured legacy `.json` ticket path is migrated to the corresponding
-`.db` path.
+After closure, chat, file transfer, and new shell streams are rejected.
+Tickets, messages, attachments, events, and durable outbox records are stored in
+a local SQLite database. In accordance with Canonical Architecture v3, local databases
+act as disposable materialized view caches that can be purged and completely reconstructed
+from verified, immutable encrypted event streams.
+
 
 A node whose own config sets `[ticket] auto_open = true` opens its ticket when
 the service starts, surviving restarts and reboots. It is intended for lab and
@@ -313,25 +359,18 @@ When end peers establish a relayed connection, DCUtR automatically attempts a di
 
 For WSL/VPS instructions, see [docs/milestones.md](docs/milestones.md).
 
-## Security scope
+## Security scope and guarantees (Canonical v3)
 
-Only a managed client can create a ticket, and that client remains its canonical
-owner. Creating a ticket enables support messaging and attachments, not a shell.
-A shell is accepted only while the ticket permits work, the client has explicitly
-enabled remote access, and the caller is the ticket's configured operator PeerId.
-The client can revoke consent at any time; an active shell is then terminated.
+FORTIQ guarantees tenant isolation, post-quantum confidentiality, and sovereign client control through its cryptographic model:
 
-`[ticket] auto_open = true` lets a managed machine create its own ticket at service start.
-It is meant for lab and infrastructure nodes that must stay reachable across
-restarts, it is set only in that machine's own local config, and no remote peer
-can turn it on. A real client machine leaves it off.
-
-Transport is authenticated and encrypted: QUIC for direct links, Noise + Yamux
-for relay circuits, so a relay never sees plaintext. There is no separate
-per-session key for a ticket, chat or shell today, so sessions are not
-cryptographically isolated from one another beyond the transport.
-
-Identity files contain private keys and are ignored by Git. On Unix they are created with mode `0600`. On Windows, `C:\ProgramData\FORTIQ` is strictly ACL-hardened to `SYSTEM` (`*S-1-5-18`) and `Administrators` (`*S-1-5-32-544`), blocking standard unprivileged user accounts from reading private key material. Never copy an identity file between machines or expose its contents.
+1. **Cryptographic Segmentation:** Every client organization has an independent cryptographic `SegmentId`. The operator uses deterministic, distinct HPKE recipient keys for each Segment. An operator key leak for Client A **MUST NOT** decrypt data belonging to Client B.
+2. **Client-Owned Access Epochs:** Only a managed client can create a ticket and generate a `TicketAccessEpoch`. Shell access requires an active ticket, valid `TicketAccessEpoch`, and an unexpired `OperatorSessionCertificate`.
+3. **Immediate Synchronous Revocation:** When a client revokes consent or closes a ticket, the managed node immediately writes the revocation event, invalidates the local access epoch, and synchronously kills the running PTY process tree before transmitting the event across the network. Operator administrative overrides cannot revive an invalidated access epoch.
+4. **Post-Quantum Cryptography (FORTIQ-PQ1):** Data is protected against harvest-now-decrypt-later attacks via hybrid ML-KEM-768/X25519 HPKE and ML-DSA-65 digital signatures.
+5. **Separation of Transport and Authority:** A libp2p `PeerId` represents transport identity only. Holding an active QUIC connection confers zero administrative privilege. Administrative authority is rooted in signed Genesis and portable via a 24-word mnemonic.
+6. **Tiered Durability with Integrity Verification:** Large StatePacks and blobs are encrypted first and Reed–Solomon erasure-coded second. Every shard is independently checksummed with `BLAKE3-256` before acceptance for RS reconstruction.
+7. **Zero Plaintext Database:** Local SQLite databases and indexes serve solely as disposable materialized view caches. Decrypted operator state is retained in zeroized volatile memory.
+8. **Host Permission Hardening:** Identity and seed material are strictly protected. On Unix, identity files use mode `0600`. On Windows, `C:\ProgramData\FORTIQ` is strictly ACL-hardened to `SYSTEM` (`*S-1-5-18`) and `Administrators` (`*S-1-5-32-544`), blocking unprivileged user access. Private keys and seed phrases are never committed, logged, or transmitted.
 
 ## Clean-Machine Install & Lifecycle Flow
 

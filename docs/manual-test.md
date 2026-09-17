@@ -1,5 +1,7 @@
 # FORTIQ Manual Verification Guide
 
+> **Architectural Note:** This guide covers verification of the production transport mesh, background service daemon, local IPC, and packaging (M14/M15 baseline). Application protocol evolution conforms to [Canonical Architecture v3](architecture.md) and the [Canonical Roadmap](milestones.md).
+
 This guide describes how to manually test FORTIQ end-to-end as a testable product without requiring a Rust/Cargo development environment on client machines.
 
 ---
