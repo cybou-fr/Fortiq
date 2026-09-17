@@ -218,8 +218,8 @@ fn test_reducer_full_ticket_reconstruction_and_tombstone() {
         }],
     };
     let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
-    let pack1_id = append_pack_unchecked(&mut graph, pack1_signed, pack1_plain)
-        .expect("pack 1 append failed");
+    let pack1_id =
+        append_pack_unchecked(&mut graph, pack1_signed, pack1_plain).expect("pack 1 append failed");
 
     // Pack 2: ChatMessage + FileAttached
     let blob_id = BlobId::from_bytes([0xbb; 32]);
@@ -243,8 +243,8 @@ fn test_reducer_full_ticket_reconstruction_and_tombstone() {
         ],
     };
     let pack2_signed = dummy_signed_object(client_key, stream_id, 2, Some(pack1_id), 200);
-    let pack2_id = append_pack_unchecked(&mut graph, pack2_signed, pack2_plain)
-        .expect("pack 2 append failed");
+    let pack2_id =
+        append_pack_unchecked(&mut graph, pack2_signed, pack2_plain).expect("pack 2 append failed");
 
     // Reduce: both messages and attachments present
     let view =
@@ -652,8 +652,8 @@ fn test_verified_event_pack_typestate_and_signature_verification() {
     let good_verifier = TestVerifier {
         expected_sig: signed_obj.signature.clone(),
     };
-    let verified = VerifiedEventPack::verify(signed_obj, plaintext, &good_verifier)
-        .expect("verification ok");
+    let verified =
+        VerifiedEventPack::verify(signed_obj, plaintext, &good_verifier).expect("verification ok");
     let pack_id = graph.append_pack(verified).expect("append verified pack");
     assert!(graph.get_object(&pack_id).is_some());
 }
@@ -704,8 +704,7 @@ fn test_simple_role_resolver_fail_closed() {
         ],
     };
     let pack2_signed = dummy_signed_object(unknown_key, stream_id, 2, Some(pack1_id), 100);
-    append_pack_unchecked(&mut graph, pack2_signed, pack2_plain)
-        .expect("pack 2 append into graph");
+    append_pack_unchecked(&mut graph, pack2_signed, pack2_plain).expect("pack 2 append into graph");
 
     // Reduce: The unauthorized pack MUST be completely dropped by the fail-closed resolver!
     let view = reduce_ticket_with_resolver(ticket_id, &graph, &resolver).expect("ticket view");

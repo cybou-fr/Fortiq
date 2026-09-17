@@ -27,10 +27,25 @@ impl TerminalSession {
         ticket_id: Option<String>,
         cols: u16,
         rows: u16,
-        mut cmd_rx: mpsc::Receiver<TerminalCommand>,
+        cmd_rx: mpsc::Receiver<TerminalCommand>,
         text_update_tx: mpsc::Sender<String>,
     ) -> Result<(), IpcClientError> {
         let stream = ipc.connect_terminal().await?;
+        Self::run_with_stream(stream, peer, ticket_id, cols, rows, cmd_rx, text_update_tx).await
+    }
+
+    pub async fn run_with_stream<S>(
+        stream: S,
+        peer: String,
+        ticket_id: Option<String>,
+        cols: u16,
+        rows: u16,
+        mut cmd_rx: mpsc::Receiver<TerminalCommand>,
+        text_update_tx: mpsc::Sender<String>,
+    ) -> Result<(), IpcClientError>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
         let (read_half, mut write_half) = tokio::io::split(stream);
 
         let init = TerminalSessionInit {
@@ -64,24 +79,37 @@ impl TerminalSession {
             return Err(IpcClientError::DaemonError(msg));
         }
 
+        let (control_tx, mut control_rx) = mpsc::channel::<ShellFrame>(32);
+        let (local_resize_tx, mut local_resize_rx) = mpsc::channel::<(u16, u16)>(16);
+
         // Spawn writer task
         let writer_handle = tokio::spawn(async move {
-            while let Some(cmd) = cmd_rx.recv().await {
-                match cmd {
-                    TerminalCommand::Input(bytes) => {
-                        let frame = ShellFrame::Data(bytes);
+            loop {
+                tokio::select! {
+                    Some(frame) = control_rx.recv() => {
                         if frame.write_to(&mut write_half).await.is_err() {
                             break;
                         }
                     }
-                    TerminalCommand::Resize { cols, rows } => {
-                        let frame = ShellFrame::Resize { cols, rows };
-                        if frame.write_to(&mut write_half).await.is_err() {
-                            break;
+                    cmd = cmd_rx.recv() => {
+                        match cmd {
+                            Some(TerminalCommand::Input(bytes)) => {
+                                let frame = ShellFrame::Data(bytes);
+                                if frame.write_to(&mut write_half).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Some(TerminalCommand::Resize { cols, rows }) => {
+                                let _ = local_resize_tx.send((cols, rows)).await;
+                                let frame = ShellFrame::Resize { cols, rows };
+                                if frame.write_to(&mut write_half).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Some(TerminalCommand::Close) | None => {
+                                break;
+                            }
                         }
-                    }
-                    TerminalCommand::Close => {
-                        break;
                     }
                 }
             }
@@ -93,23 +121,46 @@ impl TerminalSession {
             let mut screen = TerminalScreen::new(cols, rows);
             let mut parser = Parser::new();
 
-            while let Ok(Some(frame)) = ShellFrame::read_from(&mut stream_read).await {
-                match frame {
-                    ShellFrame::Data(bytes) => {
-                        {
-                            let mut performer = TerminalPerformer::new(&mut screen);
-                            parser.advance(&mut performer, &bytes);
-                        }
+            loop {
+                tokio::select! {
+                    Some((new_cols, new_rows)) = local_resize_rx.recv() => {
+                        screen.resize(new_cols, new_rows);
                         let text = screen.render_plain_text();
                         if text_update_tx.send(text).await.is_err() {
                             break;
                         }
                     }
-                    ShellFrame::Ping => {
-                        // Handled automatically or ignored
+                    frame_res = ShellFrame::read_from(&mut stream_read) => {
+                        match frame_res {
+                            Ok(Some(frame)) => {
+                                match frame {
+                                    ShellFrame::Data(bytes) => {
+                                        {
+                                            let mut performer = TerminalPerformer::new(&mut screen);
+                                            parser.advance(&mut performer, &bytes);
+                                        }
+                                        let text = screen.render_plain_text();
+                                        if text_update_tx.send(text).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                    ShellFrame::Ping => {
+                                        // Immediately send Pong back via writer
+                                        let _ = control_tx.send(ShellFrame::Pong).await;
+                                    }
+                                    ShellFrame::Pong => {}
+                                    ShellFrame::Resize { cols: r_cols, rows: r_rows } => {
+                                        screen.resize(r_cols, r_rows);
+                                        let text = screen.render_plain_text();
+                                        if text_update_tx.send(text).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            _ => break,
+                        }
                     }
-                    ShellFrame::Pong => {}
-                    ShellFrame::Resize { .. } => {}
                 }
             }
 

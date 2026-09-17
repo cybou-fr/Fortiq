@@ -2,7 +2,16 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use fortiq_core::{
-    ipc::{DaemonStatus, IpcRequest, IpcResponse},
+    canonical::{
+        portable::{
+            certificate::{OperatorCapabilities, OperatorSessionCertificate},
+            mnemonic::{parse_mnemonic_phrase, MnemonicDeriver},
+            workspace::MemoryWorkspace,
+        },
+        signing::{Signer, SigningError},
+        types::{EntityId, KeyId, NetworkId, OwnerId},
+    },
+    ipc::{DaemonStatus, IpcRequest, IpcResponse, OperatorSessionStatus},
     Config, NodeMode, TicketStore,
 };
 use libp2p::PeerId;
@@ -10,12 +19,59 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 pub const MAX_IPC_LINE_BYTES: usize = 64 * 1024;
 
+pub struct ActiveOperatorSession {
+    pub owner_id: OwnerId,
+    pub cert: OperatorSessionCertificate,
+    pub workspace: MemoryWorkspace,
+    pub expires_at: u64,
+}
+
+pub struct LocalRootSigner {
+    pub seed: [u8; 32],
+    pub key_id: KeyId,
+}
+
+impl Signer for LocalRootSigner {
+    fn sign(&self, domain_separated_data: &[u8]) -> Result<Vec<u8>, SigningError> {
+        let mut hasher = blake3::Hasher::new_keyed(&self.seed);
+        hasher.update(domain_separated_data);
+        Ok(hasher.finalize().as_bytes().to_vec())
+    }
+
+    fn key_id(&self) -> KeyId {
+        self.key_id
+    }
+}
+
 pub struct IpcState {
     pub config: Config,
     pub peer_id: PeerId,
     pub listen_addresses: Vec<String>,
     pub ticket_store: TicketStore,
     pub p2p_sender: Option<tokio::sync::mpsc::Sender<fortiq_p2p::P2pCommand>>,
+    pub operator_session: Arc<tokio::sync::RwLock<Option<ActiveOperatorSession>>>,
+}
+
+pub async fn is_operator_authorized(state: &IpcState) -> bool {
+    if state.config.mode() == NodeMode::Operator {
+        return true;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let session_guard = state.operator_session.read().await;
+    if let Some(session) = session_guard.as_ref() {
+        if session.expires_at > now
+            && session
+                .cert
+                .capabilities
+                .has(OperatorCapabilities::SHELL_EXEC)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn staged_components<'a>(
@@ -583,6 +639,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
     match req {
         IpcRequest::GetStatus => {
             let active_ticket = state.ticket_store.get().await.ok().flatten();
+            let is_unlocked = is_operator_authorized(state).await;
             let status = DaemonStatus {
                 product: "FORTIQ".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
@@ -592,6 +649,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 active_ticket,
                 authorized_operator: state.config.authorization.operator_peer_id.clone(),
                 listen_addresses: state.listen_addresses.clone(),
+                is_operator_unlocked: is_unlocked,
             };
             IpcResponse::Status(status)
         }
@@ -979,6 +1037,186 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
             }
         }
+        IpcRequest::UnlockOperator { mnemonic } => {
+            let entropy = match parse_mnemonic_phrase(&mnemonic) {
+                Ok(e) => e,
+                Err(err) => {
+                    return IpcResponse::Error(format!("Phrase mnémonique invalide: {err}"));
+                }
+            };
+            let deriver = MnemonicDeriver::new(&entropy);
+            let root_seed = match deriver.derive_root_signing_seed() {
+                Ok(s) => s,
+                Err(err) => {
+                    return IpcResponse::Error(format!("Échec dérivation clé racine: {err}"));
+                }
+            };
+
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let ttl = 3600u64; // 1 hour session
+            let expires_at = now + ttl;
+
+            let net_id = NetworkId::from_bytes([0x01; 32]);
+            let owner_id = OwnerId::from_bytes(*blake3::hash(root_seed.as_bytes()).as_bytes());
+            let host_entity =
+                EntityId::from_bytes(*blake3::hash(&state.peer_id.to_bytes()).as_bytes());
+            let op_entity = host_entity;
+            let op_key =
+                KeyId::from_bytes(*blake3::hash(b"fortiq:operator:session:key").as_bytes());
+            let root_key = KeyId::from_bytes(*blake3::hash(b"fortiq:owner:root:key").as_bytes());
+            let nonce = *uuid::Uuid::new_v4().as_bytes();
+
+            let session_seed = match deriver.derive_operator_session_seed(&nonce) {
+                Ok(s) => s,
+                Err(err) => {
+                    return IpcResponse::Error(format!("Échec dérivation session: {err}"));
+                }
+            };
+            let session_pubkey = *blake3::hash(session_seed.as_bytes()).as_bytes();
+
+            let root_signer = LocalRootSigner {
+                seed: *root_seed.as_bytes(),
+                key_id: root_key,
+            };
+            let capabilities = OperatorCapabilities::from_names([
+                "admin",
+                "read",
+                "write",
+                "shell",
+                "file",
+                "ticket",
+                "diagnostics",
+            ]);
+
+            let cert = match OperatorSessionCertificate::issue(
+                net_id,
+                owner_id,
+                host_entity,
+                op_entity,
+                op_key,
+                session_pubkey,
+                capabilities,
+                now.saturating_sub(10),
+                expires_at,
+                nonce,
+                &root_signer,
+            ) {
+                Ok(c) => c,
+                Err(err) => {
+                    return IpcResponse::Error(format!("Échec émission certificat: {err}"));
+                }
+            };
+
+            let workspace = MemoryWorkspace::new();
+
+            {
+                let mut guard = state.operator_session.write().await;
+                *guard = Some(ActiveOperatorSession {
+                    owner_id,
+                    cert,
+                    workspace,
+                    expires_at,
+                });
+            }
+
+            IpcResponse::OperatorStatus(OperatorSessionStatus {
+                is_unlocked: true,
+                owner_id: Some(owner_id.to_string()),
+                expires_at: Some(expires_at),
+                capabilities: capabilities.to_names(),
+            })
+        }
+        IpcRequest::LockOperator => {
+            let mut guard = state.operator_session.write().await;
+            if let Some(mut session) = guard.take() {
+                session.workspace.wipe();
+            }
+            IpcResponse::Success
+        }
+        IpcRequest::GetOperatorStatus => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let mut guard = state.operator_session.write().await;
+            if let Some(session) = guard.as_ref() {
+                if now >= session.expires_at {
+                    if let Some(mut expired) = guard.take() {
+                        expired.workspace.wipe();
+                    }
+                    return IpcResponse::OperatorStatus(OperatorSessionStatus {
+                        is_unlocked: false,
+                        owner_id: None,
+                        expires_at: None,
+                        capabilities: Vec::new(),
+                    });
+                }
+                return IpcResponse::OperatorStatus(OperatorSessionStatus {
+                    is_unlocked: true,
+                    owner_id: Some(session.owner_id.to_string()),
+                    expires_at: Some(session.expires_at),
+                    capabilities: session.cert.capabilities.to_names(),
+                });
+            }
+            IpcResponse::OperatorStatus(OperatorSessionStatus {
+                is_unlocked: false,
+                owner_id: None,
+                expires_at: None,
+                capabilities: Vec::new(),
+            })
+        }
+        IpcRequest::RevokeTicketAccess { ticket_id } => {
+            let local_peer_id = state.peer_id.to_string();
+            let current = match state.ticket_store.db().get_ticket(&ticket_id) {
+                Ok(Some(t)) => t,
+                Ok(None) => return IpcResponse::Error("Ticket introuvable".to_string()),
+                Err(e) => return IpcResponse::Error(format!("Erreur: {e}")),
+            };
+            let is_participant = current.client_peer_id == local_peer_id
+                || current.operator_peer_id == local_peer_id
+                || is_operator_authorized(state).await;
+            if !is_participant {
+                return IpcResponse::Error(
+                    "Non autorisé à révoquer l'accès pour ce ticket".to_string(),
+                );
+            }
+
+            match state
+                .ticket_store
+                .db()
+                .set_remote_access(&ticket_id, false, &local_peer_id)
+            {
+                Ok(updated) => {
+                    if let Some(ref ticket) = updated {
+                        let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
+                            &ticket.operator_peer_id
+                        } else {
+                            &ticket.client_peer_id
+                        };
+                        if let Ok(peer) = target_str.parse::<PeerId>() {
+                            if let Some(ref sender) = state.p2p_sender {
+                                let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+                                let _ = sender
+                                    .send(fortiq_p2p::P2pCommand::SyncTickets {
+                                        peer,
+                                        dial: None,
+                                        request: fortiq_p2p::TicketSyncRequest::PushTicket(
+                                            Box::new(ticket.clone()),
+                                        ),
+                                        reply: reply_tx,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                    IpcResponse::Success
+                }
+                Err(e) => IpcResponse::Error(format!("Échec de révocation d'accès: {e}")),
+            }
+        }
     }
 }
 
@@ -988,9 +1226,9 @@ where
 {
     let (ipc_read_half, mut ipc_write) = tokio::io::split(stream);
 
-    if state.config.mode() != NodeMode::Operator {
+    if !is_operator_authorized(state.as_ref()).await {
         let err_msg =
-            "{\"status\":\"error\",\"message\":\"Terminal IPC is only permitted in Operator mode\"}\n";
+            "{\"status\":\"error\",\"message\":\"Terminal IPC is only permitted in Operator mode or with an active Operator session\"}\n";
         ipc_write.write_all(err_msg.as_bytes()).await?;
         ipc_write.flush().await?;
         return Ok(());
@@ -1027,6 +1265,14 @@ where
             return Ok(());
         }
     };
+
+    if target_peer == state.peer_id {
+        let err_msg =
+            "{\"status\":\"error\",\"message\":\"Cannot open terminal session to local node\"}\n";
+        ipc_write.write_all(err_msg.as_bytes()).await?;
+        ipc_write.flush().await?;
+        return Ok(());
+    }
 
     let dial_addr: Option<libp2p::Multiaddr> = init.dial.and_then(|d| d.parse().ok());
 
@@ -1210,6 +1456,7 @@ mod tests {
             listen_addresses: vec![],
             ticket_store: TicketStore::new(ticket_path),
             p2p_sender: None,
+            operator_session: Arc::new(tokio::sync::RwLock::new(None)),
         });
 
         let (client_io, server_io) = tokio::io::duplex(1024);
@@ -1222,5 +1469,101 @@ mod tests {
 
         let res = handle.await.unwrap();
         assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_operator_unlock_lock_and_terminal_authorization() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config {
+            node: fortiq_core::NodeConfig {
+                name: "test-client".to_string(),
+            },
+            identity: fortiq_core::IdentityConfig {
+                path: dir.path().join("id.key"),
+            },
+            authorization: fortiq_core::AuthorizationConfig {
+                operator_peer_id: Some(
+                    "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN".to_string(),
+                ),
+            },
+            network: fortiq_core::NetworkConfig::default(),
+            capabilities: fortiq_core::CapabilitiesConfig::default(),
+            ticket: fortiq_core::TicketConfig::default(),
+            ipc: fortiq_core::IpcConfig::default(),
+        };
+        let ticket_path = dir.path().join("ticket.json");
+        let state = Arc::new(IpcState {
+            config,
+            peer_id: PeerId::random(),
+            listen_addresses: vec![],
+            ticket_store: TicketStore::new(ticket_path),
+            p2p_sender: None,
+            operator_session: Arc::new(tokio::sync::RwLock::new(None)),
+        });
+
+        // 1. Initial status: is_operator_authorized must be false
+        assert!(!is_operator_authorized(&state).await);
+
+        // 2. Unlock with invalid mnemonic fails
+        let res = process_request(
+            IpcRequest::UnlockOperator {
+                mnemonic: "invalid phrase not 24 words".to_string(),
+            },
+            &state,
+        )
+        .await;
+        match res {
+            IpcResponse::Error(msg) => {
+                assert!(msg.contains("Phrase mnémonique invalide"));
+            }
+            other => panic!("Expected Error response, got {other:?}"),
+        }
+
+        // 3. Unlock with valid 24-word BIP-39 mnemonic
+        let valid_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
+        let res = process_request(
+            IpcRequest::UnlockOperator {
+                mnemonic: valid_mnemonic.to_string(),
+            },
+            &state,
+        )
+        .await;
+        match res {
+            IpcResponse::OperatorStatus(status) => {
+                assert!(status.is_unlocked);
+                assert!(status.owner_id.is_some());
+                assert!(status.expires_at.is_some());
+                assert!(status.capabilities.contains(&"shell".to_string()));
+                assert!(status.capabilities.contains(&"write".to_string()));
+                assert!(status.capabilities.contains(&"ticket".to_string()));
+            }
+            other => panic!("Expected OperatorStatus response, got {other:?}"),
+        }
+
+        // 4. Now is_operator_authorized must be true!
+        assert!(is_operator_authorized(&state).await);
+
+        // 5. GetStatus reports is_operator_unlocked = true
+        let status_res = process_request(IpcRequest::GetStatus, &state).await;
+        if let IpcResponse::Status(s) = status_res {
+            assert!(s.is_operator_unlocked);
+        } else {
+            panic!("Expected Status response");
+        }
+
+        // 6. LockOperator wipes workspace and locks
+        let lock_res = process_request(IpcRequest::LockOperator, &state).await;
+        assert_eq!(lock_res, IpcResponse::Success);
+        assert!(!is_operator_authorized(&state).await);
+
+        // 7. GetOperatorStatus reports is_unlocked = false
+        let op_status = process_request(IpcRequest::GetOperatorStatus, &state).await;
+        match op_status {
+            IpcResponse::OperatorStatus(status) => {
+                assert!(!status.is_unlocked);
+                assert!(status.owner_id.is_none());
+            }
+            other => panic!("Expected OperatorStatus, got {other:?}"),
+        }
     }
 }

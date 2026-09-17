@@ -95,13 +95,7 @@ impl<'a> Perform for TerminalPerformer<'a> {
 
     fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
 
-    fn csi_dispatch(
-        &mut self,
-        params: &Params,
-        intermediates: &[u8],
-        _ignore: bool,
-        action: char,
-    ) {
+    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], _ignore: bool, action: char) {
         let is_private = intermediates.contains(&b'?');
         match action {
             'A' => {
@@ -127,8 +121,18 @@ impl<'a> Perform for TerminalPerformer<'a> {
             'H' | 'f' => {
                 // Cursor Position (row, col) 1-based
                 let mut iter = params.iter();
-                let row = iter.next().map(|p| p[0]).unwrap_or(1).max(1).saturating_sub(1);
-                let col = iter.next().map(|p| p[0]).unwrap_or(1).max(1).saturating_sub(1);
+                let row = iter
+                    .next()
+                    .map(|p| p[0])
+                    .unwrap_or(1)
+                    .max(1)
+                    .saturating_sub(1);
+                let col = iter
+                    .next()
+                    .map(|p| p[0])
+                    .unwrap_or(1)
+                    .max(1)
+                    .saturating_sub(1);
                 self.screen.set_cursor_pos(row, col);
             }
             'J' => {

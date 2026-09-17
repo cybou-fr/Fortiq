@@ -213,6 +213,7 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
         listen_addresses: vec![listen_address.to_string()],
         ticket_store,
         p2p_sender: Some(p2p_cmd_tx),
+        operator_session: Arc::new(tokio::sync::RwLock::new(None)),
     });
     tokio::spawn(async move {
         if let Err(e) = ipc_server::run_ipc_server(ipc_state).await {
@@ -303,6 +304,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
         listen_addresses: vec![listen_address.to_string()],
         ticket_store,
         p2p_sender: Some(p2p_cmd_tx),
+        operator_session: Arc::new(tokio::sync::RwLock::new(None)),
     });
     tokio::spawn(async move {
         if let Err(e) = ipc_server::run_ipc_server(ipc_state).await {

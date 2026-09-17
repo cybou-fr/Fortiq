@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use fortiq_core::ipc::{IpcRequest, IpcResponse};
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
@@ -140,12 +140,12 @@ impl IpcClient {
         #[cfg(windows)]
         {
             use tokio::net::windows::named_pipe::ClientOptions;
-            ClientOptions::new()
-                .open(&term_endpoint)
-                .map_err(|e| IpcClientError::ConnectionFailed {
+            ClientOptions::new().open(&term_endpoint).map_err(|e| {
+                IpcClientError::ConnectionFailed {
                     endpoint: term_endpoint.clone(),
                     source: e,
-                })
+                }
+            })
         }
 
         #[cfg(unix)]

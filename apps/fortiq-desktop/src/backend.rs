@@ -3,15 +3,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tracing::warn;
 
-use fortiq_core::canonical::crypto::keys::{MnemonicEntropy, OwnerRootSigningSeed};
-use fortiq_core::canonical::portable::certificate::{
-    OperatorCapabilities, OperatorSessionCertificate,
-};
-use fortiq_core::canonical::portable::mnemonic::MnemonicDeriver;
-use fortiq_core::canonical::portable::workspace::MemoryWorkspace;
 use fortiq_core::canonical::self_support::{LoopbackEndpoint, SelfSupportEngine, ThisDevice};
-use fortiq_core::canonical::signing::{Signer, SigningError};
-use fortiq_core::canonical::types::{EntityId, KeyId, NetworkId, OwnerId};
+use fortiq_core::canonical::types::EntityId;
 use fortiq_core::ipc::{IpcRequest, IpcResponse};
 
 use crate::command::DesktopCommand;
@@ -23,38 +16,15 @@ use crate::models::{
 };
 use crate::terminal::{TerminalCommand, TerminalSession};
 
-pub struct LocalOwnerSigner {
-    pub key_id: KeyId,
-    pub seed: OwnerRootSigningSeed,
-}
-
-impl Signer for LocalOwnerSigner {
-    fn sign(&self, domain_separated_data: &[u8]) -> Result<Vec<u8>, SigningError> {
-        let mut hasher = blake3::Hasher::new_keyed(self.seed.as_bytes());
-        hasher.update(domain_separated_data);
-        Ok(hasher.finalize().as_bytes().to_vec())
-    }
-
-    fn key_id(&self) -> KeyId {
-        self.key_id
-    }
-}
-
-pub struct OperatorState {
-    pub workspace: MemoryWorkspace,
-    pub cert: OperatorSessionCertificate,
-    pub expires_at: u64,
-}
-
 pub struct BackendActor {
     ipc: Arc<IpcClient>,
     cmd_rx: mpsc::Receiver<DesktopCommand>,
     event_tx: mpsc::Sender<DesktopEvent>,
     selected_ticket_id: Option<String>,
+    selected_ticket_detail: Option<TicketDetailDto>,
     current_status: DesktopStatusDto,
     terminal_tx: Option<mpsc::Sender<TerminalCommand>>,
     self_support_engine: Arc<Mutex<SelfSupportEngine>>,
-    operator_state: Arc<Mutex<Option<OperatorState>>>,
 }
 
 impl BackendActor {
@@ -72,10 +42,10 @@ impl BackendActor {
             cmd_rx,
             event_tx,
             selected_ticket_id: None,
+            selected_ticket_detail: None,
             current_status: DesktopStatusDto::default(),
             terminal_tx: None,
             self_support_engine: Arc::new(Mutex::new(engine)),
-            operator_state: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -157,7 +127,7 @@ impl BackendActor {
         // Poll status
         match self.ipc.send_request(&IpcRequest::GetStatus).await {
             Ok(IpcResponse::Status(status)) => {
-                let is_unlocked = self.operator_state.lock().await.is_some();
+                let is_unlocked = status.is_operator_unlocked;
                 let status_dto = DesktopStatusDto {
                     product: status.product,
                     version: status.version,
@@ -173,7 +143,10 @@ impl BackendActor {
                     is_operator_unlocked: is_unlocked,
                 };
                 self.current_status = status_dto.clone();
-                let _ = self.event_tx.send(DesktopEvent::StatusChanged(status_dto)).await;
+                let _ = self
+                    .event_tx
+                    .send(DesktopEvent::StatusChanged(status_dto))
+                    .await;
             }
             Ok(_) => {}
             Err(e) => {
@@ -183,6 +156,26 @@ impl BackendActor {
                     .event_tx
                     .send(DesktopEvent::StatusChanged(self.current_status.clone()))
                     .await;
+            }
+        }
+
+        // Poll operator status from daemon authority
+        if let Ok(IpcResponse::OperatorStatus(op_status)) =
+            self.ipc.send_request(&IpcRequest::GetOperatorStatus).await
+        {
+            if op_status.is_unlocked {
+                let dto = OperatorSessionDto {
+                    operator_entity: op_status.owner_id.unwrap_or_default(),
+                    capabilities: op_status.capabilities,
+                    issued_at: 0,
+                    expires_at: op_status.expires_at.unwrap_or_default(),
+                };
+                let _ = self
+                    .event_tx
+                    .send(DesktopEvent::OperatorUnlocked(dto))
+                    .await;
+            } else {
+                let _ = self.event_tx.send(DesktopEvent::OperatorLocked).await;
             }
         }
 
@@ -202,7 +195,10 @@ impl BackendActor {
                     rendezvous: p.rendezvous,
                 })
                 .collect();
-            let _ = self.event_tx.send(DesktopEvent::PeersChanged(peer_dtos)).await;
+            let _ = self
+                .event_tx
+                .send(DesktopEvent::PeersChanged(peer_dtos))
+                .await;
         }
 
         // Poll tickets
@@ -240,7 +236,7 @@ impl BackendActor {
         }
     }
 
-    async fn load_ticket_detail(&self, ticket_id: &str) {
+    async fn load_ticket_detail(&mut self, ticket_id: &str) {
         match self
             .ipc
             .send_request(&IpcRequest::GetTicket {
@@ -284,10 +280,13 @@ impl BackendActor {
                     priority: prio,
                     state: detail.ticket.state.as_str().to_string(),
                     created_at: detail.ticket.created_at,
+                    client_peer_id: detail.ticket.client_peer_id,
+                    operator_peer_id: detail.ticket.operator_peer_id,
                     access_epoch: None,
                     messages: msgs,
                     attachments,
                 };
+                self.selected_ticket_detail = Some(dto.clone());
                 let _ = self
                     .event_tx
                     .send(DesktopEvent::TicketLoaded(Some(dto)))
@@ -431,7 +430,52 @@ impl BackendActor {
     async fn start_shell(&mut self, ticket_id: &str, cols: u16, rows: u16) {
         self.close_shell().await;
 
-        let peer = self.current_status.peer_id.clone();
+        let target_peer = match &self.selected_ticket_detail {
+            Some(detail) if detail.id == ticket_id => {
+                let local_peer = &self.current_status.peer_id;
+                if &detail.client_peer_id == local_peer {
+                    let msg =
+                        "Impossible d'ouvrir un shell : le nœud local est le client du ticket"
+                            .to_string();
+                    let _ = self.event_tx.send(DesktopEvent::ShellDenied(msg)).await;
+                    return;
+                }
+                detail.client_peer_id.clone()
+            }
+            _ => {
+                match self
+                    .ipc
+                    .send_request(&IpcRequest::GetTicket {
+                        ticket_id: ticket_id.to_string(),
+                    })
+                    .await
+                {
+                    Ok(IpcResponse::TicketDetail(Some(detail))) => {
+                        let local_peer = &self.current_status.peer_id;
+                        if &detail.ticket.client_peer_id == local_peer {
+                            let msg = "Impossible d'ouvrir un shell : le nœud local est le client du ticket"
+                                .to_string();
+                            let _ = self.event_tx.send(DesktopEvent::ShellDenied(msg)).await;
+                            return;
+                        }
+                        detail.ticket.client_peer_id
+                    }
+                    _ => {
+                        let msg =
+                            "Impossible de résoudre le pair client pour ce ticket".to_string();
+                        let _ = self.event_tx.send(DesktopEvent::ShellDenied(msg)).await;
+                        return;
+                    }
+                }
+            }
+        };
+
+        if target_peer.is_empty() || target_peer == self.current_status.peer_id {
+            let msg = "Pair distant invalide ou boucle locale détectée".to_string();
+            let _ = self.event_tx.send(DesktopEvent::ShellDenied(msg)).await;
+            return;
+        }
+
         let (cmd_tx, cmd_rx) = mpsc::channel(128);
         let (text_tx, mut text_rx) = mpsc::channel::<String>(128);
 
@@ -447,7 +491,7 @@ impl BackendActor {
 
         match TerminalSession::spawn(
             self.ipc.clone(),
-            peer,
+            target_peer,
             Some(ticket_id.to_string()),
             cols,
             rows,
@@ -484,9 +528,8 @@ impl BackendActor {
         if let Some(ticket_id) = &self.selected_ticket_id {
             match self
                 .ipc
-                .send_request(&IpcRequest::SetRemoteAccess {
+                .send_request(&IpcRequest::RevokeTicketAccess {
                     ticket_id: ticket_id.clone(),
-                    enabled: false,
                 })
                 .await
             {
@@ -495,9 +538,10 @@ impl BackendActor {
                         .event_tx
                         .send(DesktopEvent::Notification {
                             level: "warning".into(),
-                            message: "Accès au terminal révoqué immédiatement.".into(),
+                            message: "Accès distant révoqué immédiatement.".into(),
                         })
                         .await;
+                    self.handle_refresh().await;
                 }
                 Err(e) => {
                     let _ = self.event_tx.send(DesktopEvent::Error(e.to_string())).await;
@@ -506,126 +550,66 @@ impl BackendActor {
         }
     }
 
-    async fn unlock_operator(&self, mnemonic_words: &str) {
-        let words = mnemonic_words.trim();
-        let hash = blake3::hash(words.as_bytes());
-        let entropy = MnemonicEntropy::new(*hash.as_bytes());
-        let deriver = MnemonicDeriver::new(&entropy);
-
-        let root_seed = match deriver.derive_root_signing_seed() {
-            Ok(seed) => seed,
-            Err(e) => {
-                let _ = self
-                    .event_tx
-                    .send(DesktopEvent::Error(format!("Erreur dérivation: {e}")))
-                    .await;
-                return;
-            }
-        };
-
-        let segment_master_seed = match deriver.derive_segment_master_seed() {
-            Ok(seed) => seed,
-            Err(e) => {
-                let _ = self
-                    .event_tx
-                    .send(DesktopEvent::Error(format!("Erreur dérivation: {e}")))
-                    .await;
-                return;
-            }
-        };
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let expires_at = now + 3600 * 8; // 8 hours max TTL
-
-        let network_id = NetworkId::from_bytes([0x01; 32]);
-        let owner_id = OwnerId::from_bytes([0x02; 32]);
-        let operator_key_id = KeyId::from_bytes([0x03; 32]);
-        let operator_entity = EntityId::from_bytes([0x04; 32]);
-        let capabilities = vec![
-            "admin".to_string(),
-            "shell".to_string(),
-            "read".to_string(),
-            "write".to_string(),
-        ];
-
-        let signer = LocalOwnerSigner {
-            key_id: operator_key_id,
-            seed: root_seed,
-        };
-        let host_entity = operator_entity;
-        let session_pubkey = [0x42; 32];
-        let op_capabilities = OperatorCapabilities::from_names(&capabilities);
-        let mut nonce = [0u8; 16];
-        rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut nonce);
-
-        match OperatorSessionCertificate::issue(
-            network_id,
-            owner_id,
-            host_entity,
-            operator_entity,
-            operator_key_id,
-            session_pubkey,
-            op_capabilities,
-            now,
-            expires_at,
-            nonce,
-            &signer,
-        ) {
-            Ok(cert) => {
-                let mut workspace = MemoryWorkspace::new();
-                workspace.unlock(network_id, owner_id, segment_master_seed);
-
+    async fn unlock_operator(&mut self, mnemonic_words: &str) {
+        match self
+            .ipc
+            .send_request(&IpcRequest::UnlockOperator {
+                mnemonic: mnemonic_words.trim().to_string(),
+            })
+            .await
+        {
+            Ok(IpcResponse::OperatorStatus(status)) if status.is_unlocked => {
                 let dto = OperatorSessionDto {
-                    operator_entity: operator_entity.to_hex(),
-                    capabilities,
-                    issued_at: now,
-                    expires_at,
+                    operator_entity: status.owner_id.unwrap_or_default(),
+                    capabilities: status.capabilities,
+                    issued_at: 0,
+                    expires_at: status.expires_at.unwrap_or_default(),
                 };
-
-                let mut guard = self.operator_state.lock().await;
-                *guard = Some(OperatorState {
-                    workspace,
-                    cert,
-                    expires_at,
-                });
-
-                let _ = self.event_tx.send(DesktopEvent::OperatorUnlocked(dto)).await;
+                let _ = self
+                    .event_tx
+                    .send(DesktopEvent::OperatorUnlocked(dto))
+                    .await;
                 let _ = self
                     .event_tx
                     .send(DesktopEvent::Notification {
                         level: "success".into(),
-                        message: "Espace opérateur déverrouillé avec succès.".into(),
+                        message: "Espace opérateur déverrouillé avec succès auprès du démon."
+                            .into(),
                     })
+                    .await;
+                self.handle_refresh().await;
+            }
+            Ok(IpcResponse::Error(msg)) => {
+                let _ = self.event_tx.send(DesktopEvent::Error(msg)).await;
+            }
+            Ok(_) => {
+                let _ = self
+                    .event_tx
+                    .send(DesktopEvent::Error(
+                        "Réponse inattendue du démon lors du déverrouillage".into(),
+                    ))
                     .await;
             }
             Err(e) => {
                 let _ = self
                     .event_tx
-                    .send(DesktopEvent::Error(format!(
-                        "Échec émission certificat de session: {e}"
-                    )))
+                    .send(DesktopEvent::Error(format!("Erreur IPC: {e}")))
                     .await;
             }
         }
     }
 
-    async fn lock_operator(&self) {
-        let mut guard = self.operator_state.lock().await;
-        if let Some(mut state) = guard.take() {
-            state.workspace.wipe();
-        }
+    async fn lock_operator(&mut self) {
+        let _ = self.ipc.send_request(&IpcRequest::LockOperator).await;
         let _ = self.event_tx.send(DesktopEvent::OperatorLocked).await;
         let _ = self
             .event_tx
             .send(DesktopEvent::Notification {
                 level: "info".into(),
-                message: "Espace opérateur reverrouillé et mémoire effacée.".into(),
+                message: "Espace opérateur reverrouillé et mémoire effacée sur le démon.".into(),
             })
             .await;
+        self.handle_refresh().await;
     }
 
     async fn trigger_self_support(&self, action: &str) {

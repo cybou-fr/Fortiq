@@ -25,9 +25,7 @@ pub enum DesktopEvent {
         file: AttachmentDto,
     },
     /// Shell session connected and pseudo-terminal opened.
-    ShellOpened {
-        ticket_id: String,
-    },
+    ShellOpened { ticket_id: String },
     /// Raw terminal output bytes received from remote PTY.
     ShellOutput(Vec<u8>),
     /// Shell session ended.
@@ -41,10 +39,7 @@ pub enum DesktopEvent {
     /// Diagnostic self-support state updated.
     SelfSupportChanged(SelfSupportStatusDto),
     /// User notification or feedback toast.
-    Notification {
-        level: String,
-        message: String,
-    },
+    Notification { level: String, message: String },
     /// Error encountered during operation.
     Error(String),
 }

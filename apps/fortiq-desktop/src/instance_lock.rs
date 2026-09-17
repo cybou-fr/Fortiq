@@ -1,6 +1,6 @@
+use fs2::FileExt;
 use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
-use fs2::FileExt;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

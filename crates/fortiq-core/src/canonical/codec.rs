@@ -99,11 +99,7 @@ pub fn verify_definite_length_cbor(bytes: &[u8]) -> Result<(), CodecError> {
     Ok(())
 }
 
-fn scan_single_cbor_item(
-    bytes: &[u8],
-    cursor: &mut usize,
-    depth: usize,
-) -> Result<(), CodecError> {
+fn scan_single_cbor_item(bytes: &[u8], cursor: &mut usize, depth: usize) -> Result<(), CodecError> {
     if depth > 32 {
         return Err(CodecError::MaxDepthExceeded(depth, 32));
     }
@@ -371,8 +367,7 @@ mod tests {
 
         // Lone break stop code: 0xff
         let lone_break = vec![0xff];
-        let res: Result<u64, CodecError> =
-            from_canonical_cbor(&lone_break, DecoderLimits::DEFAULT);
+        let res: Result<u64, CodecError> = from_canonical_cbor(&lone_break, DecoderLimits::DEFAULT);
         assert!(matches!(res, Err(CodecError::IndefiniteLengthRejected)));
     }
 }

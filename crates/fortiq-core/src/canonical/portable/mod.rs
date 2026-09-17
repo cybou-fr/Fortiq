@@ -16,6 +16,7 @@ pub use certificate::{
 };
 pub use mnemonic::{
     entropy_to_mnemonic, get_wordlist, parse_mnemonic_phrase, word_to_index, MnemonicDeriver,
-    MnemonicError, MNEMONIC_KDF_SALT, OPERATOR_SESSION_INFO, ROOT_SIGNING_INFO, SEGMENT_MASTER_INFO,
+    MnemonicError, MNEMONIC_KDF_SALT, OPERATOR_SESSION_INFO, ROOT_SIGNING_INFO,
+    SEGMENT_MASTER_INFO,
 };
 pub use workspace::{MemoryWorkspace, WorkspaceError};

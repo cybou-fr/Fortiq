@@ -66,8 +66,8 @@ impl VerifiedEventPack {
         })
     }
 
-    /// For internal migration and trusted testing builders.
-    pub fn new_unchecked(
+    /// For internal migration and trusted testing builders within fortiq-core.
+    pub(crate) fn new_unchecked(
         signed_obj: SignedObject,
         plaintext: EventPackPlaintext,
     ) -> Result<Self, EventGraphError> {
@@ -132,7 +132,10 @@ impl EventGraph {
         let entry = cursor.accept_append(pack.seq, pack.prev_pack_id, object_id)?;
 
         // Record stream append
-        self.stream_chains.entry(pack.stream_id).or_default().push(entry);
+        self.stream_chains
+            .entry(pack.stream_id)
+            .or_default()
+            .push(entry);
 
         // Record parent relationship for ancestry graph traversal
         self.parent_packs.insert(object_id, pack.prev_pack_id);

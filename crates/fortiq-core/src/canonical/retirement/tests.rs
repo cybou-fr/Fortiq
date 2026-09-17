@@ -3,9 +3,7 @@
 use super::*;
 use crate::canonical::control::capabilities;
 use crate::canonical::events::graph::EventGraph;
-use crate::canonical::portable::certificate::{
-    OperatorCapabilities, OperatorSessionCertificate,
-};
+use crate::canonical::portable::certificate::{OperatorCapabilities, OperatorSessionCertificate};
 use crate::canonical::records::LogicalEvent;
 use crate::canonical::signing::{Signer, SigningError, Verifier};
 use crate::canonical::types::{AccessEpoch, EntityId, KeyId, NetworkId, OwnerId, StreamId};

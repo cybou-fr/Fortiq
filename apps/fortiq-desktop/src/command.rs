@@ -8,20 +8,11 @@ pub enum DesktopCommand {
     /// Select and load full details of a specific ticket.
     SelectTicket(String),
     /// Create a new local ticket.
-    CreateTicket {
-        title: String,
-        priority: u8,
-    },
+    CreateTicket { title: String, priority: u8 },
     /// Post a chat message to the active ticket.
-    SendMessage {
-        ticket_id: String,
-        body: String,
-    },
+    SendMessage { ticket_id: String, body: String },
     /// Attach a staged local file to the active ticket.
-    SendFile {
-        ticket_id: String,
-        path: PathBuf,
-    },
+    SendFile { ticket_id: String, path: PathBuf },
     /// Initiate a remote shell session for the given ticket.
     StartShell {
         ticket_id: String,
@@ -31,10 +22,7 @@ pub enum DesktopCommand {
     /// Send raw keyboard / input bytes to the running shell session.
     ShellInput(Vec<u8>),
     /// Inform the shell pseudo-terminal of window geometry resize.
-    ResizeShell {
-        cols: u16,
-        rows: u16,
-    },
+    ResizeShell { cols: u16, rows: u16 },
     /// Terminate the active shell session gracefully.
     CloseShell,
     /// Emergency revocation of client AccessEpoch, severing all operator shell access instantly.

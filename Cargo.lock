@@ -2052,6 +2052,7 @@ name = "fortiq-service"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "clap",
  "fortiq-core",
  "fortiq-p2p",

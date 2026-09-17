@@ -325,8 +325,7 @@ fn test_encrypted_snapshot_seal_open_and_fast_tail_catchup() {
 
     let p1 = graph
         .append_pack(
-            VerifiedEventPack::new_unchecked(pack1_signed, pack1_plain)
-                .expect("verified pack 1"),
+            VerifiedEventPack::new_unchecked(pack1_signed, pack1_plain).expect("verified pack 1"),
         )
         .expect("pack 1 append must succeed");
 
@@ -398,8 +397,7 @@ fn test_encrypted_snapshot_seal_open_and_fast_tail_catchup() {
 
     let p2 = graph
         .append_pack(
-            VerifiedEventPack::new_unchecked(pack2_signed, pack2_plain)
-                .expect("verified pack 2"),
+            VerifiedEventPack::new_unchecked(pack2_signed, pack2_plain).expect("verified pack 2"),
         )
         .expect("pack 2 append must succeed");
 

@@ -111,9 +111,8 @@ pub fn reduce_ticket_with_resolver(
     }
 
     // Optional admin canonical head filter walking backward to include full ancestry
-    let head_set_filter: Option<HashSet<ObjectId>> = graph
-        .get_canonical_heads(&ticket_id)
-        .map(|heads| {
+    let head_set_filter: Option<HashSet<ObjectId>> =
+        graph.get_canonical_heads(&ticket_id).map(|heads| {
             let mut allowed = HashSet::new();
             for head in &heads.canonical_heads {
                 allowed.extend(graph.get_pack_ancestors_inclusive(head));

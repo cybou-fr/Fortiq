@@ -64,7 +64,8 @@ pub fn parse_mnemonic_phrase(phrase: &str) -> Result<MnemonicEntropy, MnemonicEr
 
     let mut indices = [0u16; 24];
     for (i, word) in words.iter().enumerate() {
-        let idx = word_to_index(word).ok_or_else(|| MnemonicError::UnknownWord(word.to_string()))?;
+        let idx =
+            word_to_index(word).ok_or_else(|| MnemonicError::UnknownWord(word.to_string()))?;
         indices[i] = idx;
     }
 

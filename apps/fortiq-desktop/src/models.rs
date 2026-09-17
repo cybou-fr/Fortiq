@@ -75,6 +75,8 @@ pub struct TicketDetailDto {
     pub priority: u8,
     pub state: String,
     pub created_at: u64,
+    pub client_peer_id: String,
+    pub operator_peer_id: String,
     pub access_epoch: Option<String>,
     pub messages: Vec<ChatMessageDto>,
     pub attachments: Vec<AttachmentDto>,

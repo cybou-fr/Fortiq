@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use slint::ComponentHandle;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -10,9 +10,7 @@ use fortiq_desktop::file_picker::{FilePicker, NativeFilePicker};
 use fortiq_desktop::instance_lock::InstanceLock;
 use fortiq_desktop::ipc::IpcClient;
 use fortiq_desktop::settings::DesktopSettings;
-use fortiq_desktop::{
-    AppWindow, AttachmentItem, ChatMessageItem, PeerItem, TicketItem,
-};
+use fortiq_desktop::{AppWindow, AttachmentItem, ChatMessageItem, PeerItem, TicketItem};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Single Instance Check
@@ -100,10 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(path) = picker.pick_file() {
                 if let Some(ui) = ui_handle.upgrade() {
                     let ticket_id = ui.get_selected_ticket_id().to_string();
-                    let _ = tx.blocking_send(DesktopCommand::SendFile {
-                        ticket_id,
-                        path,
-                    });
+                    let _ = tx.blocking_send(DesktopCommand::SendFile { ticket_id, path });
                 }
             }
         });
@@ -176,7 +171,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let tx = cmd_tx.clone();
         app.on_reset_peers(move || {
-            let _ = tx.blocking_send(DesktopCommand::TriggerSelfSupportAction("reset_peers".into()));
+            let _ = tx.blocking_send(DesktopCommand::TriggerSelfSupportAction(
+                "reset_peers".into(),
+            ));
         });
     }
 
@@ -201,116 +198,108 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui_weak_clone = ui_weak.clone();
     rt.spawn(async move {
         while let Some(event) = event_rx.recv().await {
-            let _ = ui_weak_clone.upgrade_in_event_loop(move |ui| {
-                match event {
-                    DesktopEvent::StatusChanged(status) => {
-                        ui.set_agent_state(status.agent_state.into());
-                        ui.set_peer_id(status.peer_id.into());
-                        ui.set_version(status.version.into());
-                        ui.set_is_operator_unlocked(status.is_operator_unlocked);
-                    }
-                    DesktopEvent::PeersChanged(peers) => {
-                        let items: Vec<PeerItem> = peers
-                            .into_iter()
-                            .map(|p| PeerItem {
-                                peer_id: p.peer_id.into(),
-                                hostname: p.hostname.into(),
-                                os: p.os.into(),
-                                transport: p.transport.into(),
-                                status: p.status.into(),
-                            })
-                            .collect();
-                        ui.set_peers(slint::ModelRc::new(slint::VecModel::from(items)));
-                    }
-                    DesktopEvent::TicketsChanged(tickets) => {
-                        let items: Vec<TicketItem> = tickets
-                            .into_iter()
-                            .map(|t| TicketItem {
-                                id: t.id.into(),
-                                title: t.title.into(),
-                                priority: t.priority as i32,
-                                state: t.state.into(),
-                                created_at: format!("{}", t.created_at).into(),
-                            })
-                            .collect();
-                        ui.set_tickets(slint::ModelRc::new(slint::VecModel::from(items)));
-                    }
-                    DesktopEvent::TicketLoaded(detail) => {
-                        if let Some(d) = detail {
-                            ui.set_selected_ticket_id(d.id.into());
-                            ui.set_selected_ticket_title(d.title.into());
-                            ui.set_selected_ticket_priority(d.priority as i32);
-                            ui.set_selected_ticket_state(d.state.into());
-                            ui.set_selected_ticket_epoch(
-                                d.access_epoch.unwrap_or_default().into(),
-                            );
-                            let msgs: Vec<ChatMessageItem> = d
-                                .messages
-                                .into_iter()
-                                .map(|m| ChatMessageItem {
-                                    id: m.id.into(),
-                                    sender: m.sender.into(),
-                                    body: m.body.into(),
-                                    is_operator: m.is_operator,
-                                })
-                                .collect();
-                            ui.set_ticket_messages(slint::ModelRc::new(slint::VecModel::from(
-                                msgs,
-                            )));
-
-                            let files: Vec<AttachmentItem> = d
-                                .attachments
-                                .into_iter()
-                                .map(|f| AttachmentItem {
-                                    id: f.id.into(),
-                                    filename: f.filename.into(),
-                                    size_str: format!("{} o", f.size_bytes).into(),
-                                    sha256: f.sha256.into(),
-                                })
-                                .collect();
-                            ui.set_ticket_files(slint::ModelRc::new(slint::VecModel::from(
-                                files,
-                            )));
-                        } else {
-                            ui.set_selected_ticket_id("".into());
-                        }
-                    }
-                    DesktopEvent::ShellOpened { .. } => {
-                        ui.set_terminal_connected(true);
-                        ui.set_terminal_denied("".into());
-                    }
-                    DesktopEvent::ShellOutput(bytes) => {
-                        let s = String::from_utf8_lossy(&bytes);
-                        ui.set_terminal_text(s.to_string().into());
-                    }
-                    DesktopEvent::ShellClosed => {
-                        ui.set_terminal_connected(false);
-                    }
-                    DesktopEvent::ShellDenied(msg) => {
-                        ui.set_terminal_connected(false);
-                        ui.set_terminal_denied(msg.into());
-                    }
-                    DesktopEvent::OperatorUnlocked(_) => {
-                        ui.set_is_operator_unlocked(true);
-                    }
-                    DesktopEvent::OperatorLocked => {
-                        ui.set_is_operator_unlocked(false);
-                    }
-                    DesktopEvent::SelfSupportChanged(status) => {
-                        ui.set_db_healthy(!status.db_corrupt);
-                        ui.set_peers_stale(status.peers_stale);
-                        ui.set_last_action_result(
-                            status.last_action_message.unwrap_or_default().into(),
-                        );
-                    }
-                    DesktopEvent::Notification { message, .. } => {
-                        ui.set_toast_message(message.into());
-                    }
-                    DesktopEvent::Error(err) => {
-                        ui.set_toast_message(err.into());
-                    }
-                    _ => {}
+            let _ = ui_weak_clone.upgrade_in_event_loop(move |ui| match event {
+                DesktopEvent::StatusChanged(status) => {
+                    ui.set_agent_state(status.agent_state.into());
+                    ui.set_peer_id(status.peer_id.into());
+                    ui.set_version(status.version.into());
+                    ui.set_is_operator_unlocked(status.is_operator_unlocked);
                 }
+                DesktopEvent::PeersChanged(peers) => {
+                    let items: Vec<PeerItem> = peers
+                        .into_iter()
+                        .map(|p| PeerItem {
+                            peer_id: p.peer_id.into(),
+                            hostname: p.hostname.into(),
+                            os: p.os.into(),
+                            transport: p.transport.into(),
+                            status: p.status.into(),
+                        })
+                        .collect();
+                    ui.set_peers(slint::ModelRc::new(slint::VecModel::from(items)));
+                }
+                DesktopEvent::TicketsChanged(tickets) => {
+                    let items: Vec<TicketItem> = tickets
+                        .into_iter()
+                        .map(|t| TicketItem {
+                            id: t.id.into(),
+                            title: t.title.into(),
+                            priority: t.priority as i32,
+                            state: t.state.into(),
+                            created_at: format!("{}", t.created_at).into(),
+                        })
+                        .collect();
+                    ui.set_tickets(slint::ModelRc::new(slint::VecModel::from(items)));
+                }
+                DesktopEvent::TicketLoaded(detail) => {
+                    if let Some(d) = detail {
+                        ui.set_selected_ticket_id(d.id.into());
+                        ui.set_selected_ticket_title(d.title.into());
+                        ui.set_selected_ticket_priority(d.priority as i32);
+                        ui.set_selected_ticket_state(d.state.into());
+                        ui.set_selected_ticket_epoch(d.access_epoch.unwrap_or_default().into());
+                        let msgs: Vec<ChatMessageItem> = d
+                            .messages
+                            .into_iter()
+                            .map(|m| ChatMessageItem {
+                                id: m.id.into(),
+                                sender: m.sender.into(),
+                                body: m.body.into(),
+                                is_operator: m.is_operator,
+                            })
+                            .collect();
+                        ui.set_ticket_messages(slint::ModelRc::new(slint::VecModel::from(msgs)));
+
+                        let files: Vec<AttachmentItem> = d
+                            .attachments
+                            .into_iter()
+                            .map(|f| AttachmentItem {
+                                id: f.id.into(),
+                                filename: f.filename.into(),
+                                size_str: format!("{} o", f.size_bytes).into(),
+                                sha256: f.sha256.into(),
+                            })
+                            .collect();
+                        ui.set_ticket_files(slint::ModelRc::new(slint::VecModel::from(files)));
+                    } else {
+                        ui.set_selected_ticket_id("".into());
+                    }
+                }
+                DesktopEvent::ShellOpened { .. } => {
+                    ui.set_terminal_connected(true);
+                    ui.set_terminal_denied("".into());
+                }
+                DesktopEvent::ShellOutput(bytes) => {
+                    let s = String::from_utf8_lossy(&bytes);
+                    ui.set_terminal_text(s.to_string().into());
+                }
+                DesktopEvent::ShellClosed => {
+                    ui.set_terminal_connected(false);
+                }
+                DesktopEvent::ShellDenied(msg) => {
+                    ui.set_terminal_connected(false);
+                    ui.set_terminal_denied(msg.into());
+                }
+                DesktopEvent::OperatorUnlocked(_) => {
+                    ui.set_is_operator_unlocked(true);
+                }
+                DesktopEvent::OperatorLocked => {
+                    ui.set_is_operator_unlocked(false);
+                }
+                DesktopEvent::SelfSupportChanged(status) => {
+                    ui.set_db_healthy(!status.db_corrupt);
+                    ui.set_peers_stale(status.peers_stale);
+                    ui.set_last_action_result(
+                        status.last_action_message.unwrap_or_default().into(),
+                    );
+                }
+                DesktopEvent::Notification { message, .. } => {
+                    ui.set_toast_message(message.into());
+                }
+                DesktopEvent::Error(err) => {
+                    ui.set_toast_message(err.into());
+                }
+                _ => {}
             });
         }
     });

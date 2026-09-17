@@ -31,7 +31,9 @@ impl DesktopSettings {
         #[cfg(windows)]
         {
             if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-                PathBuf::from(local_app_data).join("FORTIQ").join("desktop.toml")
+                PathBuf::from(local_app_data)
+                    .join("FORTIQ")
+                    .join("desktop.toml")
             } else {
                 PathBuf::from(r"C:\ProgramData\FORTIQ\desktop.toml")
             }

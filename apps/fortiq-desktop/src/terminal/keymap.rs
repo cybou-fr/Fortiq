@@ -31,16 +31,16 @@ pub fn encode_key(input: &KeyInput) -> Option<Vec<u8>> {
         "\r" | "\n" => Some(vec![b'\r']),
         "\x08" => Some(vec![0x7f]), // Backspace -> DEL
         "\t" => Some(vec![b'\t']),
-        "\x1b" => Some(vec![0x1b]), // Escape
+        "\x1b" => Some(vec![0x1b]),                            // Escape
         "\u{F700}" | "\u{001b}[A" => Some(b"\x1b[A".to_vec()), // Up arrow
         "\u{F701}" | "\u{001b}[B" => Some(b"\x1b[B".to_vec()), // Down arrow
         "\u{F702}" | "\u{001b}[D" => Some(b"\x1b[D".to_vec()), // Left arrow
         "\u{F703}" | "\u{001b}[C" => Some(b"\x1b[C".to_vec()), // Right arrow
         "\u{F728}" | "\x7f" => Some(b"\x1b[3~".to_vec()),      // Delete
-        "\u{F729}" => Some(b"\x1b[H".to_vec()),                 // Home
-        "\u{F72B}" => Some(b"\x1b[F".to_vec()),                 // End
-        "\u{F72C}" => Some(b"\x1b[5~".to_vec()),                // PageUp
-        "\u{F72D}" => Some(b"\x1b[6~".to_vec()),                // PageDown
+        "\u{F729}" => Some(b"\x1b[H".to_vec()),                // Home
+        "\u{F72B}" => Some(b"\x1b[F".to_vec()),                // End
+        "\u{F72C}" => Some(b"\x1b[5~".to_vec()),               // PageUp
+        "\u{F72D}" => Some(b"\x1b[6~".to_vec()),               // PageDown
         text if !text.is_empty() => {
             if input.alt {
                 let mut bytes = vec![0x1b];

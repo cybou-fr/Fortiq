@@ -128,6 +128,16 @@ pub enum IpcRequest {
     ListShellSessions {
         ticket_id: String,
     },
+
+    // Canonical Operator Authority & Access Epoch additions:
+    UnlockOperator {
+        mnemonic: String,
+    },
+    LockOperator,
+    GetOperatorStatus,
+    RevokeTicketAccess {
+        ticket_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -144,8 +154,20 @@ pub enum IpcResponse {
     Attachments(Vec<crate::AttachmentRecord>),
     FileSent(crate::AttachmentRecord),
     ShellSessions(Vec<crate::ShellSessionRecord>),
+    OperatorStatus(OperatorSessionStatus),
     Success,
     Error(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct OperatorSessionStatus {
+    pub is_unlocked: bool,
+    #[serde(default)]
+    pub owner_id: Option<String>,
+    #[serde(default)]
+    pub expires_at: Option<u64>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -158,6 +180,8 @@ pub struct DaemonStatus {
     pub active_ticket: Option<Ticket>,
     pub authorized_operator: Option<String>,
     pub listen_addresses: Vec<String>,
+    #[serde(default)]
+    pub is_operator_unlocked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

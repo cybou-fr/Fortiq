@@ -256,11 +256,17 @@ fn test_validated_rs_profile_boundaries() {
     // Exceeding 128 must fail
     assert_eq!(
         ValidatedRsProfile::new(65, 64),
-        Err(ErasureError::InvalidProfile { data: 65, parity: 64 })
+        Err(ErasureError::InvalidProfile {
+            data: 65,
+            parity: 64
+        })
     );
     assert_eq!(
         ValidatedRsProfile::new(129, 0),
-        Err(ErasureError::InvalidProfile { data: 129, parity: 0 })
+        Err(ErasureError::InvalidProfile {
+            data: 129,
+            parity: 0
+        })
     );
 
     // 0 data shards must fail
