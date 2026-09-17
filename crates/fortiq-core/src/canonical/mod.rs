@@ -4,14 +4,26 @@
 //! strict decoder resource limits, and canonical domain-separated hashing.
 
 pub mod codec;
+pub mod control;
+pub mod control_store;
 pub mod records;
 pub mod signing;
 pub mod types;
 
 #[cfg(test)]
+mod control_tests;
+#[cfg(test)]
 mod test_vectors;
 
 pub use codec::{from_canonical_cbor, to_canonical_cbor, CodecError, DecoderLimits};
+pub use control::{
+    capabilities, derive_genesis_id, derive_owner_id, ControlError, DeviceBinding,
+    EnrollmentCertificate, Genesis, GenesisTbs, JoinInvitation, RevocationList, SegmentDescriptor,
+    DESCRIPTOR_CLIENT_SIG_DOMAIN, DESCRIPTOR_OWNER_SIG_DOMAIN, ENROLLMENT_SIG_DOMAIN,
+    GENESIS_ID_DOMAIN, GENESIS_SIG_DOMAIN, INVITATION_SIG_DOMAIN, OWNER_ID_DOMAIN,
+    REVOCATION_SIG_DOMAIN,
+};
+pub use control_store::ControlStore;
 pub use records::{
     BlobManifest, EventPackPlaintext, LogicalEvent, ObjectTbs, RecipientEnvelope, SignedObject,
     StripeManifest,
