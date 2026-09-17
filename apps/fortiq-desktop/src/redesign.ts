@@ -1,12 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
-
-interface DesktopStatus {
-  version: string;
-  agentState: string;
-  mode: string;
-  peerId: string;
-}
-
 interface DesktopPeer {
   peerId: string;
   hostname: string;
@@ -29,15 +20,9 @@ interface TicketRecord {
   closed_at?: number | null;
 }
 
-interface TicketDetail {
-  ticket: TicketRecord;
-}
-
 let uxTickets: TicketRecord[] = [];
 let uxPeers: DesktopPeer[] = [];
-let lastSelectedTicketId: string | null = null;
 let searchValue = "";
-let uxRefreshTimer: number | null = null;
 
 const stateLabel: Record<TicketRecord["state"], string> = {
   OPEN: "Ouvert",
@@ -157,10 +142,9 @@ function hydrateTicketCards(): void {
   applyTicketSearch();
 }
 
-async function syncSelectedTicket(): Promise<void> {
+function syncSelectedTicket(): void {
   const ticketId = selectedTicketId();
   if (!ticketId) {
-    lastSelectedTicketId = null;
     updateSessionBar(undefined);
     updateContext(undefined, undefined);
     return;
@@ -171,22 +155,6 @@ async function syncSelectedTicket(): Promise<void> {
   updateSessionBar(ticket);
   updateContext(ticket, peer);
 
-  if (ticketId === lastSelectedTicketId) return;
-  lastSelectedTicketId = ticketId;
-
-  try {
-    const detail = await invoke<TicketDetail | null>("get_ticket", { ticketId });
-    if (detail) {
-      const state = el("ux-detail-state");
-      const access = el("ux-detail-access");
-      const updated = el("ux-updated-at");
-      if (state) state.textContent = stateLabel[detail.ticket.state];
-      if (access) access.textContent = detail.ticket.remote_access_enabled ? "Autorisée" : "Désactivée";
-      if (updated) updated.textContent = formatDateTime(detail.ticket.updated_at);
-    }
-  } catch {
-    // The legacy main.ts remains responsible for displaying service errors.
-  }
 }
 
 function updateContext(ticket: TicketRecord | undefined, peer: DesktopPeer | undefined): void {
@@ -276,28 +244,13 @@ function updateClock(): void {
   if (time) time.textContent = now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
-async function refreshUxData(): Promise<void> {
-  try {
-    const [status, tickets, peers] = await Promise.all([
-      invoke<DesktopStatus>("desktop_status"),
-      invoke<TicketRecord[]>("list_tickets", {}),
-      invoke<DesktopPeer[]>("list_peers"),
-    ]);
-
-    uxTickets = tickets;
-    uxPeers = peers;
-
-    const topbar = el("operator-global-topbar");
-    if (topbar) topbar.style.display = status.mode.toLowerCase() === "managed" ? "none" : "flex";
-
-    const localPeer = el("ux-local-peer");
-    if (localPeer) localPeer.textContent = status.peerId ? `${status.peerId.slice(0, 12)}…` : "Identité FORTIQ";
-
-    hydrateTicketCards();
-    await syncSelectedTicket();
-  } catch {
-    // The main application already handles daemon offline state.
-  }
+function applyOperatorSnapshot(detail: { tickets: TicketRecord[]; peers: DesktopPeer[]; peerId: string }): void {
+  uxTickets = detail.tickets;
+  uxPeers = detail.peers;
+  const localPeer = el("ux-local-peer");
+  if (localPeer) localPeer.textContent = detail.peerId ? `${detail.peerId.slice(0, 12)}…` : "Identité FORTIQ";
+  hydrateTicketCards();
+  syncSelectedTicket();
 }
 
 function normalizeManagedConsentLabel(): void {
@@ -345,11 +298,6 @@ function initAccessibility(): void {
   el("btn-term-fullscreen")?.setAttribute("aria-label", "Afficher le terminal en plein écran");
 }
 
-function scheduleUxRefresh(intervalMs: number): void {
-  if (uxRefreshTimer !== null) window.clearInterval(uxRefreshTimer);
-  uxRefreshTimer = window.setInterval(() => void refreshUxData(), intervalMs);
-}
-
 function initMutationObserver(): void {
   const list = el("operator-ticket-list");
   if (!list) return;
@@ -361,7 +309,7 @@ function initMutationObserver(): void {
     window.requestAnimationFrame(() => {
       scheduled = false;
       hydrateTicketCards();
-      void syncSelectedTicket();
+      syncSelectedTicket();
     });
   });
 
@@ -375,16 +323,14 @@ window.addEventListener("DOMContentLoaded", () => {
   initAccessibility();
   initMutationObserver();
 
-  const refreshSelect = el<HTMLSelectElement>("settings-refresh-interval");
-  refreshSelect?.addEventListener("change", () => scheduleUxRefresh(Number(refreshSelect.value)));
-
-  void refreshUxData();
-  scheduleUxRefresh(Number(localStorage.getItem("fortiq.refreshInterval") || "2500"));
+  window.addEventListener("fortiq:operator-snapshot", (event) => {
+    applyOperatorSnapshot((event as CustomEvent<{ tickets: TicketRecord[]; peers: DesktopPeer[]; peerId: string }>).detail);
+  });
 
   window.setInterval(updateClock, 30_000);
   window.setInterval(() => {
     hydrateTicketCards();
-    void syncSelectedTicket();
+    syncSelectedTicket();
     normalizeManagedConsentLabel();
   }, 700);
 });

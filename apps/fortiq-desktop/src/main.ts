@@ -141,6 +141,7 @@ function applyMode(mode: "operator" | "managed", isOnline: boolean) {
   const peersView = document.getElementById("peers-view");
   const settingsView = document.getElementById("settings-view");
   const managedView = document.getElementById("managed-view");
+  const operatorTopbar = document.getElementById("operator-global-topbar");
   const navMenu = document.querySelector(".nav-menu") as HTMLElement | null;
   const brandModeEl = document.getElementById("brand-mode");
   const userRoleEl = document.getElementById("user-role");
@@ -150,6 +151,7 @@ function applyMode(mode: "operator" | "managed", isOnline: boolean) {
     if (peersView) peersView.style.display = activeOperatorTab === "peers" ? "grid" : "none";
     if (settingsView) settingsView.style.display = activeOperatorTab === "settings" ? "grid" : "none";
     if (managedView) managedView.style.display = "none";
+    if (operatorTopbar) operatorTopbar.style.display = "flex";
     if (navMenu) navMenu.style.display = "flex";
     if (brandModeEl) brandModeEl.textContent = "CONSOLE OPÉRATEUR";
     if (userRoleEl) userRoleEl.textContent = isOnline ? "OPÉRATEUR" : "DÉCONNECTÉ";
@@ -158,6 +160,7 @@ function applyMode(mode: "operator" | "managed", isOnline: boolean) {
     if (peersView) peersView.style.display = "none";
     if (settingsView) settingsView.style.display = "none";
     if (managedView) managedView.style.display = "flex";
+    if (operatorTopbar) operatorTopbar.style.display = "none";
     if (navMenu) navMenu.style.display = "none";
     if (brandModeEl) brandModeEl.textContent = "CLIENT MANAGÉ";
     if (userRoleEl) userRoleEl.textContent = isOnline ? "CLIENT MANAGÉ" : "DÉCONNECTÉ";
@@ -838,6 +841,14 @@ function scheduleRefresh(intervalMs: number) {
   refreshTimer = window.setInterval(refresh, intervalMs);
 }
 
+function emitOperatorSnapshot(tickets: TicketRecord[], peers: DesktopPeer[]) {
+  window.dispatchEvent(
+    new CustomEvent("fortiq:operator-snapshot", {
+      detail: { tickets, peers, peerId: currentPeerId },
+    }),
+  );
+}
+
 // ----------------------------------------------------------------------------
 // Polling / State Refresh
 // ----------------------------------------------------------------------------
@@ -874,19 +885,22 @@ async function refresh() {
           renderTicketList([], true);
         }
 
+        let peers: DesktopPeer[] = [];
         try {
-          const peers = await invoke<DesktopPeer[]>("list_peers");
+          peers = await invoke<DesktopPeer[]>("list_peers");
           renderNetworkPeers(peers, true);
         } catch (err) {
           console.warn("Failed to fetch network peers:", err);
           renderNetworkPeers([], true);
         }
+        emitOperatorSnapshot(ticketsCache, peers);
       }
     } else {
       applyMode(status.mode === "managed" ? "managed" : "operator", false);
       renderTicketList([], false);
       renderManagedTicketPortal(null, false);
       renderNetworkPeers([], false);
+      emitOperatorSnapshot([], []);
     }
   } catch (err) {
     console.warn("Daemon unreachable:", err);
@@ -895,6 +909,7 @@ async function refresh() {
     renderTicketList([], false);
     renderManagedTicketPortal(null, false);
     renderNetworkPeers([], false);
+    emitOperatorSnapshot([], []);
   }
 }
 

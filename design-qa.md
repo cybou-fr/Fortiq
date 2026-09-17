@@ -16,7 +16,7 @@ The archived HTML, CSS, and enhancement script were applied directly. The first 
 - Navigation: Tickets, Réseau P2P, and Paramètres all switch to the correct existing application views.
 - Ticket workspace: search, status filters, conversation/files/session tabs, action header, and secure-session proxy are present and aligned with the supplied markup.
 - Network: diagnostic summary, security notice, refresh action, and offline empty state render correctly.
-- Settings: identity and refresh-frequency sections render correctly; the redesign refresh timer now follows the same saved interval as the main application.
+- Settings: identity and refresh-frequency sections render correctly; one main refresh loop now owns synchronization and publishes snapshots to the redesign layer.
 - Shell: the redesign preserves the existing ticket-scoped terminal controls and the OPEN/IN_PROGRESS plus client-consent guard.
 
 ## Required fidelity surfaces
@@ -31,7 +31,7 @@ The archived HTML, CSS, and enhancement script were applied directly. The first 
 
 1. P0 — inherited `grid-template-areas` collapsed the new workspace. Fixed by resetting the main grid columns/areas and the inherited panel areas. Post-fix capture shows the full queue and ticket workspace.
 2. P2 — the narrow ticket filter exposed a native horizontal scrollbar. Fixed by hiding the scrollbar while preserving horizontal access. Post-fix layout remains usable at the captured width.
-3. P2 — the redesign data refresh used a fixed three-second interval independent of operator settings. Fixed by sharing the saved refresh interval and rescheduling on setting changes.
+3. P2 — the redesign initially duplicated ticket/peer IPC polling and could drift from operator refresh settings. Fixed by removing the second polling loop; `main.ts` now publishes a single operator snapshot consumed by the redesign layer.
 
 ## Residual test limits
 
