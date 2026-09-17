@@ -24,6 +24,10 @@
             <i class="ph ph-ticket nav-icon"></i>
             <span>Tickets</span>
           </button>
+          <button class="nav-item" data-tab="self-support" id="nav-tab-self-support">
+            <i class="ph ph-laptop nav-icon"></i>
+            <span>Ce Périphérique</span>
+          </button>
           <button class="nav-item" data-tab="peers" id="nav-tab-peers">
             <i class="ph ph-monitor nav-icon"></i>
             <span>Réseau P2P</span>
@@ -190,6 +194,9 @@
                   </div>
                   <div class="terminal-actions">
                     <button class="btn btn-secondary btn-sm" id="btn-terminal-toggle" disabled>Démarrer le shell</button>
+                    <button class="btn btn-danger btn-sm" id="btn-terminal-revoke" disabled title="Révocation d'urgence immédiate">
+                      <i class="ph ph-shield-slash"></i> Révoquer
+                    </button>
                     <button class="btn-icon" id="btn-term-clear" title="Effacer l'écran" aria-label="Effacer l'écran">
                       <i class="ph ph-trash"></i>
                     </button>
@@ -278,6 +285,58 @@
           </footer>
         </main>
 
+        <main id="self-support-view" class="network-layout" style="display:none;">
+          <section class="panel network-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Ce Périphérique · Auto-Support Local</h2>
+                <span class="panel-subtitle">Diagnostic hors-ligne souverain et boucle locale</span>
+              </div>
+              <div class="panel-actions">
+                <button id="btn-self-support-refresh" class="btn btn-secondary btn-sm">
+                  <i class="ph ph-arrows-clockwise"></i> Actualiser diagnostics
+                </button>
+              </div>
+            </div>
+
+            <div class="diagnostic-grid">
+              <div class="diagnostic-item"><span>Système d'exploitation</span><strong id="self-diag-os">—</strong></div>
+              <div class="diagnostic-item"><span>Architecture</span><strong id="self-diag-arch">—</strong></div>
+              <div class="diagnostic-item"><span>Nom d'hôte</span><strong id="self-diag-hostname">—</strong></div>
+              <div class="diagnostic-item"><span>Boucle locale (Loopback)</span><strong id="self-diag-loopback">Actif</strong></div>
+              <div class="diagnostic-item"><span>Relais contournés (Offline)</span><strong id="self-diag-relay-bypassed">Oui (100% Local)</strong></div>
+              <div class="diagnostic-item"><span>Shards de stockage actifs</span><strong id="self-diag-shards">0</strong></div>
+              <div class="diagnostic-item"><span>Packs d'événements</span><strong id="self-diag-event-packs">0</strong></div>
+              <div class="diagnostic-item"><span>Têtes canoniques</span><strong id="self-diag-canonical-heads">0</strong></div>
+            </div>
+
+            <div class="network-security-note">
+              <i class="ph ph-shield-check"></i>
+              <div>
+                <strong>Boucle locale souveraine ("This Device")</strong>
+                <span>Les interventions et diagnostics sur ce poste ne dépendent d'aucun relais externe ni de connectivité WAN.</span>
+              </div>
+            </div>
+
+            <div style="margin-top: 24px;">
+              <h3 style="margin-bottom: 12px; font-size: 1rem; color: var(--color-text-primary, #fff);">Créer un ticket d'auto-support local</h3>
+              <div style="display: flex; flex-direction: column; gap: 12px; max-width: 600px;">
+                <input type="text" id="self-support-ticket-title" class="form-input" placeholder="Titre du diagnostic local (ex: Problème disque ou PTY local)" />
+                <textarea id="self-support-ticket-desc" class="form-textarea" placeholder="Description des symptômes locaux..." style="min-height: 80px;"></textarea>
+                <div>
+                  <button id="btn-create-self-ticket" class="btn btn-primary">
+                    <i class="ph ph-ticket"></i> Créer le ticket auto-support
+                  </button>
+                </div>
+              </div>
+              <div id="self-support-ticket-result" class="offline-banner" style="display: none; margin-top: 12px; background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.3); color: #22c55e;">
+                <i class="ph ph-check-circle"></i>
+                <span id="self-support-ticket-msg">Ticket créé avec succès.</span>
+              </div>
+            </div>
+          </section>
+        </main>
+
         <main id="peers-view" class="network-layout" style="display:none;">
           <section class="panel network-panel">
             <div class="panel-header">
@@ -324,6 +383,30 @@
                 <div class="settings-row"><span>Version</span><strong id="settings-version">—</strong></div>
                 <div class="settings-row"><span>Peer ID local</span><strong id="settings-peer-id" class="code">—</strong></div>
                 <div class="settings-row"><span>État du service</span><strong id="settings-service-state">Hors-ligne</strong></div>
+              </section>
+              <section class="settings-section">
+                <h3>Opérateur Portable (Mnémonique 24 mots)</h3>
+                <div class="settings-row">
+                  <span>Session en mémoire</span>
+                  <strong id="operator-session-badge" class="badge">Verrouillé</strong>
+                </div>
+                <div id="operator-session-details" style="display: none; margin-top: 8px; margin-bottom: 8px;">
+                  <div class="settings-row"><span>Entité Opérateur</span><strong id="operator-session-entity" class="code" style="font-size: 0.75rem;">—</strong></div>
+                  <div class="settings-row"><span>Capacités actives</span><strong id="operator-session-caps">—</strong></div>
+                  <div class="settings-row"><span>Expire à</span><strong id="operator-session-expires">—</strong></div>
+                </div>
+                <div style="margin-top: 10px;">
+                  <textarea id="mnemonic-input" class="form-textarea" placeholder="Entrez la phrase mnémonique de 24 mots pour déverrouiller l'espace opérateur..." style="min-height: 70px;"></textarea>
+                  <div style="display: flex; gap: 8px; margin-top: 8px;">
+                    <button id="btn-unlock-mnemonic" class="btn btn-primary btn-sm">
+                      <i class="ph ph-key"></i> Déverrouiller session
+                    </button>
+                    <button id="btn-lock-mnemonic" class="btn btn-danger btn-sm" disabled>
+                      <i class="ph ph-lock"></i> Verrouiller &amp; Purger
+                    </button>
+                  </div>
+                  <div id="mnemonic-status-msg" style="margin-top: 8px; font-size: 0.85rem; color: #94a3b8;"></div>
+                </div>
               </section>
               <section class="settings-section">
                 <h3>Actualisation</h3>

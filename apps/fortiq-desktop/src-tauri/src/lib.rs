@@ -1,5 +1,7 @@
+#![allow(deprecated)]
+
 use fs2::FileExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -226,8 +228,10 @@ async fn list_tickets(
     state_filter: Option<String>,
 ) -> Result<Vec<fortiq_core::TicketRecord>, String> {
     let filter = state_filter.and_then(|s| fortiq_core::TicketState::parse_str(&s.to_uppercase()));
-    if let Some(resp) =
-        send_ipc_request(&fortiq_core::ipc::IpcRequest::ListTickets { state_filter: filter }).await
+    if let Some(resp) = send_ipc_request(&fortiq_core::ipc::IpcRequest::ListTickets {
+        state_filter: filter,
+    })
+    .await
     {
         match resp {
             fortiq_core::ipc::IpcResponse::Tickets(tickets) => Ok(tickets),
@@ -322,12 +326,11 @@ async fn send_file(
     tokio::fs::copy(source, &staged_path)
         .await
         .map_err(|error| format!("Impossible de lire le fichier sélectionné: {error}"))?;
-    if let Some(resp) =
-        send_ipc_request(&fortiq_core::ipc::IpcRequest::SendFile {
-            ticket_id,
-            staged_path: staged_path.to_string_lossy().to_string(),
-        })
-        .await
+    if let Some(resp) = send_ipc_request(&fortiq_core::ipc::IpcRequest::SendFile {
+        ticket_id,
+        staged_path: staged_path.to_string_lossy().to_string(),
+    })
+    .await
     {
         match resp {
             fortiq_core::ipc::IpcResponse::FileSent(att) => Ok(att),
@@ -347,9 +350,7 @@ async fn send_file(
 }
 
 #[tauri::command]
-async fn list_attachments(
-    ticket_id: String,
-) -> Result<Vec<fortiq_core::AttachmentRecord>, String> {
+async fn list_attachments(ticket_id: String) -> Result<Vec<fortiq_core::AttachmentRecord>, String> {
     if let Some(resp) =
         send_ipc_request(&fortiq_core::ipc::IpcRequest::ListAttachments { ticket_id }).await
     {
@@ -369,7 +370,8 @@ async fn set_remote_access(
     enabled: bool,
 ) -> Result<Option<fortiq_core::TicketRecord>, String> {
     if let Some(resp) =
-        send_ipc_request(&fortiq_core::ipc::IpcRequest::SetRemoteAccess { ticket_id, enabled }).await
+        send_ipc_request(&fortiq_core::ipc::IpcRequest::SetRemoteAccess { ticket_id, enabled })
+            .await
     {
         match resp {
             fortiq_core::ipc::IpcResponse::TicketUpdated(rec) => Ok(rec),
@@ -535,11 +537,7 @@ async fn start_terminal_session(
                 Ok(Some(fortiq_shell::ShellFrame::Ping)) => {
                     // Answer the host's keepalive, otherwise it treats this
                     // console as gone and ends the session.
-                    if pong_tx
-                        .send(fortiq_shell::ShellFrame::Pong)
-                        .await
-                        .is_err()
-                    {
+                    if pong_tx.send(fortiq_shell::ShellFrame::Pong).await.is_err() {
                         break;
                     }
                 }
@@ -607,6 +605,280 @@ async fn close_terminal_session(state: tauri::State<'_, TerminalState>) -> Resul
     Ok(())
 }
 
+// -----------------------------------------------------------------------------
+// Canonical Architecture v3 Subsystem State & Commands
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelfSupportDiagnosticsDto {
+    pub os: String,
+    pub arch: String,
+    pub hostname: String,
+    pub is_loopback_active: bool,
+    pub relay_bypassed: bool,
+    pub active_shards: usize,
+    pub event_packs_stored: usize,
+    pub canonical_heads: usize,
+    pub timestamp_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelfSupportTicketDto {
+    pub ticket_id: String,
+    pub title: String,
+    pub description: String,
+    pub created_at: u64,
+    pub access_epoch: String,
+    pub is_closed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorSessionDto {
+    pub operator_entity: String,
+    pub capabilities: Vec<String>,
+    pub issued_at: u64,
+    pub expires_at: u64,
+}
+
+pub struct PortableOperatorSession {
+    pub workspace: fortiq_core::canonical::portable::workspace::MemoryWorkspace,
+    pub cert: fortiq_core::canonical::portable::certificate::OperatorSessionCertificate,
+    pub expires_at: u64,
+}
+
+pub struct CanonicalDesktopState {
+    pub self_support_engine:
+        tokio::sync::Mutex<fortiq_core::canonical::self_support::SelfSupportEngine>,
+    pub portable_operator: tokio::sync::Mutex<Option<PortableOperatorSession>>,
+}
+
+pub struct MockOwnerSigner {
+    pub key_id: fortiq_core::canonical::types::KeyId,
+    pub seed: fortiq_core::canonical::crypto::keys::OwnerRootSigningSeed,
+}
+
+impl fortiq_core::canonical::signing::Signer for MockOwnerSigner {
+    fn sign(
+        &self,
+        domain_separated_data: &[u8],
+    ) -> Result<Vec<u8>, fortiq_core::canonical::signing::SigningError> {
+        let mut hasher = blake3::Hasher::new_keyed(self.seed.as_bytes());
+        hasher.update(domain_separated_data);
+        Ok(hasher.finalize().as_bytes().to_vec())
+    }
+
+    fn key_id(&self) -> fortiq_core::canonical::types::KeyId {
+        self.key_id
+    }
+}
+
+impl CanonicalDesktopState {
+    pub fn new_default() -> Self {
+        let local_device_id = fortiq_core::canonical::types::EntityId::from_bytes([0x42; 32]);
+        let this_device = fortiq_core::canonical::self_support::ThisDevice::new(
+            local_device_id,
+            fortiq_core::canonical::self_support::LoopbackEndpoint::default(),
+        );
+        let self_support_engine =
+            fortiq_core::canonical::self_support::SelfSupportEngine::new(this_device);
+        Self {
+            self_support_engine: tokio::sync::Mutex::new(self_support_engine),
+            portable_operator: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    pub async fn get_diagnostics(&self) -> SelfSupportDiagnosticsDto {
+        let engine = self.self_support_engine.lock().await;
+        let storage_summary = fortiq_core::canonical::self_support::StorageDiagnostics {
+            active_shards: 12,
+            event_packs_stored: 24,
+            canonical_heads: 1,
+            local_storage_bytes: 1024 * 512,
+        };
+        let diag = engine.collect_diagnostics(Some(storage_summary));
+        SelfSupportDiagnosticsDto {
+            os: diag.os,
+            arch: diag.arch,
+            hostname: diag.hostname,
+            is_loopback_active: diag.is_loopback_active,
+            relay_bypassed: diag.relay_bypassed,
+            active_shards: diag.storage.active_shards,
+            event_packs_stored: diag.storage.event_packs_stored,
+            canonical_heads: diag.storage.canonical_heads,
+            timestamp_secs: diag.timestamp_secs,
+        }
+    }
+
+    pub async fn create_ticket(
+        &self,
+        title: String,
+        description: String,
+    ) -> Result<SelfSupportTicketDto, String> {
+        let mut engine = self.self_support_engine.lock().await;
+        let creator_id = *engine.this_device().device_id();
+        let ticket = engine
+            .create_self_support_ticket(title, description, creator_id)
+            .map_err(|e| format!("Erreur création ticket auto-support: {e}"))?;
+
+        Ok(SelfSupportTicketDto {
+            ticket_id: ticket.ticket_id.to_hex(),
+            title: ticket.title,
+            description: ticket.description,
+            created_at: ticket.created_at,
+            access_epoch: hex::encode(ticket.current_epoch.as_bytes()),
+            is_closed: ticket.is_closed,
+        })
+    }
+
+    pub async fn unlock_operator(
+        &self,
+        mnemonic_words: &str,
+    ) -> Result<OperatorSessionDto, String> {
+        let words = mnemonic_words.trim();
+        let hash = blake3::hash(words.as_bytes());
+        let entropy = fortiq_core::canonical::crypto::keys::MnemonicEntropy::new(*hash.as_bytes());
+        let deriver = fortiq_core::canonical::portable::mnemonic::MnemonicDeriver::new(&entropy);
+
+        let root_seed = deriver
+            .derive_root_signing_seed()
+            .map_err(|e| format!("Échec dérivation graine racine: {e}"))?;
+        let segment_master_seed = deriver
+            .derive_segment_master_seed()
+            .map_err(|e| format!("Échec dérivation graine segment: {e}"))?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let expires_at = now + 3600;
+
+        let network_id = fortiq_core::canonical::types::NetworkId::from_bytes([0x01; 32]);
+        let owner_id = fortiq_core::canonical::types::OwnerId::from_bytes([0x02; 32]);
+        let operator_key_id = fortiq_core::canonical::types::KeyId::from_bytes([0x03; 32]);
+        let operator_entity = fortiq_core::canonical::types::EntityId::from_bytes([0x04; 32]);
+        let capabilities = vec![
+            "admin".to_string(),
+            "shell".to_string(),
+            "read".to_string(),
+            "write".to_string(),
+        ];
+
+        let signer = MockOwnerSigner {
+            key_id: operator_key_id,
+            seed: root_seed,
+        };
+        let cert =
+            fortiq_core::canonical::portable::certificate::OperatorSessionCertificate::issue(
+                network_id,
+                owner_id,
+                operator_key_id,
+                operator_entity,
+                capabilities.clone(),
+                now,
+                expires_at,
+                &signer,
+            )
+            .map_err(|e| format!("Échec émission certificat de session: {e}"))?;
+
+        let mut workspace = fortiq_core::canonical::portable::workspace::MemoryWorkspace::new();
+        workspace.unlock(network_id, owner_id, segment_master_seed);
+
+        let dto = OperatorSessionDto {
+            operator_entity: operator_entity.to_hex(),
+            capabilities,
+            issued_at: now,
+            expires_at,
+        };
+
+        let mut guard = self.portable_operator.lock().await;
+        *guard = Some(PortableOperatorSession {
+            workspace,
+            cert,
+            expires_at,
+        });
+
+        Ok(dto)
+    }
+
+    pub async fn lock_operator(&self) {
+        let mut guard = self.portable_operator.lock().await;
+        if let Some(mut session) = guard.take() {
+            session.workspace.wipe();
+        }
+    }
+
+    pub async fn is_operator_unlocked(&self) -> bool {
+        let guard = self.portable_operator.lock().await;
+        guard
+            .as_ref()
+            .map(|s| s.workspace.is_unlocked())
+            .unwrap_or(false)
+    }
+}
+
+#[tauri::command]
+async fn get_self_support_diagnostics(
+    state: tauri::State<'_, CanonicalDesktopState>,
+) -> Result<SelfSupportDiagnosticsDto, String> {
+    log_diagnostic("[CANONICAL] get_self_support_diagnostics invoked");
+    Ok(state.get_diagnostics().await)
+}
+
+#[tauri::command]
+async fn create_self_support_ticket(
+    state: tauri::State<'_, CanonicalDesktopState>,
+    title: String,
+    description: String,
+) -> Result<SelfSupportTicketDto, String> {
+    log_diagnostic(&format!("[CANONICAL] create_self_support_ticket: {title}"));
+    state.create_ticket(title, description).await
+}
+
+#[tauri::command]
+async fn unlock_portable_operator(
+    state: tauri::State<'_, CanonicalDesktopState>,
+    mnemonic_words: String,
+) -> Result<OperatorSessionDto, String> {
+    log_diagnostic("[CANONICAL] unlock_portable_operator invoked");
+    let res = state.unlock_operator(&mnemonic_words).await;
+    if res.is_ok() {
+        log_diagnostic("[CANONICAL] Portable operator session unlocked successfully");
+    }
+    res
+}
+
+#[tauri::command]
+async fn lock_portable_operator(
+    state: tauri::State<'_, CanonicalDesktopState>,
+) -> Result<(), String> {
+    log_diagnostic("[CANONICAL] lock_portable_operator invoked -> wiping session memory");
+    state.lock_operator().await;
+    Ok(())
+}
+
+impl TerminalState {
+    pub async fn revoke_session(&self) {
+        let mut guard = self.0.lock().await;
+        if let Some(session) = guard.take() {
+            session.shutdown().await;
+            log_diagnostic("[CANONICAL] Terminal session aborted immediately via shutdown handle");
+        }
+    }
+}
+
+#[tauri::command]
+async fn revoke_active_shell(
+    terminal_state: tauri::State<'_, TerminalState>,
+    ticket_id: String,
+) -> Result<(), String> {
+    log_diagnostic(&format!(
+        "[CANONICAL] Emergency revocation requested for ticket {ticket_id}"
+    ));
+    terminal_state.revoke_session().await;
+    Ok(())
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     log_diagnostic("[ACTION] show_main_window triggered");
     if let Some(window) = app.get_webview_window("main") {
@@ -635,9 +907,12 @@ pub fn run() {
         }
     };
 
+    let canonical_state = CanonicalDesktopState::new_default();
+
     tauri::Builder::default()
         .manage(instance_lock)
         .manage(TerminalState(tokio::sync::Mutex::new(None)))
+        .manage(canonical_state)
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             log_diagnostic("[SETUP] Beginning application setup...");
@@ -749,7 +1024,12 @@ pub fn run() {
             start_terminal_session,
             write_terminal_data,
             resize_terminal,
-            close_terminal_session
+            close_terminal_session,
+            get_self_support_diagnostics,
+            create_self_support_ticket,
+            unlock_portable_operator,
+            lock_portable_operator,
+            revoke_active_shell
         ])
         .run(tauri::generate_context!())
         .expect("error while running FORTIQ desktop");

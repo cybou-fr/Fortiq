@@ -48,6 +48,36 @@ export interface ChatMessage {
   body: string;
   created_at: number;
   delivery_state: string;
+  revised_at?: number | null;
+  revision_count?: number | null;
+}
+
+export interface SelfSupportDiagnosticsDto {
+  os: string;
+  arch: string;
+  hostname: string;
+  is_loopback_active: boolean;
+  relay_bypassed: boolean;
+  active_shards: number;
+  event_packs_stored: number;
+  canonical_heads: number;
+  timestamp_secs: number;
+}
+
+export interface SelfSupportTicketDto {
+  ticket_id: string;
+  title: string;
+  description: string;
+  created_at: number;
+  access_epoch: string;
+  is_closed: boolean;
+}
+
+export interface OperatorSessionDto {
+  operator_entity: string;
+  capabilities: string[];
+  issued_at: number;
+  expires_at: number;
 }
 
 export interface AttachmentRecord {
@@ -91,7 +121,7 @@ export interface TicketDetail {
 
 // Application State
 let currentPeerId = "";
-let activeOperatorTab: "tickets" | "peers" | "settings" = "tickets";
+let activeOperatorTab: "tickets" | "self-support" | "peers" | "settings" = "tickets";
 let ticketFilter: "ALL" | "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED" = "ALL";
 
 let ticketsCache: TicketRecord[] = [];
@@ -138,6 +168,7 @@ function isPeerConnected(status: string): boolean {
 
 function applyMode(mode: "operator" | "managed", isOnline: boolean) {
   const operatorView = document.getElementById("operator-view");
+  const selfSupportView = document.getElementById("self-support-view");
   const peersView = document.getElementById("peers-view");
   const settingsView = document.getElementById("settings-view");
   const managedView = document.getElementById("managed-view");
@@ -148,6 +179,7 @@ function applyMode(mode: "operator" | "managed", isOnline: boolean) {
 
   if (mode === "operator") {
     if (operatorView) operatorView.style.display = activeOperatorTab === "tickets" ? "grid" : "none";
+    if (selfSupportView) selfSupportView.style.display = activeOperatorTab === "self-support" ? "grid" : "none";
     if (peersView) peersView.style.display = activeOperatorTab === "peers" ? "grid" : "none";
     if (settingsView) settingsView.style.display = activeOperatorTab === "settings" ? "grid" : "none";
     if (managedView) managedView.style.display = "none";
@@ -157,6 +189,7 @@ function applyMode(mode: "operator" | "managed", isOnline: boolean) {
     if (userRoleEl) userRoleEl.textContent = isOnline ? "OPÉRATEUR" : "DÉCONNECTÉ";
   } else {
     if (operatorView) operatorView.style.display = "none";
+    if (selfSupportView) selfSupportView.style.display = "none";
     if (peersView) peersView.style.display = "none";
     if (settingsView) settingsView.style.display = "none";
     if (managedView) managedView.style.display = "flex";
@@ -167,12 +200,14 @@ function applyMode(mode: "operator" | "managed", isOnline: boolean) {
   }
 }
 
-function setOperatorTab(tab: "tickets" | "peers" | "settings") {
+function setOperatorTab(tab: "tickets" | "self-support" | "peers" | "settings") {
   activeOperatorTab = tab;
   const operatorView = document.getElementById("operator-view");
+  const selfSupportView = document.getElementById("self-support-view");
   const peersView = document.getElementById("peers-view");
   const settingsView = document.getElementById("settings-view");
   if (operatorView) operatorView.style.display = tab === "tickets" ? "grid" : "none";
+  if (selfSupportView) selfSupportView.style.display = tab === "self-support" ? "grid" : "none";
   if (peersView) peersView.style.display = tab === "peers" ? "grid" : "none";
   if (settingsView) settingsView.style.display = tab === "settings" ? "grid" : "none";
   document.querySelectorAll<HTMLElement>(".nav-item").forEach((item) => {
@@ -180,6 +215,9 @@ function setOperatorTab(tab: "tickets" | "peers" | "settings") {
     item.classList.toggle("active", selected);
     item.setAttribute("aria-selected", String(selected));
   });
+  if (tab === "self-support") {
+    loadSelfSupportDiagnostics();
+  }
 }
 
 function setTicketSubTab(tab: "overview" | "chat" | "files" | "events" | "terminal") {
@@ -547,11 +585,14 @@ function renderOperatorChat(messages: ChatMessage[]) {
       const isMe = msg.sender_peer_id === currentPeerId;
       const bubbleClass = isMe ? "chat-bubble outgoing" : "chat-bubble incoming";
       const senderLabel = isMe ? "Moi (Opérateur)" : `Client (${msg.sender_peer_id.substring(0, 8)})`;
+      const revisedBadge = (msg.revised_at || (msg.revision_count && msg.revision_count > 0))
+        ? `<span class="chat-revised" style="font-size:0.75rem;opacity:0.8;margin-left:6px;color:#f59e0b;" title="Message révisé">✎ Révisé</span>`
+        : "";
       return `
         <div class="${bubbleClass}">
           <div class="chat-meta">
             <span class="chat-sender">${escapeHtml(senderLabel)}</span>
-            <span class="chat-time">${escapeHtml(formatTimestamp(msg.created_at))}</span>
+            <span class="chat-time">${escapeHtml(formatTimestamp(msg.created_at))}${revisedBadge}</span>
           </div>
           <div class="chat-body">${escapeHtml(msg.body)}</div>
         </div>
@@ -718,11 +759,14 @@ function renderClientChat(messages: ChatMessage[]) {
       const isMe = msg.sender_peer_id === currentPeerId;
       const bubbleClass = isMe ? "chat-bubble outgoing" : "chat-bubble incoming";
       const senderLabel = isMe ? "Vous" : "Technicien Opérateur";
+      const revisedBadge = (msg.revised_at || (msg.revision_count && msg.revision_count > 0))
+        ? `<span class="chat-revised" style="font-size:0.75rem;opacity:0.8;margin-left:6px;color:#f59e0b;" title="Message révisé">✎ Révisé</span>`
+        : "";
       return `
         <div class="${bubbleClass}">
           <div class="chat-meta">
             <span class="chat-sender">${escapeHtml(senderLabel)}</span>
-            <span class="chat-time">${escapeHtml(formatTimestamp(msg.created_at))}</span>
+            <span class="chat-time">${escapeHtml(formatTimestamp(msg.created_at))}${revisedBadge}</span>
           </div>
           <div class="chat-body">${escapeHtml(msg.body)}</div>
         </div>
@@ -996,9 +1040,11 @@ function initTerminal() {
     const termDot = document.getElementById("terminal-dot");
     const termTitle = document.getElementById("terminal-title-text");
     const btnToggle = document.getElementById("btn-terminal-toggle") as HTMLButtonElement | null;
+    const btnRevoke = document.getElementById("btn-terminal-revoke") as HTMLButtonElement | null;
     if (termDot) termDot.className = "status-dot";
     if (termTitle) termTitle.textContent = "Shell du ticket — Session terminée";
     if (btnToggle) btnToggle.textContent = "Démarrer le shell";
+    if (btnRevoke) btnRevoke.disabled = true;
     if (container) container.style.display = "none";
     if (placeholder) placeholder.style.display = "flex";
     if (term) {
@@ -1018,6 +1064,7 @@ async function connectTerminalSession(peerId: string, ticketId: string | null | 
   const container = document.getElementById("xterm-container");
   const placeholder = document.getElementById("terminal-placeholder");
   const btnToggle = document.getElementById("btn-terminal-toggle") as HTMLButtonElement | null;
+  const btnRevoke = document.getElementById("btn-terminal-revoke") as HTMLButtonElement | null;
   const termDot = document.getElementById("terminal-dot");
   const termTitle = document.getElementById("terminal-title-text");
   const deniedBanner = document.getElementById("terminal-denied-banner");
@@ -1063,10 +1110,12 @@ async function connectTerminalSession(peerId: string, ticketId: string | null | 
     if (termDot) termDot.className = "status-dot online";
     if (termTitle) termTitle.textContent = `Shell actif — ticket ${(ticketId || "").substring(0, 8)}`;
     if (btnToggle) btnToggle.textContent = "Fermer le shell";
+    if (btnRevoke) btnRevoke.disabled = false;
   } catch (err: any) {
     if (generation !== terminalSwitchGeneration) return;
     isTerminalActive = false;
     terminalTicketId = null;
+    if (btnRevoke) btnRevoke.disabled = true;
     const errMsg = String(err);
     if (term) {
       term.write(`\r\n\x1b[1;31m[ACCÈS REFUSÉ]\x1b[0m ${errMsg}\r\n`);
@@ -1090,6 +1139,149 @@ async function connectTerminalSession(peerId: string, ticketId: string | null | 
         btnToggle.textContent = "Démarrer le shell";
       }
     }
+    if (btnRevoke && !isTerminalActive) {
+      btnRevoke.disabled = true;
+    }
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Canonical Architecture: Self-Support Loop & Portable Operator
+// ----------------------------------------------------------------------------
+
+async function loadSelfSupportDiagnostics() {
+  try {
+    const diag = await invoke<SelfSupportDiagnosticsDto>("get_self_support_diagnostics");
+    const osEl = document.getElementById("self-diag-os");
+    const archEl = document.getElementById("self-diag-arch");
+    const hostEl = document.getElementById("self-diag-hostname");
+    const loopEl = document.getElementById("self-diag-loopback");
+    const relayEl = document.getElementById("self-diag-relay-bypassed");
+    const shardsEl = document.getElementById("self-diag-shards");
+    const eventsEl = document.getElementById("self-diag-event-packs");
+    const headsEl = document.getElementById("self-diag-canonical-heads");
+
+    if (osEl) osEl.textContent = diag.os;
+    if (archEl) archEl.textContent = diag.arch;
+    if (hostEl) hostEl.textContent = diag.hostname;
+    if (loopEl) loopEl.textContent = diag.is_loopback_active ? "Actif (Local)" : "Inactif";
+    if (relayEl) relayEl.textContent = diag.relay_bypassed ? "Oui (100% Hors-ligne)" : "Non";
+    if (shardsEl) shardsEl.textContent = String(diag.active_shards);
+    if (eventsEl) eventsEl.textContent = String(diag.event_packs_stored);
+    if (headsEl) headsEl.textContent = String(diag.canonical_heads);
+  } catch (err) {
+    console.error("Échec chargement diagnostics auto-support:", err);
+  }
+}
+
+async function handleCreateSelfSupportTicket() {
+  const titleInput = document.getElementById("self-support-ticket-title") as HTMLInputElement | null;
+  const descInput = document.getElementById("self-support-ticket-desc") as HTMLTextAreaElement | null;
+  const resultBanner = document.getElementById("self-support-ticket-result");
+  const resultMsg = document.getElementById("self-support-ticket-msg");
+
+  const title = titleInput?.value.trim() || "";
+  const description = descInput?.value.trim() || "";
+  if (!title) {
+    alert("Veuillez indiquer un titre pour le diagnostic d'auto-support.");
+    return;
+  }
+
+  try {
+    const ticket = await invoke<SelfSupportTicketDto>("create_self_support_ticket", {
+      title,
+      description,
+    });
+    if (resultBanner && resultMsg) {
+      resultBanner.style.display = "flex";
+      resultBanner.style.background = "rgba(34, 197, 94, 0.15)";
+      resultBanner.style.borderColor = "rgba(34, 197, 94, 0.3)";
+      resultBanner.style.color = "#22c55e";
+      resultMsg.innerHTML = `Ticket auto-support créé : <strong>${escapeHtml(ticket.ticket_id.substring(0, 16))}...</strong> (AccessEpoch : ${escapeHtml(ticket.access_epoch.substring(0, 16))}...)`;
+    }
+    if (titleInput) titleInput.value = "";
+    if (descInput) descInput.value = "";
+    loadSelfSupportDiagnostics();
+  } catch (err) {
+    if (resultBanner && resultMsg) {
+      resultBanner.style.display = "flex";
+      resultBanner.style.background = "rgba(239, 68, 68, 0.15)";
+      resultBanner.style.borderColor = "rgba(239, 68, 68, 0.3)";
+      resultBanner.style.color = "#ef4444";
+      resultMsg.textContent = `Erreur : ${String(err)}`;
+    }
+  }
+}
+
+async function handleUnlockMnemonic() {
+  const input = document.getElementById("mnemonic-input") as HTMLTextAreaElement | null;
+  const badge = document.getElementById("operator-session-badge");
+  const details = document.getElementById("operator-session-details");
+  const entityEl = document.getElementById("operator-session-entity");
+  const capsEl = document.getElementById("operator-session-caps");
+  const expiresEl = document.getElementById("operator-session-expires");
+  const statusMsg = document.getElementById("mnemonic-status-msg");
+  const btnUnlock = document.getElementById("btn-unlock-mnemonic") as HTMLButtonElement | null;
+  const btnLock = document.getElementById("btn-lock-mnemonic") as HTMLButtonElement | null;
+
+  const words = input?.value.trim() || "";
+  if (!words) {
+    if (statusMsg) {
+      statusMsg.style.color = "#ef4444";
+      statusMsg.textContent = "Veuillez entrer une phrase mnémonique valide (ex. 24 mots).";
+    }
+    return;
+  }
+
+  try {
+    const session = await invoke<OperatorSessionDto>("unlock_portable_operator", {
+      mnemonicWords: words,
+    });
+    if (badge) {
+      badge.className = "badge success";
+      badge.textContent = "Déverrouillé";
+    }
+    if (details) details.style.display = "block";
+    if (entityEl) entityEl.textContent = session.operator_entity;
+    if (capsEl) capsEl.textContent = session.capabilities.join(", ");
+    if (expiresEl) expiresEl.textContent = formatTimestamp(session.expires_at);
+    if (btnLock) btnLock.disabled = false;
+    if (btnUnlock) btnUnlock.disabled = true;
+    if (input) input.value = "";
+    if (statusMsg) {
+      statusMsg.style.color = "#22c55e";
+      statusMsg.textContent = "Session opérateur déverrouillée avec succès en mémoire.";
+    }
+  } catch (err) {
+    if (statusMsg) {
+      statusMsg.style.color = "#ef4444";
+      statusMsg.textContent = `Échec de déverrouillage : ${String(err)}`;
+    }
+  }
+}
+
+async function handleLockMnemonic() {
+  const badge = document.getElementById("operator-session-badge");
+  const details = document.getElementById("operator-session-details");
+  const statusMsg = document.getElementById("mnemonic-status-msg");
+  const btnUnlock = document.getElementById("btn-unlock-mnemonic") as HTMLButtonElement | null;
+  const btnLock = document.getElementById("btn-lock-mnemonic") as HTMLButtonElement | null;
+
+  try {
+    await invoke("lock_portable_operator");
+    if (badge) {
+      badge.className = "badge";
+      badge.textContent = "Verrouillé";
+    }
+    if (details) details.style.display = "none";
+    if (btnLock) btnLock.disabled = true;
+    if (btnUnlock) btnUnlock.disabled = false;
+    if (statusMsg) {
+      statusMsg.style.color = "#94a3b8";
+      statusMsg.textContent = "Session opérateur verrouillée et mémoire purgée.";
+    }
+  } catch (err) {
+    console.error("Échec verrouillage opérateur:", err);
   }
 }
 
@@ -1102,7 +1294,7 @@ function initEventListeners() {
   document.querySelectorAll<HTMLElement>(".nav-item").forEach((btn) => {
     btn.addEventListener("click", () => {
       const tab = btn.dataset.tab;
-      if (tab === "tickets" || tab === "peers" || tab === "settings") {
+      if (tab === "tickets" || tab === "self-support" || tab === "peers" || tab === "settings") {
         setOperatorTab(tab);
       }
     });
@@ -1260,6 +1452,24 @@ function initEventListeners() {
     });
   }
 
+  // Emergency Revoke Button (Immediate safety gate revocation)
+  const btnTermRevoke = document.getElementById("btn-terminal-revoke");
+  if (btnTermRevoke) {
+    btnTermRevoke.addEventListener("click", async () => {
+      const ticketId = terminalTicketId || selectedTicketId || "";
+      if (!ticketId) return;
+      try {
+        await invoke("revoke_active_shell", { ticketId });
+        if (term) {
+          term.write("\r\n\x1b[1;31m[FORTIQ]\x1b[0m Révocation d'urgence immédiate exécutée.\r\n");
+        }
+        await invoke("close_terminal_session").catch(() => {});
+      } catch (err) {
+        console.error("Échec révocation d'urgence:", err);
+      }
+    });
+  }
+
   // Clear & Fullscreen terminal
   const btnTermClear = document.getElementById("btn-term-clear");
   if (btnTermClear) {
@@ -1276,6 +1486,36 @@ function initEventListeners() {
       setTimeout(() => {
         if (fitAddon) fitAddon.fit();
       }, 100);
+    });
+  }
+
+  // Self-Support Controls
+  const btnSelfRefresh = document.getElementById("btn-self-support-refresh");
+  if (btnSelfRefresh) {
+    btnSelfRefresh.addEventListener("click", () => {
+      loadSelfSupportDiagnostics();
+    });
+  }
+
+  const btnCreateSelfTicket = document.getElementById("btn-create-self-ticket");
+  if (btnCreateSelfTicket) {
+    btnCreateSelfTicket.addEventListener("click", () => {
+      handleCreateSelfSupportTicket();
+    });
+  }
+
+  // Portable Operator Mnemonic Controls
+  const btnUnlockMnemonic = document.getElementById("btn-unlock-mnemonic");
+  if (btnUnlockMnemonic) {
+    btnUnlockMnemonic.addEventListener("click", () => {
+      handleUnlockMnemonic();
+    });
+  }
+
+  const btnLockMnemonic = document.getElementById("btn-lock-mnemonic");
+  if (btnLockMnemonic) {
+    btnLockMnemonic.addEventListener("click", () => {
+      handleLockMnemonic();
     });
   }
 
