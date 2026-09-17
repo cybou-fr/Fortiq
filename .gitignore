@@ -1,7 +1,13 @@
 /target/
+**/target/
 *.identity
+*.log
 fortiq.identity
 fortiq.toml
 *.ticket.json
 fortiq.ticket.json
-
+apps/fortiq-desktop/dist/
+apps/fortiq-desktop/src-tauri/gen/
+apps/fortiq-desktop/node_modules/
+.DS_Store
+Thumbs.db
