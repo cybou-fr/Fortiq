@@ -81,6 +81,7 @@ Tickets / Chat / Files / Shell / UI
 
 The complete Canonical Architecture v3 specification suite and ADRs are published in [`docs/`](docs/README.md).
 See also the [Architecture Specification](docs/architecture.md), [Protocol Specification](docs/protocol.md), [Architecture Decision Records (ADRs)](docs/adr/ADR-001-genesis-owner-signing-only.md), [Detailed Specifications](docs/spec/00-architecture-review.md), and [Implementation Roadmap](docs/milestones.md).
+Deployment procedures for [WSL and OVH/VPS](docs/deployment-wsl-vps.md) are maintained separately.
 
 
 ## Prerequisites
@@ -309,8 +310,13 @@ desktop application for user logon.
 Build both installers locally with NSIS installed:
 
 ```powershell
-./scripts/build_windows_dist.ps1 -Version 0.1.0-beta
+./scripts/build_windows_dist.ps1 -Version 0.1.0-beta -Role operator
+./scripts/build_windows_dist.ps1 -Version 0.1.0-beta -Role client -OperatorPeerId <PEER_ID>
 ```
+
+Use `-Role client -OperatorPeerId <PEER_ID>` for a managed client package. Use
+`-StageOnly` when NSIS is not installed and you only need the release staging
+directory and ZIP archive.
 
 ### Multi-Platform Desktop Bundles
 
@@ -323,7 +329,7 @@ cargo build --release -p fortiq-desktop -p fortiq-service -p fortiq-cli
 
 - **Windows**: Use the role-specific complete product installers above; they package the native Slint desktop binary with the service and CLI.
 - **Linux**: Package the native binaries using the distribution scripts under `packaging/`.
-- **GitHub Actions**: Tagging a commit (`git tag v0.1.0 && git push origin v0.1.0`) triggers `.github/workflows/release.yml`, automatically building and attaching all Linux `.deb`, Windows `.zip`, and desktop installer artifacts to the GitHub Release.
+- **CI**: `.github/workflows/ci.yml` verifies formatting, Clippy, and workspace tests. Release packaging is currently run from the checked-in Linux bootstrap and Windows staging/NSIS scripts.
 
 
 ## Rendezvous discovery

@@ -1,0 +1,21 @@
+[Unit]
+Description=FORTIQ sovereign peer service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=fortiq
+Group=fortiq
+ExecStart=/usr/bin/fortiq-service --service-run --config /etc/fortiq/fortiq.toml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fortiq /run/fortiq
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
