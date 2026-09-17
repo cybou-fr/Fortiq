@@ -52,7 +52,7 @@ FORTIQ separates responsibilities into ten cleanly bounded layers. Each layer ha
 
 ```text
 +-------------------------------------------------------------------------+
-| L9  Product UI (Tauri v2 Desktop, CLI, Operator Console, Client App)    |
+| L9  Product UI (Slint Desktop, CLI, Operator Console, Client App)        |
 +-------------------------------------------------------------------------+
 | L8  Reducers & Materialized Views (Disposable Caches, Ticket State)    |
 +-------------------------------------------------------------------------+
@@ -137,7 +137,7 @@ Storage is tiered based on payload class and size:
 ### L9 — Product UI & Local Daemon IPC
 - **Thin Client / Fat Daemon:**
   - `fortiq-service`: Background system daemon (Windows Service or Linux systemd). Manages libp2p networking, encrypted storage, Quic streams, PTY process allocation, and verification.
-  - `fortiq` (CLI) and `fortiq-desktop` (Tauri v2 GUI): Presentation frontends communicating exclusively over local IPC (Named Pipe `\\.\pipe\fortiq-ipc` on Windows; Unix Domain Socket `/run/fortiq.sock` on Linux).
+  - `fortiq` (CLI) and `fortiq-desktop` (Slint GUI): Presentation frontends communicating exclusively over local IPC (Named Pipe `\\.\pipe\fortiq-ipc` on Windows; Unix Domain Socket `/run/fortiq.sock` on Linux).
 - **Adaptive UI Modes:** The interface queries daemon state over IPC and renders role-appropriate workspaces (Managed Client view or Operator Console).
 
 ---
@@ -166,7 +166,7 @@ Storage is tiered based on payload class and size:
 
 1. **Owner Root Identity:** Root signing keypair generated from the mnemonic seed. Used exclusively for signing Genesis, initial policy, segment descriptors, and issuing operator session certificates. Never used for bulk data encryption.
 2. **Deterministic Segment Derivation:** The `Owner Segment Master Seed` derives unique operator HPKE keypairs for each `SegmentId`. Compromise of one segment’s operator key does not affect other clients.
-3. **Operator Session Certificates:** When an operator operates from a physical device, they sign a bounded `OperatorSessionCertificate` delegating authority to an ephemeral local signing key with an explicit expiration (e.g., 8–12 hours). The seed phrase is immediately erased from memory.
+3. **Operator Session Certificates:** When an operator operates from a physical device, the Owner Root issues a bounded `OperatorSessionCertificate` delegating authority to an ephemeral local signing key. The current service uses a one-hour session TTL; lock, expiry, and replacement of a session cancel active terminal forwarding and wipe the volatile workspace. The seed phrase is immediately erased from memory.
 4. **Node Transport Key:** Persistent Ed25519 keypair identifying the libp2p peer on the wire. Changing or replacing the host machine does not affect Genesis or Segment identity.
 
 ---
@@ -206,11 +206,13 @@ The support ticket is the central coordination entity for client assistance. Ter
   4. Flushes the event as a high-priority single-event EventPack to the swarm.
 - **Administrative Override Boundaries:** Operator/Admin may publish state overrides (e.g. `TicketStatus::RESOLVED` or presentation tombstones), but administrative overrides **cannot** revive an invalidated `AccessEpoch`. Only a new client-signed event can create a new epoch.
 
+In the current runtime, the managed node revalidates the ticket and `AccessEpoch` immediately before admitting `/fortiq/shell/next`. Active sessions are watched for ticket closure, consent withdrawal, and epoch rotation; the operator service separately cancels terminal forwarding on lock or session expiry. Legacy `/fortiq/shell/2.0` is rejected.
+
 ---
 
-## 6. Cryptographic Profile (FORTIQ-PQ1)
+## 6. Cryptographic Profiles
 
-All signed and encrypted canonical objects utilize the **FORTIQ-PQ1** post-quantum hybrid suite:
+The current development runtime uses the explicitly identified `FortiqClassicalDev1` profile. `FortiqPq1` / FORTIQ-PQ1 is reserved as the post-quantum target and is not yet deployed:
 
 - **Key Encapsulation Mechanism (KEM):** Hybrid `ML-KEM-768` + `X25519` via HPKE (RFC 9180 profile).
 - **Digital Signatures (SIG):** `ML-DSA-65` (FIPS 204).
@@ -223,7 +225,7 @@ All signed and encrypted canonical objects utilize the **FORTIQ-PQ1** post-quant
 
 ## 7. Migration and Legacy Coexistence
 
-Existing libp2p transport infrastructure (QUIC, Relay v2, Rendezvous, DCUtR), native PTY/ConPTY streaming, and Tauri IPC interfaces form the foundation for Layer 0, Layer 8, and Layer 9.
+Existing libp2p transport infrastructure (QUIC, Relay v2, Rendezvous, DCUtR), native PTY/ConPTY streaming, and local IPC interfaces form the foundation for Layer 0, Layer 8, and Layer 9. The desktop presentation layer is implemented with Slint.
 
 The transition from the legacy prototype (flat PeerId authorization, mutable SQLite storage) to the full Canonical Architecture v3 is managed across the 15 phases detailed in [docs/milestones.md](milestones.md) and [docs/spec/21-implementation-roadmap.md](spec/21-implementation-roadmap.md).
 

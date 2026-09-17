@@ -34,6 +34,10 @@
 
 ## Crypto
 
+The following is the canonical target profile. The current development runtime
+uses the separately identified `FortiqClassicalDev1` profile while the PQ
+provider remains under implementation.
+
 Default target profile:
 
 ```text

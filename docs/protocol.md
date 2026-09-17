@@ -44,9 +44,11 @@ Storage payloads and individual Reed–Solomon shards additionally employ `BLAKE
 
 ---
 
-## 3. Cryptographic Profile (FORTIQ-PQ1)
+## 3. Cryptographic Profiles
 
-All confidential and signed canonical records conform to the **FORTIQ-PQ1** post-quantum hybrid suite:
+The wire format carries an explicit crypto profile. The current development runtime uses **`FortiqClassicalDev1`** with the classical primitives implemented by the Rust crates. **`FortiqPq1`** is reserved for the post-quantum target and is not a deployed security claim yet.
+
+The reserved **FORTIQ-PQ1** target is defined as:
 
 - **Key Encapsulation (KEM):** Hybrid `MLKEM768-X25519` via HPKE (RFC 9180 profile).
 - **Digital Signatures (SIG):** `ML-DSA-65` (FIPS 204).
@@ -153,6 +155,8 @@ Sender                                                      Receiver
   1. Local `AccessEpoch` is immediately deleted from memory.
   2. Local shell process tree is terminated with extreme prejudice (`SIGKILL` / `TerminateProcess`).
   3. Revocation event is fsynced to disk and dispatched to the network.
+- **Session Certificate Lifecycle:** Operator lock or certificate expiry cancels active terminal forwarding and prevents an in-flight shell handshake from completing. The managed node re-reads the ticket immediately before authorization, so close, revoke, and epoch rotation during the handshake fail closed.
+- **Legacy Rejection:** `/fortiq/shell/2.0` is disabled. Clients must use `/fortiq/shell/next` through the service IPC path.
 
 ---
 

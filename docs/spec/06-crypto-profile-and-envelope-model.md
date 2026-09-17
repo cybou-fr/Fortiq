@@ -1,5 +1,10 @@
 # 06 — Crypto Profile and Envelope Model
 
+**Implementation status:** The current runtime uses `FortiqClassicalDev1`. The
+`FortiqPq1` profile described below is reserved for the future PQ provider and
+must not be presented as deployed protection until its implementation and
+interoperability vectors are complete.
+
 ## Standards basis
 
 FORTIQ-PQ1 is designed around:

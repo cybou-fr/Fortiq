@@ -1,6 +1,6 @@
 # FORTIQ Documentation Catalog
 
-Welcome to the FORTIQ documentation suite. The architecture and protocol are defined by **Canonical Architecture v3**, establishing FORTIQ as a sovereign, post-quantum-resilient peer-to-peer support network.
+Welcome to the FORTIQ documentation suite. The architecture and protocol are defined by **Canonical Architecture v3**. The current development runtime uses the versioned `FortiqClassicalDev1` profile; the post-quantum `FortiqPq1` profile is a reserved target, not a deployed security claim.
 
 ---
 
@@ -8,7 +8,7 @@ Welcome to the FORTIQ documentation suite. The architecture and protocol are def
 
 - **[Canonical v3 Charter & Invariants](CANONICAL_README.md)**: Original canonical v3 charter and core statement.
 - **[Architecture Specification](architecture.md)**: System overview, L0–L9 layered architecture, 20 Hard Invariants, identity lifecycle, and ticket safety.
-- **[Protocol Specification](protocol.md)**: Wire protocols (`/fortiq/*`), deterministic CBOR array encoding, FORTIQ-PQ1 crypto profile, and shard streaming.
+- **[Protocol Specification](protocol.md)**: Wire protocols (`/fortiq/*`), deterministic CBOR array encoding, deployed and reserved crypto profiles, shell/next authorization, and shard streaming.
 - **[Milestones & Roadmap](milestones.md)**: Prototype baseline (M0–M15) and Canonical v3 Implementation Roadmap (Phases 1–15).
 - **[Manual Verification Guide](manual-test.md)**: Step-by-step instructions for manual end-to-end testing of the daemon, CLI, desktop, and VPS relay.
 

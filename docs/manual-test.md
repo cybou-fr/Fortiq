@@ -61,13 +61,16 @@ Download and run:
 FORTIQ-Client-Setup-<version>-x64.exe
 ```
 
-The wizard requires the Operator PeerId and refuses to install when it is
-missing or invalid. It uses the Windows computer name by default.
+The wizard may request the compatibility Operator PeerId for discovery and
+ticket routing. This value is not a shell authorization grant. The current
+runtime authorizes shell access through `/fortiq/shell/next`, an Owner-signed
+operator session certificate, and the client-owned ticket AccessEpoch.
 
 The complete installer:
 - Copies binaries to `C:\Program Files\FORTIQ\`
 - Adds `C:\Program Files\FORTIQ` to system `PATH`
-- Writes an explicit Client configuration with the supplied `operator_peer_id`
+- Writes the compatibility Client configuration with the supplied
+    `operator_peer_id` for discovery and ticket routing
 - Installs and starts the background Windows Service (`FortiqService`)
 - Creates Start Menu shortcuts
 - Registers `fortiq-desktop.exe` for automatic start at interactive user logon
@@ -101,7 +104,8 @@ On Windows, first install:
 FORTIQ-Operator-Setup-<version>-x64.exe
 ```
 
-The Operator package never writes an `operator_peer_id`. After installation:
+The Operator package does not need an `operator_peer_id` for shell authority.
+After installation:
 
 ```powershell
 # 9. Verify operator daemon is running and check its status

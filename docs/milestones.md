@@ -22,7 +22,7 @@ The initial implementation phases established the production transport mesh, ter
 - **M9 — Circuit Relay v2:** libp2p Circuit Relay v2 reservations, hop negotiation, and relayed stream routing.
 - **M10 — DCUtR Direct Punching:** Automatic direct hole-punch upgrades on relayed connections with non-disruptive fallback.
 - **M11 — Thin Client / Fat Daemon IPC:** Windows Named Pipes (`\\.\pipe\fortiq-ipc`) and Unix Domain Sockets (`/run/fortiq.sock`) bridging `fortiq-service` to GUI/CLI.
-- **M12 — Native Pseudoterminal (PTY/ConPTY):** Integrated `portable-pty` with ConPTY / Unix openpty, binary `ShellFrame` framing, dynamic window resizing, and xterm.js frontend.
+- **M12 — Native Pseudoterminal (PTY/ConPTY):** Integrated `portable-pty` with ConPTY / Unix openpty, binary `ShellFrame` framing, dynamic window resizing, and the Slint terminal pane.
 - **M13 — System Services:** Native background services (`systemd` on Linux, Windows Service Control Manager via `windows-service`) and automated multi-node end-to-end integration tests.
 - **M14 — Productization & Lightweight CLI:** Dedicated lightweight `fortiq` CLI binary with raw-mode terminal forwarding and automated Debian packaging (`.deb`).
 - **M15 — Dual Windows Installers:** Separate Operator and Client NSIS setups with COMPUTERNAME provisioning, service boot auto-start, and desktop logon registration.
@@ -46,6 +46,7 @@ Canonical Architecture v3 transitions FORTIQ from the prototype model to a sover
 - Root revocation distribution and control plane replication.
 
 ### Phase 3 — Crypto Provider (FORTIQ-PQ1)
+- **Status:** The runtime currently uses `FortiqClassicalDev1`; `FortiqPq1` remains reserved until the PQ provider and interoperability vectors are complete.
 - Abstract `CryptoProvider` trait (decoupled wire format from specific Rust crates).
 - Hybrid Post-Quantum HPKE (`MLKEM768-X25519`).
 - Post-Quantum digital signatures (`ML-DSA-65`).
@@ -93,6 +94,7 @@ Canonical Architecture v3 transitions FORTIQ from the prototype model to a sover
 - Chunk resume and attachment manifests.
 
 ### Phase 10 — Shell & Session Binding
+- **Status:** Canonical `/fortiq/shell/next` is implemented; legacy `/fortiq/shell/2.0` is rejected.
 - Binding existing ConPTY/PTY shell streams to:
   - `OperatorSessionCertificate` (signed by mnemonic-derived Owner Root);
   - Valid client `TicketAccessEpoch`;
@@ -100,6 +102,7 @@ Canonical Architecture v3 transitions FORTIQ from the prototype model to a sover
 - Synchronous local shell termination on client `AccessEpochRevoked` event.
 
 ### Phase 11 — Portable Operator
+- **Status:** Owner-signed session certificates, one-hour TTL, lock/expiry cancellation, and volatile workspace wipe are implemented.
 - BIP-39 24-word mnemonic unlock on any standard node.
 - Temporary Operator Session certificate derivation without changing host `PeerId`.
 - Strictly volatile, zeroized in-memory decrypted workspace.

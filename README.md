@@ -28,7 +28,7 @@ a client, or fork it and take ownership of the changes.
 
 ---
 
-FORTIQ is a sovereign support network composed of ordinary P2P nodes. Its application state is an immutable signed object graph, encrypted end-to-end with post-quantum algorithms, erasure-coded where appropriate, and distributed across storage-capable peers.
+FORTIQ is a sovereign support network composed of ordinary P2P nodes. Its target application state is an immutable signed object graph, encrypted end-to-end with post-quantum algorithms, erasure-coded where appropriate, and distributed across storage-capable peers. The current development runtime uses the explicitly identified `FortiqClassicalDev1` profile; `FortiqPq1` remains reserved until its ML-KEM/ML-DSA implementation and interoperability vectors are complete.
 
 The operator is not a machine. The network owner/operator authority is rooted in Genesis and is portable through a 24-word BIP-39 mnemonic.
 
@@ -43,7 +43,7 @@ Immutable logical events
         ↓
 EventPacks / Blob Manifests
         ↓
-PQ-resistant encryption (FORTIQ-PQ1: ML-KEM-768 hybrid, ML-DSA-65)
+Versioned crypto profile (`FortiqClassicalDev1` today; `FortiqPq1` reserved target)
         ↓
 Ciphertext storage objects
         ↓
@@ -126,7 +126,7 @@ Note the printed `Local PeerId` (e.g. `12D3KooW_OPERATOR_PEER_ID`).
 
 ### 2. Start the Managed Client Daemon
 
-On the managed machine, set `authorization.operator_peer_id = "12D3KooW_OPERATOR_PEER_ID"` in `examples/managed.toml`, then start the client daemon:
+On the managed machine, configure the operator PeerId in `examples/managed.toml` for current peer discovery and ticket routing, then start the client daemon. This deprecated setting is not an authority grant; shell authorization requires a valid Owner-signed session certificate and client-owned ticket AccessEpoch:
 
 ```bash
 cargo run -p fortiq-service -- --config examples/managed.toml
@@ -159,7 +159,7 @@ cargo run -p fortiq -- ticket access FTQ_TICKET_ID true
 cargo run -p fortiq -- shell 12D3KooW_MANAGED_PEER_ID --ticket-id FTQ_TICKET_ID
 ```
 
-The peers authenticate through mutual libp2p cryptographic handshake (`/fortiq/hello/1.0`), and the interactive ConPTY/PTY shell stream connects over the secure P2P transport.
+The peers authenticate through mutual libp2p cryptographic handshake (`/fortiq/hello/1.0`). Interactive ConPTY/PTY access uses only the canonical `/fortiq/shell/next` handshake and is bound to the ticket, AccessEpoch, session certificate, and challenge signature. Legacy `/fortiq/shell/2.0` is rejected.
 
 
 ## Architecture Overview
@@ -167,7 +167,7 @@ The peers authenticate through mutual libp2p cryptographic handshake (`/fortiq/h
 FORTIQ follows a strict daemon / control-client architecture:
 - **`fortiq-service`**: Sovereign background daemon (systemd service on Linux, Windows Service on Windows). Manages P2P QUIC / Relay transports, identity keys, local support tickets, pseudoterminal allocation (ConPTY / PTY), and serves local IPC.
 - **`fortiq`**: Lightweight command-line client communicating with `fortiq-service` via local IPC (UNIX domain socket on Linux, Named Pipe on Windows).
-- **`fortiq-desktop`**: Desktop GUI console with system tray integration and embedded xterm.js terminal emulator.
+- **`fortiq-desktop`**: Slint desktop GUI console with system tray integration and native terminal session support.
 
 FORTIQ permits exactly one service instance per operating system.
 
@@ -257,15 +257,14 @@ fortiq-service service uninstall
 
 ## Desktop Client (`fortiq-desktop`)
 
-FORTIQ includes a dual-mode Tauri desktop client (Operator Console and Managed Client):
+FORTIQ includes a dual-mode Slint desktop client (Operator Console and Managed Client):
 
 ```bash
-# Build desktop frontend
-cd apps/fortiq-desktop
-npm run build
+# Build the Slint desktop application
+cargo build -p fortiq-desktop
 
 # Run desktop application
-cargo run --manifest-path apps/fortiq-desktop/src-tauri/Cargo.toml
+cargo run -p fortiq-desktop
 ```
 
 ## Production Packaging & Distribution
@@ -298,9 +297,10 @@ FORTIQ-Operator-Setup-<version>-x64.exe
 FORTIQ-Client-Setup-<version>-x64.exe
 ```
 
-Client Setup requires an Operator PeerId and cannot silently fall back to the
-Operator role. Both installers use the Windows computer name, install the
-service for boot startup, and register the desktop application for user logon.
+Client Setup uses the compatibility Operator PeerId for discovery and ticket
+routing. It does not grant shell authority. Both installers use the Windows
+computer name, install the service for boot startup, and register the Slint
+desktop application for user logon.
 
 Build both installers locally with NSIS installed:
 
@@ -310,15 +310,15 @@ Build both installers locally with NSIS installed:
 
 ### Multi-Platform Desktop Bundles
 
-The desktop GUI and background service are bundled for production via Tauri:
+The desktop GUI and background service are bundled for production as native Rust
+and Slint binaries:
 
 ```bash
-cd apps/fortiq-desktop
-npm run tauri build
+cargo build --release -p fortiq-desktop -p fortiq-service -p fortiq-cli
 ```
 
-- **Windows**: Use the role-specific complete product installers above; the standalone Tauri bundle is not a complete FORTIQ installation.
-- **Linux**: Produces `.deb` and `.AppImage` bundles under `target/release/bundle/`.
+- **Windows**: Use the role-specific complete product installers above; they package the native Slint desktop binary with the service and CLI.
+- **Linux**: Package the native binaries using the distribution scripts under `packaging/`.
 - **GitHub Actions**: Tagging a commit (`git tag v0.1.0 && git push origin v0.1.0`) triggers `.github/workflows/release.yml`, automatically building and attaching all Linux `.deb`, Windows `.zip`, and desktop installer artifacts to the GitHub Release.
 
 
@@ -366,16 +366,17 @@ FORTIQ guarantees tenant isolation, post-quantum confidentiality, and sovereign 
 1. **Cryptographic Segmentation:** Every client organization has an independent cryptographic `SegmentId`. The operator uses deterministic, distinct HPKE recipient keys for each Segment. An operator key leak for Client A **MUST NOT** decrypt data belonging to Client B.
 2. **Client-Owned Access Epochs:** Only a managed client can create a ticket and generate a `TicketAccessEpoch`. Shell access requires an active ticket, valid `TicketAccessEpoch`, and an unexpired `OperatorSessionCertificate`.
 3. **Immediate Synchronous Revocation:** When a client revokes consent or closes a ticket, the managed node immediately writes the revocation event, invalidates the local access epoch, and synchronously kills the running PTY process tree before transmitting the event across the network. Operator administrative overrides cannot revive an invalidated access epoch.
-4. **Post-Quantum Cryptography (FORTIQ-PQ1):** Data is protected against harvest-now-decrypt-later attacks via hybrid ML-KEM-768/X25519 HPKE and ML-DSA-65 digital signatures.
-5. **Separation of Transport and Authority:** A libp2p `PeerId` represents transport identity only. Holding an active QUIC connection confers zero administrative privilege. Administrative authority is rooted in signed Genesis and portable via a 24-word mnemonic.
-6. **Tiered Durability with Integrity Verification:** Large StatePacks and blobs are encrypted first and Reed–Solomon erasure-coded second. Every shard is independently checksummed with `BLAKE3-256` before acceptance for RS reconstruction.
-7. **Zero Plaintext Database:** Local SQLite databases and indexes serve solely as disposable materialized view caches. Decrypted operator state is retained in zeroized volatile memory.
-8. **Host Permission Hardening:** Identity and seed material are strictly protected. On Unix, identity files use mode `0600`. On Windows, `C:\ProgramData\FORTIQ` is strictly ACL-hardened to `SYSTEM` (`*S-1-5-18`) and `Administrators` (`*S-1-5-32-544`), blocking unprivileged user access. Private keys and seed phrases are never committed, logged, or transmitted.
+4. **Versioned Cryptography:** The runtime advertises `FortiqClassicalDev1` and uses classical development primitives. `FortiqPq1` (ML-KEM-768/X25519 HPKE and ML-DSA-65) is a reserved target and must not be claimed as deployed protection until implemented and verified.
+5. **Operator Session Lifecycle:** Operator lock, one-hour session expiry, or replacement of an active session cancels terminal forwarding and wipes the volatile operator workspace. In-flight shell handshakes fail closed.
+6. **Separation of Transport and Authority:** A libp2p `PeerId` represents transport identity only. Holding an active QUIC connection confers zero administrative privilege. Administrative authority is rooted in signed Genesis and portable via a 24-word mnemonic.
+7. **Tiered Durability with Integrity Verification:** Large StatePacks and blobs are encrypted first and Reed–Solomon erasure-coded second. Every shard is independently checksummed with `BLAKE3-256` before acceptance for RS reconstruction.
+8. **Zero Plaintext Database:** Local SQLite databases and indexes serve solely as disposable materialized view caches. Decrypted operator state is retained in zeroized volatile memory.
+9. **Host Permission Hardening:** Identity and seed material are strictly protected. On Unix, identity files use mode `0600`. On Windows, `C:\ProgramData\FORTIQ` is strictly ACL-hardened to `SYSTEM` (`*S-1-5-18`) and `Administrators` (`*S-1-5-32-544`), blocking unprivileged user access. Private keys and seed phrases are never committed, logged, or transmitted.
 
 ## Clean-Machine Install & Lifecycle Flow
 
 1. **Packaging & Deployment:**
-   - **Windows:** Run `FORTIQ-Client-Setup-<version>-x64.exe` (with required operator PeerId) or `FORTIQ-Operator-Setup-<version>-x64.exe`.
+        - **Windows:** Run `FORTIQ-Client-Setup-<version>-x64.exe` (with the compatibility operator PeerId) or `FORTIQ-Operator-Setup-<version>-x64.exe`.
    - **Linux:** Install `fortiq-service_<version>_amd64.deb` and start via `systemctl start fortiq`.
 2. **Initial Service Startup:**
    - On first launch, the daemon inspects `[identity] path`. If absent, a new Ed25519 keypair is cryptographically generated and safely saved with restricted permissions.
@@ -396,6 +397,6 @@ To ensure unbroken stability across Linux and Windows targets, the following Git
   - `Code Formatting` (`cargo fmt --check`)
   - `Workspace Tests & Clippy (ubuntu-latest)`
   - `Workspace Tests & Clippy (windows-latest)`
-  - `Tauri Desktop Frontend & Backend Check (ubuntu-latest)`
-  - `Tauri Desktop Frontend & Backend Check (windows-latest)`
+        - `Slint Desktop Build & Backend Check (ubuntu-latest)`
+        - `Slint Desktop Build & Backend Check (windows-latest)`
 - **Require linear history:** Enforce rebase or squash merges to maintain a clean git trajectory.
