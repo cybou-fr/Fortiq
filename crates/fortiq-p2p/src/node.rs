@@ -19,7 +19,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 pub const HELLO_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/hello/1.0");
-pub const SHELL_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/shell/1.0");
 pub const SHELL_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/shell/2.0");
 pub const TICKET_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/ticket/1.0");
 pub const TICKET_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/ticket/2.0");
@@ -653,8 +652,6 @@ pub struct RunOptions {
 struct EventOptions {
     local_info: NodeInfo,
     config: Config,
-    shell_peer: Option<PeerId>,
-    shell_command: Option<String>,
     close_ticket_peer: Option<PeerId>,
     ticket_store: TicketStore,
     active_shells: Arc<AtomicBool>,
@@ -704,10 +701,15 @@ pub async fn run(
         listen_address,
         dial_address,
         shell_peer,
-        shell_command,
+        shell_command: _shell_command,
         close_ticket_peer,
         command_receiver,
     } = options;
+    if shell_peer.is_some() {
+        anyhow::bail!(
+            "legacy shell/1.0 is disabled; open a ticket-scoped shell through the service IPC"
+        );
+    }
     let identify_config =
         identify::Config::new("/fortiq/identify/1.0".to_owned(), keypair.public());
     let codec = request_response::json::codec::Codec::default()
@@ -831,9 +833,6 @@ pub async fn run(
     let incoming_shells_v2 = stream_control
         .accept(SHELL_PROTOCOL_V2)
         .context("shell v2 protocol already registered")?;
-    let incoming_shells_v1 = stream_control
-        .accept(SHELL_PROTOCOL)
-        .context("shell v1 protocol already registered")?;
     let incoming_files = stream_control
         .accept(FILE_PROTOCOL)
         .context("file protocol already registered")?;
@@ -844,8 +843,6 @@ pub async fn run(
     let event_options = EventOptions {
         local_info,
         config,
-        shell_peer,
-        shell_command,
         close_ticket_peer,
         ticket_store,
         active_shells,
@@ -854,7 +851,6 @@ pub async fn run(
     event_loop(
         &mut swarm,
         incoming_shells_v2,
-        incoming_shells_v1,
         incoming_files,
         stream_control,
         event_options,
@@ -865,7 +861,6 @@ pub async fn run(
 async fn event_loop(
     swarm: &mut Swarm<Behaviour>,
     mut incoming_shells_v2: libp2p_stream::IncomingStreams,
-    mut incoming_shells_v1: libp2p_stream::IncomingStreams,
     mut incoming_files: libp2p_stream::IncomingStreams,
     stream_control: libp2p_stream::Control,
     options: EventOptions,
@@ -873,16 +868,13 @@ async fn event_loop(
     let EventOptions {
         local_info,
         config,
-        shell_peer,
-        shell_command,
         close_ticket_peer,
         ticket_store,
         active_shells,
         command_receiver,
     } = options;
     let (shell_result_sender, mut shell_result_receiver) = tokio::sync::mpsc::channel(1);
-    let mut shell_started = false;
-    let target_peer = shell_peer.or(close_ticket_peer);
+    let target_peer = close_ticket_peer;
 
     let (dummy_tx, dummy_rx) = tokio::sync::mpsc::channel(1);
     let mut command_receiver = command_receiver.unwrap_or(dummy_rx);
@@ -1120,16 +1112,6 @@ async fn event_loop(
                     &local_info,
                 ).await;
             }
-            Some((remote_peer, stream)) = incoming_shells_v1.next() => {
-                handle_incoming_shell_v1(
-                    stream,
-                    remote_peer,
-                    &config,
-                    &ticket_store,
-                    &active_shells,
-                    &local_info,
-                ).await;
-            }
             Some((remote_peer, stream)) = incoming_files.next() => {
                 let files_dir = ticket_store.storage_dir().join("tickets");
                 let t_store = ticket_store.clone();
@@ -1311,23 +1293,6 @@ async fn event_loop(
                             &peer_id,
                             HelloRequest(local_info.clone()),
                         );
-                        if shell_peer == Some(peer_id) && !shell_started {
-                            shell_started = true;
-                            let mut control = stream_control.clone();
-                            let sender = shell_result_sender.clone();
-                            let command = shell_command.clone();
-                            tokio::spawn(async move {
-                                let result = async {
-                                    let stream = control
-                                        .open_stream(peer_id, SHELL_PROTOCOL)
-                                        .await
-                                        .context("failed to open remote shell stream")?;
-                                    fortiq_shell::run_client(stream, command).await
-                                }
-                                .await;
-                                let _ = sender.send(result).await;
-                            });
-                        }
                         if close_ticket_peer == Some(peer_id) {
                             swarm.behaviour_mut().ticket.send_request(
                                 &peer_id,
@@ -2071,94 +2036,6 @@ async fn handle_incoming_shell_v2(
             "SHELL_SESSION_ENDED",
             &op_peer_str,
             Some("Session shell terminée"),
-        );
-    });
-}
-
-async fn handle_incoming_shell_v1(
-    mut stream: libp2p::Stream,
-    remote_peer: PeerId,
-    config: &Config,
-    ticket_store: &TicketStore,
-    active_shells: &Arc<AtomicBool>,
-    local_info: &NodeInfo,
-) {
-    if !is_authorized_operator(remote_peer, config) {
-        warn!(remote_peer_id = %remote_peer, "denied shell v1 from unauthorized peer");
-        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED).await;
-        return;
-    }
-
-    let ticket = match ticket_store.db().get_active_ticket() {
-        Ok(Some(t)) => t,
-        _ => {
-            warn!(remote_peer_id = %remote_peer, "denied shell v1: no active ticket");
-            let _ =
-                fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_NO_TICKET)
-                    .await;
-            return;
-        }
-    };
-
-    if !ticket.state.permits_work() {
-        warn!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "denied shell v1: ticket closed");
-        let _ =
-            fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_TICKET_CLOSED)
-                .await;
-        return;
-    }
-
-    if !ticket.remote_access_enabled {
-        warn!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "denied shell v1: remote access disabled");
-        let _ = fortiq_shell::send_authorization_code(
-            &mut stream,
-            fortiq_shell::DENIED_REMOTE_ACCESS_DISABLED,
-        )
-        .await;
-        return;
-    }
-
-    if active_shells
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        warn!(remote_peer_id = %remote_peer, "denied shell v1: busy");
-        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_BUSY).await;
-        return;
-    }
-
-    if let Err(error) = fortiq_shell::send_authorization(&mut stream, true).await {
-        warn!(remote_peer_id = %remote_peer, %error, "failed to send shell authorization result");
-        active_shells.store(false, Ordering::SeqCst);
-        return;
-    }
-
-    info!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "accepted authorized shell v1");
-    let info = local_info.clone();
-    let shells_flag = active_shells.clone();
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let db = ticket_store.db().clone();
-    let tid = ticket.id.clone();
-    let op_peer_str = remote_peer.to_string();
-
-    tokio::spawn(async move {
-        let _guard = ShellSessionGuard(shells_flag);
-        let _ = db.record_shell_session_start(&session_id, &tid, &op_peer_str, "QUIC/Relay (v1)");
-        let _ = db.record_event(
-            &tid,
-            "SHELL_SESSION_STARTED",
-            &op_peer_str,
-            Some("Session shell démarrée (v1)"),
-        );
-
-        let res = fortiq_shell::serve(stream, info).await;
-        let result_str = if res.is_ok() { "SUCCESS" } else { "ERROR" };
-        let _ = db.record_shell_session_end(&session_id, Some(result_str));
-        let _ = db.record_event(
-            &tid,
-            "SHELL_SESSION_ENDED",
-            &op_peer_str,
-            Some("Session shell terminée (v1)"),
         );
     });
 }
