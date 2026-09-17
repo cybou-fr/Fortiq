@@ -23,8 +23,8 @@ pub const SHELL_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/shell/1.
 pub const SHELL_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/shell/2.0");
 pub const TICKET_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/ticket/1.0");
 pub const TICKET_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/ticket/2.0");
-pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/1.0");
-pub const FILE_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/file/1.0");
+pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/2.0");
+pub const FILE_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/file/2.0");
 const MAX_HELLO_BYTES: usize = 16 * 1024;
 /// How often a node re-queries the rendezvous points it knows.
 const REDISCOVERY_INTERVAL: Duration = Duration::from_secs(10);
@@ -85,6 +85,12 @@ pub struct FileOfferWire {
     pub filename: String,
     pub file_size: u64,
     pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FileSendOutboxPayload {
+    ticket_id: String,
+    file_path: std::path::PathBuf,
 }
 
 fn is_ticket_counterparty(
@@ -474,9 +480,13 @@ fn spawn_send_file_stream(
     sender_peer_id: String,
     mut control: libp2p_stream::Control,
     ticket_store: TicketStore,
-    reply: tokio::sync::oneshot::Sender<Result<fortiq_core::AttachmentRecord, String>>,
+    completion: (
+        Option<String>,
+        tokio::sync::oneshot::Sender<Result<fortiq_core::AttachmentRecord, String>>,
+    ),
 ) {
     tokio::spawn(async move {
+        let (outbox_id, reply) = completion;
         use futures::{AsyncReadExt, AsyncWriteExt};
         use sha2::{Digest, Sha256};
         use tokio::io::AsyncReadExt as TokioAsyncReadExt;
@@ -621,6 +631,11 @@ fn spawn_send_file_stream(
         }
         .await;
 
+        if res.is_ok() {
+            if let Some(outbox_id) = outbox_id.as_deref() {
+                let _ = ticket_store.db().remove_outbox(outbox_id);
+            }
+        }
         let _ = reply.send(res);
     });
 }
@@ -909,6 +924,7 @@ async fn event_loop(
         String,
         std::path::PathBuf,
         tokio::sync::oneshot::Sender<Result<fortiq_core::AttachmentRecord, String>>,
+        Option<String>,
     );
 
     let mut pending_shell_opens: std::collections::HashMap<PeerId, Vec<PendingShellOpen>> =
@@ -1056,6 +1072,23 @@ async fn event_loop(
                         }
                     }
                     P2pCommand::SendFile { peer, dial, ticket_id, file_path, reply } => {
+                        let payload = FileSendOutboxPayload {
+                            ticket_id: ticket_id.clone(),
+                            file_path: file_path.clone(),
+                        };
+                        let outbox_id = match serde_json::to_string(&payload)
+                            .map_err(anyhow::Error::from)
+                            .and_then(|payload| ticket_store.db().enqueue_outbox(
+                                &peer.to_string(),
+                                "FILE_SEND",
+                                &payload,
+                            )) {
+                            Ok(id) => Some(id),
+                            Err(error) => {
+                                let _ = reply.send(Err(format!("Échec de persistance de l'envoi fichier: {error}")));
+                                continue;
+                            }
+                        };
                         if swarm.is_connected(&peer) {
                             spawn_send_file_stream(
                                 peer,
@@ -1064,10 +1097,10 @@ async fn event_loop(
                                 local_info.peer_id.clone(),
                                 stream_control.clone(),
                                 ticket_store.clone(),
-                                reply,
+                                (outbox_id, reply),
                             );
                         } else {
-                            pending_file_dials.entry(peer).or_default().push((ticket_id, file_path, reply));
+                            pending_file_dials.entry(peer).or_default().push((ticket_id, file_path, reply, outbox_id));
                             if let Some(addr) = dial {
                                 let _ = swarm.dial(addr);
                             } else {
@@ -1231,8 +1264,12 @@ async fn event_loop(
                         }
                         Err(error) => warn!(remote_peer_id = %peer_id, %error, "failed to load pending chat outbox"),
                     }
+                    let mut active_file_outbox = std::collections::HashSet::new();
                     if let Some(pending) = pending_file_dials.remove(&peer_id) {
-                        for (tid, file_path, reply) in pending {
+                        for (tid, file_path, reply, outbox_id) in pending {
+                            if let Some(id) = outbox_id.as_ref() {
+                                active_file_outbox.insert(id.clone());
+                            }
                             spawn_send_file_stream(
                                 peer_id,
                                 tid,
@@ -1240,9 +1277,34 @@ async fn event_loop(
                                 local_info.peer_id.clone(),
                                 stream_control.clone(),
                                 ticket_store.clone(),
-                                reply,
+                                (outbox_id, reply),
                             );
                         }
+                    }
+                    match ticket_store.db().list_outbox_for_peer(&peer_id.to_string()) {
+                        Ok(records) => {
+                            for record in records.into_iter().filter(|record| {
+                                record.kind == "FILE_SEND"
+                                    && !active_file_outbox.contains(&record.id)
+                            }) {
+                                match serde_json::from_str::<FileSendOutboxPayload>(&record.payload) {
+                                    Ok(payload) => {
+                                        let (reply, _response) = tokio::sync::oneshot::channel();
+                                        spawn_send_file_stream(
+                                            peer_id,
+                                            payload.ticket_id,
+                                            payload.file_path,
+                                            local_info.peer_id.clone(),
+                                            stream_control.clone(),
+                                            ticket_store.clone(),
+                                            (Some(record.id), reply),
+                                        );
+                                    }
+                                    Err(error) => warn!(outbox_id = %record.id, %error, "invalid file outbox payload"),
+                                }
+                            }
+                        }
+                        Err(error) => warn!(remote_peer_id = %peer_id, %error, "failed to load file outbox"),
                     }
                     if endpoint.is_dialer() {
                         swarm.behaviour_mut().hello.send_request(
@@ -1425,7 +1487,7 @@ async fn event_loop(
                                 }
                             }
                             if let Some(pending) = pending_file_dials.remove(&peer) {
-                                for (_, _, reply) in pending {
+                                for (_, _, reply, _) in pending {
                                     let _ = reply.send(Err(format!(
                                         "Impossible d'établir la connexion avec le poste distant: {error}"
                                     )));
