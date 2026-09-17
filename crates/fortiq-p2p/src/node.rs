@@ -14,7 +14,6 @@ use fortiq_core::{
         portable::certificate::OperatorSessionCertificate,
         retirement::authority::CanonicalAuthorityResolver,
         signing::{derive_signing_key_id, Ed25519Signer, Ed25519Verifier, Verifier},
-        types::SegmentId,
     },
     Config, NodeInfo, TicketStore,
 };
@@ -128,7 +127,6 @@ struct PendingTicketSync {
 
 struct PendingShellNext {
     ticket_id: String,
-    segment_id: SegmentId,
     certificate: OperatorSessionCertificate,
     session_signer: Arc<Ed25519Signer>,
     reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
@@ -138,7 +136,6 @@ struct PendingShellNext {
 pub struct OpenShellNextCommand {
     pub peer: PeerId,
     pub ticket_id: String,
-    pub segment_id: SegmentId,
     pub certificate: OperatorSessionCertificate,
     pub session_signer: Arc<Ed25519Signer>,
     pub dial: Option<Multiaddr>,
@@ -456,7 +453,6 @@ fn spawn_open_shell_next(
     peer: PeerId,
     local_peer: PeerId,
     ticket_id: String,
-    segment_id: SegmentId,
     certificate: OperatorSessionCertificate,
     session_signer: Arc<Ed25519Signer>,
     mut control: libp2p_stream::Control,
@@ -480,7 +476,6 @@ fn spawn_open_shell_next(
                 .map_err(|error| format!("Lecture du challenge shell impossible: {error}"))?;
             let handshake = fortiq_shell::ShellNextHandshake::signed(
                 certificate.network_id,
-                segment_id,
                 ticket_id,
                 local_peer.to_string(),
                 certificate,
@@ -966,7 +961,6 @@ async fn event_loop(
                         let OpenShellNextCommand {
                             peer,
                             ticket_id,
-                            segment_id,
                             certificate,
                             session_signer,
                             dial,
@@ -977,7 +971,6 @@ async fn event_loop(
                                 peer,
                                 local_info.peer_id.parse().expect("local PeerId"),
                                 ticket_id,
-                                segment_id,
                                 certificate,
                                 session_signer,
                                 stream_control.clone(),
@@ -989,7 +982,6 @@ async fn event_loop(
                                 .or_default()
                                 .push(PendingShellNext {
                                     ticket_id,
-                                    segment_id,
                                     certificate,
                                     session_signer,
                                     reply,
@@ -1184,7 +1176,6 @@ async fn event_loop(
                                 peer_id,
                                 local_info.peer_id.parse().expect("local PeerId"),
                                 request.ticket_id,
-                                request.segment_id,
                                 request.certificate,
                                 request.session_signer,
                                 stream_control.clone(),
@@ -1854,22 +1845,6 @@ async fn handle_incoming_shell_next(
             return;
         }
     };
-    let ticket = match ticket_store
-        .db()
-        .get_ticket(&handshake.ticket_id)
-        .ok()
-        .flatten()
-    {
-        Some(ticket) => ticket,
-        None => {
-            let _ =
-                fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_NO_TICKET)
-                    .await;
-            return;
-        }
-    };
-    let expected_segment =
-        fortiq_shell::derive_ticket_segment_id(&genesis.tbs.network_id, &ticket.id);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1884,7 +1859,6 @@ async fn handle_incoming_shell_next(
     );
     let payload = fortiq_shell::ShellNextHandshake::signing_payload(
         &handshake.network_id,
-        &handshake.segment_id,
         &handshake.ticket_id,
         &handshake.operator_transport_peer_id,
         &challenge,
@@ -1892,7 +1866,6 @@ async fn handle_incoming_shell_next(
     let session_verifier =
         Ed25519Verifier::from_public_key(&handshake.session_certificate.session_pubkey);
     let authority_valid = handshake.network_id == genesis.tbs.network_id
-        && handshake.segment_id == expected_segment
         && handshake.operator_transport_peer_id == remote_peer.to_string()
         && handshake.session_certificate.network_id == genesis.tbs.network_id
         && handshake.session_certificate.owner_id == genesis.tbs.owner_id

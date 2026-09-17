@@ -8,7 +8,7 @@ use fortiq_core::{
     canonical::{
         portable::certificate::OperatorSessionCertificate,
         signing::{Signer, SigningError},
-        types::{NetworkId, SegmentId},
+        types::NetworkId,
     },
     NodeInfo,
 };
@@ -16,7 +16,6 @@ use futures::{
     AsyncRead, AsyncReadExt as FuturesAsyncReadExt, AsyncWrite,
     AsyncWriteExt as FuturesAsyncWriteExt,
 };
-use sha3::{Digest, Sha3_256};
 use tokio::io::AsyncWriteExt;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 
@@ -33,15 +32,6 @@ pub const DENIED_REMOTE_ACCESS_DISABLED: u8 = 5;
 pub const DENIED_INVALID_AUTHORITY: u8 = 6;
 pub const DENIED_EPOCH_MISMATCH: u8 = 7;
 pub const SHELL_NEXT_SIGNATURE_DOMAIN: &[u8] = b"FORTIQ-SHELL-v3:";
-pub const TICKET_SEGMENT_ID_DOMAIN: &[u8] = b"FORTIQ-TICKET-SEGMENT-ID-v1:";
-
-pub fn derive_ticket_segment_id(network_id: &NetworkId, ticket_id: &str) -> SegmentId {
-    let mut hasher = Sha3_256::new();
-    hasher.update(TICKET_SEGMENT_ID_DOMAIN);
-    hasher.update(network_id.as_bytes());
-    hasher.update(ticket_id.as_bytes());
-    SegmentId::from_bytes(hasher.finalize().into())
-}
 
 /// How often the served session pings an idle operator.
 const KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
@@ -72,7 +62,6 @@ pub fn describe_denial(code: u8) -> &'static str {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ShellNextHandshake {
     pub network_id: NetworkId,
-    pub segment_id: SegmentId,
     pub ticket_id: String,
     pub operator_transport_peer_id: String,
     pub session_certificate: OperatorSessionCertificate,
@@ -83,7 +72,6 @@ impl ShellNextHandshake {
     #[allow(clippy::too_many_arguments)]
     pub fn signed(
         network_id: NetworkId,
-        segment_id: SegmentId,
         ticket_id: String,
         operator_transport_peer_id: String,
         session_certificate: OperatorSessionCertificate,
@@ -92,7 +80,6 @@ impl ShellNextHandshake {
     ) -> Result<Self, SigningError> {
         let payload = Self::signing_payload(
             &network_id,
-            &segment_id,
             &ticket_id,
             &operator_transport_peer_id,
             challenge,
@@ -100,7 +87,6 @@ impl ShellNextHandshake {
         let challenge_signature = signer.sign(&payload)?;
         Ok(Self {
             network_id,
-            segment_id,
             ticket_id,
             operator_transport_peer_id,
             session_certificate,
@@ -110,7 +96,6 @@ impl ShellNextHandshake {
 
     pub fn signing_payload(
         network_id: &NetworkId,
-        segment_id: &SegmentId,
         ticket_id: &str,
         operator_transport_peer_id: &str,
         challenge: &[u8; 32],
@@ -118,7 +103,6 @@ impl ShellNextHandshake {
         let mut payload = Vec::new();
         payload.extend_from_slice(SHELL_NEXT_SIGNATURE_DOMAIN);
         payload.extend_from_slice(network_id.as_bytes());
-        payload.extend_from_slice(segment_id.as_bytes());
         payload.extend_from_slice(&(ticket_id.len() as u32).to_be_bytes());
         payload.extend_from_slice(ticket_id.as_bytes());
         payload.extend_from_slice(&(operator_transport_peer_id.len() as u32).to_be_bytes());
@@ -926,22 +910,15 @@ mod tests {
 
         let signer = Ed25519Signer::from_seed([0x42; 32]);
         let network = NetworkId::from_bytes([0x11; 32]);
-        let segment = derive_ticket_segment_id(&network, "FTQ-test");
         let challenge = [0x33; 32];
-        let payload = ShellNextHandshake::signing_payload(
-            &network,
-            &segment,
-            "FTQ-test",
-            "transport-peer",
-            &challenge,
-        );
+        let payload =
+            ShellNextHandshake::signing_payload(&network, "FTQ-test", "transport-peer", &challenge);
         let signature = signer.sign(&payload).unwrap();
         let verifier = Ed25519Verifier::from_public_key(&signer.public_key()).unwrap();
         verifier.verify(&payload, &signature).unwrap();
 
         let tampered = ShellNextHandshake::signing_payload(
             &network,
-            &segment,
             "FTQ-other",
             "transport-peer",
             &challenge,

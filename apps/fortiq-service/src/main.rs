@@ -205,7 +205,6 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
 
     tracing::info!("FORTIQ Service starting: mode={mode}, peer_id={peer_id}");
 
-
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
     let mut local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
     local_info.authorized_operator = config.authorization.operator_peer_id.clone();
@@ -337,7 +336,6 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
         }
     });
 
-
     let options = RunOptions {
         config,
         listen_address,
@@ -401,5 +399,4 @@ mod tests {
         let second = instance_lock_path_for(Path::new("fortiq-second.toml"));
         assert_ne!(first, second);
     }
-
 }

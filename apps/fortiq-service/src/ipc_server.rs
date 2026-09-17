@@ -1271,15 +1271,12 @@ where
             session.cancellation_token.clone(),
         )
     };
-    let segment_id = fortiq_shell::derive_ticket_segment_id(&certificate.network_id, &ticket_id);
-
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     if p2p_sender
         .send(fortiq_p2p::P2pCommand::OpenShellNext(Box::new(
             fortiq_p2p::OpenShellNextCommand {
                 peer: target_peer,
                 ticket_id,
-                segment_id,
                 certificate,
                 session_signer,
                 dial: dial_addr,
