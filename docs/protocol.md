@@ -144,10 +144,10 @@ Sender                                                      Receiver
 ### 4.5. Ticket Administration (`/fortiq/ticket/next`)
 - Coordinates ticket state events (`TicketCreated`, `TicketStateChanged`, `TicketCryptoEpochRotated`).
 - Tickets are created solely by managed clients.
-- Clients issue an `AccessEpoch` token when granting remote intervention permissions.
+- Ticket creation establishes the support authorization scope; Operator/Admin lifecycle state controls shell availability.
 
-### 4.6. Shell Protocol (`/fortiq/shell/next`)
-- **Admission Gate:** Requires `TicketState` $\in \{\text{OPEN}, \text{IN\_PROGRESS}\}$, active local `TicketAccessEpoch`, and a valid unexpired `OperatorSessionCertificate`.
+### 4.6. Shell Protocol (`/fortiq/shell/3.0`)
+- **Admission Gate:** Requires `TicketState` $\in \{\text{OPEN}, \text{IN\_PROGRESS}\}$ and a valid unexpired `OperatorSessionCertificate` with `SHELL_EXEC` capability.
 - **Pseudoterminal Allocation:** Uses `portable-pty` (ConPTY on Windows, openpty on Unix).
 - **Binary Framing:** Framed using `ShellFrame` packets with a 3-byte header (`tag: u8`, `len: u16` big-endian):
   - `0x00` (`Data`): Terminal byte stream (up to 64 KiB payload).
@@ -155,12 +155,9 @@ Sender                                                      Receiver
   - `0x02` (`Ping`): Keepalive telemetry sent every 15s.
   - `0x03` (`Pong`): Keepalive response.
 - **Liveness Guard:** A 60-second inactivity timeout drops abandoned shell sessions and kills child processes.
-- **Synchronous Client Revocation:** When a client revokes access or closes the ticket:
-  1. Local `AccessEpoch` is immediately deleted from memory.
-  2. Local shell process tree is terminated with extreme prejudice (`SIGKILL` / `TerminateProcess`).
-  3. Revocation event is fsynced to disk and dispatched to the network.
-- **Session Certificate Lifecycle:** Operator lock or certificate expiry cancels active terminal forwarding and prevents an in-flight shell handshake from completing. The managed node re-reads the ticket immediately before authorization, so close, revoke, and epoch rotation during the handshake fail closed.
-- **Legacy Rejection:** `/fortiq/shell/2.0` is disabled. Clients must use `/fortiq/shell/next` through the service IPC path.
+- **Lifecycle Cancellation:** `RESOLVED` and `CLOSED` cancel active sessions; `RESOLVED -> IN_PROGRESS` permits a new session, while `CLOSED` is terminal.
+- **Session Certificate Lifecycle:** Operator lock or certificate expiry cancels active terminal forwarding and prevents an in-flight shell handshake from completing. The managed node re-reads ticket lifecycle immediately before authorization.
+- **Legacy Rejection:** `/fortiq/shell/next` and `/fortiq/shell/2.0` are disabled after the v4 wire cut; clients must use `/fortiq/shell/3.0`.
 
 ---
 

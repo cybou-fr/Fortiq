@@ -1,12 +1,10 @@
 # Ticket Reducer
 
-Conceptual safety state:
+Conceptual lifecycle state:
 
 ```rust
 struct TicketSafetyState {
     ticket_id: TicketId,
-    access_epoch: AccessEpoch,
-    access_valid: bool,
     lifecycle: TicketLifecycle,
 }
 
@@ -22,22 +20,24 @@ Rules:
 
 ```text
 TicketCreated(client)
-  -> OPEN, new AccessEpoch, valid=true
+  -> OPEN
 
 TicketInProgress(operator)
-  -> IN_PROGRESS if epoch still valid
+  -> IN_PROGRESS
 
 TicketResolved(operator)
-  -> RESOLVED, valid=false
+  -> RESOLVED, terminate active shells
 
-TicketClosed(client|operator)
-  -> CLOSED, valid=false
+TicketClosed(operator|admin)
+  -> CLOSED, terminate active shells
 
-ClientAccessRevoked(client)
-  -> valid=false immediately
+TicketResolved(operator)
+  -> IN_PROGRESS is allowed when the operator resumes work
 
-TicketReopenedByClient(client)
-  -> new AccessEpoch, OPEN, valid=true
+CLOSED
+  -> terminal; create a new ticket for new work
 ```
 
-No event authored only by Operator/Admin may change `valid=false` back to `true` for an old AccessEpoch.
+Shell admission is exactly `lifecycle in {OPEN, IN_PROGRESS}` plus a valid
+Owner-signed Operator Session. `TicketCryptoEpoch` remains an encryption-key
+rotation mechanism and has no relationship to shell authorization.

@@ -32,7 +32,6 @@ export component AppWindow inherits Window {
     in-out property <string> selected-ticket-title: "";
     in-out property <int> selected-ticket-priority: 2;
     in-out property <string> selected-ticket-state: "OPEN";
-    in-out property <string> selected-ticket-epoch: "";
     in-out property <[ChatMessageItem]> ticket-messages: [];
     in-out property <[AttachmentItem]> ticket-files: [];
 
@@ -65,7 +64,6 @@ export component AppWindow inherits Window {
     callback pick-and-send-file();
     callback start-shell();
     callback close-shell();
-    callback revoke-shell();
     callback send-terminal-input(string);
     callback unlock-operator(string);
     callback lock-operator();
@@ -109,7 +107,6 @@ export component AppWindow inherits Window {
                     ticket-title: root.selected-ticket-title;
                     priority: root.selected-ticket-priority;
                     state: root.selected-ticket-state;
-                    epoch: root.selected-ticket-epoch;
                     messages: root.ticket-messages;
                     files: root.ticket-files;
                     terminal-connected: root.terminal-connected;
@@ -120,7 +117,6 @@ export component AppWindow inherits Window {
                     pick-file => { root.pick-and-send-file(); }
                     start-shell => { root.start-shell(); }
                     close-shell => { root.close-shell(); }
-                    revoke-shell => { root.revoke-shell(); }
                     send-terminal-input(str) => { root.send-terminal-input(str); }
                 }
             }

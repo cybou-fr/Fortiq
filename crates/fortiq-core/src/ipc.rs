@@ -107,10 +107,6 @@ pub enum IpcRequest {
         ticket_id: String,
         state: crate::TicketState,
     },
-    SetRemoteAccess {
-        ticket_id: String,
-        enabled: bool,
-    },
     SendChatMessage {
         ticket_id: String,
         body: String,
@@ -129,15 +125,12 @@ pub enum IpcRequest {
         ticket_id: String,
     },
 
-    // Canonical Operator Authority & Access Epoch additions:
+    // Canonical Operator Authority:
     UnlockOperator {
         mnemonic: String,
     },
     LockOperator,
     GetOperatorStatus,
-    RevokeTicketAccess {
-        ticket_id: String,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

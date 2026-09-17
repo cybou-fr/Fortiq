@@ -2,18 +2,18 @@
 //!
 //! Hard Invariants & Specifications (docs/spec/09-ticket-state-and-shell-safety.md):
 //! - Operator presents authenticated session challenge response signed with Operator Key.
-//! - Challenge binds `ticket_id`, `client_access_epoch`, `session_id`, and `challenge_nonce`.
-//! - Domain separation: `b"FORTIQ-SHELL-CHALLENGE-v1:"`.
+//! - Challenge binds `ticket_id`, `session_id`, and `challenge_nonce`.
+//! - Domain separation: `b"FORTIQ-SHELL-CHALLENGE-v2:"`.
 
 use crate::canonical::codec::serde_bytes;
 use crate::canonical::signing::{Signer, SigningError, Verifier};
-use crate::canonical::types::{AccessEpoch, EntityId, KeyId, TicketId};
+use crate::canonical::types::{EntityId, KeyId, TicketId};
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Domain separation string for shell authentication challenge.
-pub const SHELL_CHALLENGE_DOMAIN: &[u8] = b"FORTIQ-SHELL-CHALLENGE-v1:";
+pub const SHELL_CHALLENGE_DOMAIN: &[u8] = b"FORTIQ-SHELL-CHALLENGE-v2:";
 
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum ShellAuthError {
@@ -21,10 +21,6 @@ pub enum ShellAuthError {
     Signing(String),
     #[error("signature verification failed: {0}")]
     VerificationFailed(String),
-    #[error("access epoch mismatch: ticket requires {0}, operator presented {1}")]
-    EpochMismatch(AccessEpoch, AccessEpoch),
-    #[error("access epoch {0} has been permanently revoked")]
-    EpochRevoked(AccessEpoch),
     #[error("ticket {0} does not permit shell access: state is closed or inactive")]
     TicketStateClosed(TicketId),
     #[error("session revoked immediately by client: {0}")]
@@ -42,13 +38,12 @@ impl From<SigningError> for ShellAuthError {
 pub struct ShellChallenge {
     pub session_id: [u8; 16],
     pub ticket_id: TicketId,
-    pub client_access_epoch: AccessEpoch,
     pub challenge_nonce: [u8; 32],
 }
 
 impl ShellChallenge {
-    /// Generates a fresh random challenge bound to a ticket and active access epoch.
-    pub fn new(ticket_id: TicketId, client_access_epoch: AccessEpoch) -> Self {
+    /// Generates a fresh random challenge bound to a ticket.
+    pub fn new(ticket_id: TicketId) -> Self {
         let mut session_id = [0u8; 16];
         let mut challenge_nonce = [0u8; 32];
         OsRng.fill_bytes(&mut session_id);
@@ -57,18 +52,16 @@ impl ShellChallenge {
         Self {
             session_id,
             ticket_id,
-            client_access_epoch,
             challenge_nonce,
         }
     }
 
     /// Computes the domain-separated bytes to be signed by the operator.
     pub fn compute_signing_payload(&self) -> Vec<u8> {
-        let mut payload = Vec::with_capacity(SHELL_CHALLENGE_DOMAIN.len() + 16 + 16 + 16 + 32);
+        let mut payload = Vec::with_capacity(SHELL_CHALLENGE_DOMAIN.len() + 16 + 16 + 32);
         payload.extend_from_slice(SHELL_CHALLENGE_DOMAIN);
         payload.extend_from_slice(&self.session_id);
         payload.extend_from_slice(self.ticket_id.as_bytes());
-        payload.extend_from_slice(self.client_access_epoch.as_bytes());
         payload.extend_from_slice(&self.challenge_nonce);
         payload
     }

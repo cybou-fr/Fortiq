@@ -7,7 +7,6 @@ export component TerminalPane inherits Rectangle {
     in-out property <string> input-line: "";
     callback start-shell-clicked();
     callback close-shell-clicked();
-    callback revoke-shell-clicked();
     callback send-input(string);
 
     background: #09111d;
@@ -83,26 +82,6 @@ export component TerminalPane inherits Rectangle {
                         }
                     }
 
-                    // Emergency Revocation Button
-                    Rectangle {
-                        width: 140px;
-                        height: 30px;
-                        border-radius: FortiqTheme.radius-sm;
-                        background: revoke-touch.has-hover ? FortiqTheme.danger-hover : FortiqTheme.danger;
-
-                        revoke-touch := TouchArea {
-                            clicked => { root.revoke-shell-clicked(); }
-                        }
-
-                        Text {
-                            text: "Révocation d'urgence";
-                            color: #ffffff;
-                            font-size: 11px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
                 }
             }
         }

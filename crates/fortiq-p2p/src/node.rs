@@ -14,7 +14,7 @@ use fortiq_core::{
         portable::certificate::OperatorSessionCertificate,
         retirement::authority::CanonicalAuthorityResolver,
         signing::{derive_signing_key_id, Ed25519Signer, Ed25519Verifier, Verifier},
-        types::{AccessEpoch, SegmentId},
+        types::SegmentId,
     },
     Config, NodeInfo, TicketStore,
 };
@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 pub const HELLO_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/hello/1.0");
-pub const SHELL_PROTOCOL_NEXT: StreamProtocol = StreamProtocol::new("/fortiq/shell/next");
+pub const SHELL_PROTOCOL_V3: StreamProtocol = StreamProtocol::new("/fortiq/shell/3.0");
 pub const TICKET_PROTOCOL_V3: StreamProtocol = StreamProtocol::new("/fortiq/ticket/3.0");
 pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/2.0");
 pub const FILE_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/file/2.0");
@@ -58,10 +58,6 @@ pub enum TicketSyncRequest {
     UpdateStatus {
         ticket_id: String,
         state: fortiq_core::TicketState,
-    },
-    SetRemoteAccess {
-        ticket_id: String,
-        enabled: bool,
     },
 }
 
@@ -132,7 +128,6 @@ struct PendingTicketSync {
 
 struct PendingShellNext {
     ticket_id: String,
-    access_epoch: AccessEpoch,
     segment_id: SegmentId,
     certificate: OperatorSessionCertificate,
     session_signer: Arc<Ed25519Signer>,
@@ -143,7 +138,6 @@ struct PendingShellNext {
 pub struct OpenShellNextCommand {
     pub peer: PeerId,
     pub ticket_id: String,
-    pub access_epoch: AccessEpoch,
     pub segment_id: SegmentId,
     pub certificate: OperatorSessionCertificate,
     pub session_signer: Arc<Ed25519Signer>,
@@ -154,9 +148,7 @@ pub struct OpenShellNextCommand {
 fn is_ticket_mutation(request: &TicketSyncRequest) -> bool {
     matches!(
         request,
-        TicketSyncRequest::PushTicket(_)
-            | TicketSyncRequest::UpdateStatus { .. }
-            | TicketSyncRequest::SetRemoteAccess { .. }
+        TicketSyncRequest::PushTicket(_) | TicketSyncRequest::UpdateStatus { .. }
     )
 }
 
@@ -464,7 +456,6 @@ fn spawn_open_shell_next(
     peer: PeerId,
     local_peer: PeerId,
     ticket_id: String,
-    access_epoch: AccessEpoch,
     segment_id: SegmentId,
     certificate: OperatorSessionCertificate,
     session_signer: Arc<Ed25519Signer>,
@@ -476,7 +467,7 @@ fn spawn_open_shell_next(
         let result = async {
             let mut stream = tokio::time::timeout(
                 Duration::from_secs(12),
-                control.open_stream(peer, SHELL_PROTOCOL_NEXT),
+                control.open_stream(peer, SHELL_PROTOCOL_V3),
             )
             .await
             .map_err(|_| "Délai d'attente dépassé pour /fortiq/shell/next".to_string())?
@@ -491,7 +482,6 @@ fn spawn_open_shell_next(
                 certificate.network_id,
                 segment_id,
                 ticket_id,
-                access_epoch,
                 local_peer.to_string(),
                 certificate,
                 &challenge,
@@ -857,7 +847,7 @@ pub async fn run(
 
     let mut stream_control = swarm.behaviour().stream.new_control();
     let incoming_shells_next = stream_control
-        .accept(SHELL_PROTOCOL_NEXT)
+        .accept(SHELL_PROTOCOL_V3)
         .context("shell next protocol already registered")?;
     let incoming_files = stream_control
         .accept(FILE_PROTOCOL)
@@ -976,7 +966,6 @@ async fn event_loop(
                         let OpenShellNextCommand {
                             peer,
                             ticket_id,
-                            access_epoch,
                             segment_id,
                             certificate,
                             session_signer,
@@ -988,7 +977,6 @@ async fn event_loop(
                                 peer,
                                 local_info.peer_id.parse().expect("local PeerId"),
                                 ticket_id,
-                                access_epoch,
                                 segment_id,
                                 certificate,
                                 session_signer,
@@ -1001,7 +989,6 @@ async fn event_loop(
                                 .or_default()
                                 .push(PendingShellNext {
                                     ticket_id,
-                                    access_epoch,
                                     segment_id,
                                     certificate,
                                     session_signer,
@@ -1197,7 +1184,6 @@ async fn event_loop(
                                 peer_id,
                                 local_info.peer_id.parse().expect("local PeerId"),
                                 request.ticket_id,
-                                request.access_epoch,
                                 request.segment_id,
                                 request.certificate,
                                 request.session_signer,
@@ -1680,19 +1666,6 @@ async fn handle_ticket_v2(
                             }
                         }
                     }
-                    TicketSyncRequest::SetRemoteAccess { ticket_id, .. } => {
-                        TicketSyncResponse::MutationRejected {
-                            kind: MutationRejectionKind::Permanent,
-                            message: "L'accès distant doit être modifié sur le client propriétaire"
-                                .to_string(),
-                            canonical: ticket_store
-                                .db()
-                                .get_ticket(&ticket_id)
-                                .ok()
-                                .flatten()
-                                .map(Box::new),
-                        }
-                    }
                 };
                 let _ = swarm
                     .behaviour_mut()
@@ -1895,17 +1868,6 @@ async fn handle_incoming_shell_next(
             return;
         }
     };
-    let active_epoch = match AccessEpoch::from_hex(&ticket.access_epoch) {
-        Ok(epoch) => epoch,
-        Err(_) => {
-            let _ = fortiq_shell::send_authorization_code(
-                &mut stream,
-                fortiq_shell::DENIED_EPOCH_MISMATCH,
-            )
-            .await;
-            return;
-        }
-    };
     let expected_segment =
         fortiq_shell::derive_ticket_segment_id(&genesis.tbs.network_id, &ticket.id);
     let now = std::time::SystemTime::now()
@@ -1924,7 +1886,6 @@ async fn handle_incoming_shell_next(
         &handshake.network_id,
         &handshake.segment_id,
         &handshake.ticket_id,
-        &handshake.access_epoch,
         &handshake.operator_transport_peer_id,
         &challenge,
     );
@@ -1942,12 +1903,10 @@ async fn handle_incoming_shell_next(
             .session_certificate
             .capabilities
             .has(fortiq_core::canonical::portable::certificate::OperatorCapabilities::SHELL_EXEC)
-        && CanonicalAuthorityResolver::authorize_shell_execution(
+        && CanonicalAuthorityResolver::verify_operator_session(
             &handshake.session_certificate,
             &owner_verifier,
             now,
-            &handshake.access_epoch,
-            &active_epoch,
         )
         .is_ok()
         && session_verifier
@@ -1967,44 +1926,18 @@ async fn handle_incoming_shell_next(
             return;
         }
     };
-    let current_epoch = match AccessEpoch::from_hex(&ticket.access_epoch) {
-        Ok(epoch) => epoch,
-        Err(_) => {
-            let _ = fortiq_shell::send_authorization_code(
-                &mut stream,
-                fortiq_shell::DENIED_EPOCH_MISMATCH,
-            )
-            .await;
-            return;
-        }
-    };
     if !authority_valid {
-        let code = if handshake.access_epoch != current_epoch {
-            fortiq_shell::DENIED_EPOCH_MISMATCH
-        } else {
-            fortiq_shell::DENIED_INVALID_AUTHORITY
-        };
-        let _ = fortiq_shell::send_authorization_code(&mut stream, code).await;
-        return;
-    }
-    if handshake.access_epoch != current_epoch {
-        let _ =
-            fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_EPOCH_MISMATCH)
-                .await;
+        let _ = fortiq_shell::send_authorization_code(
+            &mut stream,
+            fortiq_shell::DENIED_INVALID_AUTHORITY,
+        )
+        .await;
         return;
     }
     if ticket.client_peer_id != local_info.peer_id || !ticket.state.permits_work() {
         let _ =
             fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_TICKET_CLOSED)
                 .await;
-        return;
-    }
-    if !ticket.remote_access_enabled {
-        let _ = fortiq_shell::send_authorization_code(
-            &mut stream,
-            fortiq_shell::DENIED_REMOTE_ACCESS_DISABLED,
-        )
-        .await;
         return;
     }
     if active_shells
@@ -2040,7 +1973,6 @@ async fn handle_incoming_shell_next(
         );
         let watcher_db = db.clone();
         let watched_ticket = ticket_id.clone();
-        let watched_epoch = active_epoch;
         let result = tokio::select! {
             result = fortiq_shell::serve(stream, info) => result,
             () = async move {
@@ -2048,15 +1980,13 @@ async fn handle_incoming_shell_next(
                     tokio::time::sleep(Duration::from_millis(250)).await;
                     let valid = watcher_db.get_ticket(&watched_ticket).ok().flatten().is_some_and(|ticket| {
                         ticket.state.permits_work()
-                            && ticket.remote_access_enabled
-                            && AccessEpoch::from_hex(&ticket.access_epoch).ok() == Some(watched_epoch)
                     }) && std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs() < watched_certificate_expires_at;
                     if !valid { break; }
                 }
-            } => Err(anyhow::anyhow!("ticket access epoch was revoked")),
+            } => Err(anyhow::anyhow!("ticket lifecycle or operator session expired")),
         };
         let _ = db.record_shell_session_end(
             &session_id,

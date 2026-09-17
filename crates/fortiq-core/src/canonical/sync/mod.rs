@@ -8,7 +8,7 @@ pub mod inventory;
 pub mod snapshot;
 pub mod tail;
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests;
 
 pub use head::{

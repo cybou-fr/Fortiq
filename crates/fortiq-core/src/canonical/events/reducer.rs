@@ -151,14 +151,8 @@ pub fn reduce_ticket_with_resolver(
 
         for event in &plaintext.events {
             match event {
-                LogicalEvent::TicketCreated {
-                    title,
-                    initial_access_epoch,
-                    ..
-                } => {
-                    let access_epoch = *initial_access_epoch;
-
-                    let safety = TicketSafetyState::new_client_open(ticket_id, access_epoch);
+                LogicalEvent::TicketCreated { title, .. } => {
+                    let safety = TicketSafetyState::new_client_open(ticket_id);
                     view = Some(TicketView {
                         ticket_id,
                         title: title.clone(),
@@ -206,9 +200,7 @@ pub fn reduce_ticket_with_resolver(
                         });
                     }
                 }
-                LogicalEvent::AccessEpochRevoked { .. }
-                | LogicalEvent::AccessEpochGranted { .. }
-                | LogicalEvent::TicketStateChanged { .. } => {
+                LogicalEvent::TicketStateChanged { .. } => {
                     if let Some(v) = &mut view {
                         v.safety.apply_transition(role, event);
                     }

@@ -63,8 +63,8 @@ FORTIQ-Client-Setup-<version>-x64.exe
 
 The wizard may request the compatibility Operator PeerId for discovery and
 ticket routing. This value is not a shell authorization grant. The current
-runtime authorizes shell access through `/fortiq/shell/next`, an Owner-signed
-operator session certificate, and the client-owned ticket AccessEpoch.
+runtime authorizes shell access through `/fortiq/shell/3.0`, an Owner-signed
+operator session certificate, and an active ticket lifecycle.
 
 The complete installer:
 - Copies binaries to `C:\Program Files\FORTIQ\`
@@ -84,12 +84,11 @@ Open PowerShell or Command Prompt:
 fortiq status
 fortiq id
 
-# 7. Create a support ticket (remote access remains disabled)
+# 7. Create a support ticket (ticket creation establishes the support scope)
 fortiq ticket create --title "Manual acceptance test" --priority NORMAL
 
-# 8. Note the FTQ ticket ID, then explicitly enable terminal access
+# 8. Note the FTQ ticket ID
 fortiq ticket list
-fortiq ticket access <TICKET_ID> true
 ```
 
 The same ticket and consent controls are available in the managed Desktop application.
@@ -151,7 +150,7 @@ fortiq shell <MANAGED_PEER_ID> --ticket-id <TICKET_ID> --command "Get-Service Fo
 fortiq ticket set-status <TICKET_ID> CLOSED
 ```
 
-### Verify Access is Revoked
+### Verify Lifecycle Closes Shell Access
 
 Back on the managed machine (or from the operator):
 
@@ -161,7 +160,7 @@ fortiq ticket show <TICKET_ID>
 
 # 16. Attempt to connect again as operator (must be denied)
 fortiq shell <MANAGED_PEER_ID> --ticket-id <TICKET_ID>
-# Expected output: Connection closed by remote host (Ticket CLOSED / Unauthorized)
+# Expected output: Connection closed by remote host (Ticket CLOSED / inactive)
 ```
 
 ---

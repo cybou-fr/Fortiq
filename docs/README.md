@@ -1,12 +1,12 @@
 # FORTIQ Documentation Catalog
 
-Welcome to the FORTIQ documentation suite. The architecture and protocol are defined by **Canonical Architecture v3**. The current development runtime uses the versioned `FortiqClassicalDev1` profile; the post-quantum `FortiqPq1` profile is a reserved target, not a deployed security claim.
+Welcome to the FORTIQ documentation suite. The architecture and protocol are defined by **Canonical Architecture v4**. The current development runtime uses the versioned `FortiqClassicalDev1` profile; the post-quantum `FortiqPq1` profile is a reserved target, not a deployed security claim.
 
 ---
 
 ## 1. High-Level Documentation
 
-- **[Canonical v3 Charter & Invariants](CANONICAL_README.md)**: Original canonical v3 charter and core statement.
+- **[Canonical v4 Charter & Invariants](CANONICAL_README.md)**: Canonical v4 charter and core statement.
 - **[Architecture Specification](architecture.md)**: System overview, L0–L9 layered architecture, 20 Hard Invariants, identity lifecycle, and ticket safety.
 - **[Protocol Specification](protocol.md)**: Wire protocols (`/fortiq/*`), deterministic CBOR array encoding, deployed and reserved crypto profiles, shell/next authorization, and shard streaming.
 - **[Milestones & Roadmap](milestones.md)**: Prototype baseline (M0–M15) and Canonical v3 Implementation Roadmap (Phases 1–15).
@@ -24,9 +24,10 @@ All foundational architectural decisions are formally documented in dedicated AD
 | **[ADR-001](adr/ADR-001-genesis-owner-signing-only.md)** | Genesis Owner Signing Only | Genesis pins Owner Root signing identity; no universal owner support-data HPKE decryption key. |
 | **[ADR-002](adr/ADR-002-eventpacks.md)** | EventPacks | Amortizes post-quantum signature and HPKE envelope overhead across small event batches. |
 | **[ADR-003](adr/ADR-003-tiered-storage.md)** | Tiered Storage | Separates storage into control replication, bounded small-state replication, and streaming RS. |
-| **[ADR-004](adr/ADR-004-client-access-epoch.md)** | Client Access Epoch | Shell access is bound to client-owned access epoch; admin override cannot revive expired epochs. |
+| **[ADR-004](adr/ADR-004-client-access-epoch.md)** | Client Access Epoch (Superseded) | Historical v3 decision; superseded by ticket lifecycle authority in ADR-007. |
 | **[ADR-005](adr/ADR-005-one-payload-n-envelopes.md)** | One Payload, N Envelopes | Payloads are encrypted once with a random DEK; recipients receive independent HPKE envelopes. |
 | **[ADR-006](adr/ADR-006-placement-separate-from-content.md)** | Placement Separate from Content | Content addressing (`ObjectId`) is immutable and decoupled from dynamic shard placement. |
+| **[ADR-007](adr/ADR-007-ticket-lifecycle-shell-authority.md)** | Ticket Lifecycle Shell Authority | An active ticket and valid Operator Session are the sole ticket-level shell gates. |
 
 ---
 

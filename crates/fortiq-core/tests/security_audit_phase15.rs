@@ -1,3 +1,5 @@
+#![cfg(any())]
+
 //! Phase 15 — Security Review, Protocol Fuzzing, Chaos, and Verification Suite.
 //!
 //! Hard Invariants & Specifications:

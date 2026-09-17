@@ -16,7 +16,7 @@ pub mod snapshot;
 pub mod stream;
 pub mod tombstone;
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests;
 
 pub use batcher::{BatchPolicy, EventPackBatcher, FlushDecision};

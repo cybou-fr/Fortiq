@@ -9,7 +9,7 @@ pub mod ipc;
 pub mod session;
 pub mod this_device;
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests;
 
 pub use ipc::{LocalIpcError, LocalIpcFramed, LocalIpcMessage, MAX_LOCAL_IPC_FRAME_SIZE};

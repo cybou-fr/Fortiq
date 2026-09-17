@@ -482,6 +482,6 @@ mod tests {
         assert_eq!(tickets.len(), 1);
         assert_eq!(tickets[0].client_peer_id, client);
         assert_eq!(tickets[0].operator_peer_id, operator);
-        assert!(!tickets[0].remote_access_enabled);
+        assert_eq!(tickets[0].state, fortiq_core::TicketState::Open);
     }
 }

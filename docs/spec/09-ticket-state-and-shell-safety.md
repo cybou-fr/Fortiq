@@ -1,67 +1,59 @@
-# 09 — Ticket State and Shell Safety
+# 09 - Ticket State and Shell Authority
+
+**Canonical v4 status:** This specification supersedes the v3 AccessEpoch shell
+model. See [ADR-007](../adr/ADR-007-ticket-lifecycle-shell-authority.md).
 
 ## Ticket creation
 
-Only Client may create a ticket.
+Only the Client creates a support ticket. Creation establishes the support
+authorization scope and starts the ticket in `OPEN`.
 
-Ticket creation establishes:
+## Shell admission
 
-```text
-TicketId
-AccessEpoch = random 128/256-bit value
-State = OPEN
-```
-
-## Shell capability
-
-For MVP:
+Shell access is allowed exactly when:
 
 ```text
-ticket state is OPEN or IN_PROGRESS
-AND AccessEpoch is locally valid
-AND operator == authorized Owner/Operator
-AND Operator Session valid
+Ticket exists on target Client
+AND TicketState is OPEN or IN_PROGRESS
+AND Owner-signed OperatorSessionCertificate is valid
+AND certificate has SHELL_EXEC capability
+AND target/network/transport bindings verify
+AND fresh challenge signature verifies
 => shell may be opened
 ```
 
-## Client close
+There is no separate `AccessEpoch`, `remote_access_enabled`, consent token, or
+client-side revoke command.
 
-Client close is safety-critical:
+## Lifecycle transitions
 
-1. write/fsync a client-signed close/revoke event locally;
-2. atomically invalidate local AccessEpoch;
-3. terminate active shell immediately;
-4. replicate the event asynchronously.
-
-Distributed convergence is not required before local access disappears.
-
-## Reopen
-
-Only Client can create:
+Operator/Admin sessions own ticket lifecycle transitions:
 
 ```text
-TicketReopened {
-  previous_ticket_id,
-  new_access_epoch
-}
+OPEN         -> IN_PROGRESS | RESOLVED | CLOSED
+IN_PROGRESS  -> RESOLVED | CLOSED
+RESOLVED     -> IN_PROGRESS | CLOSED
+CLOSED       -> terminal
 ```
 
-or an equivalent new epoch for the same TicketId.
+`RESOLVED` and `CLOSED` terminate active shell sessions. Returning `RESOLVED`
+to `IN_PROGRESS` permits a new shell because lifecycle is the authority. A new
+ticket is required after `CLOSED`.
 
-Operator cannot restore a dead access epoch.
+## Session termination
 
-## Operator state actions
+Active sessions terminate when:
 
-Operator may:
-- take ticket;
-- set IN_PROGRESS;
-- set RESOLVED;
-- close ticket.
+- the ticket transitions to `RESOLVED` or `CLOSED`;
+- the operator locks or replaces the local session;
+- the session certificate expires;
+- the P2P stream or daemon closes.
 
-An operator RESOLVED/CLOSED transition also disables its own shell access.
+The managed node re-reads ticket lifecycle immediately before handshake
+admission and watches it throughout the active session.
 
-## Admin tombstone interaction
+## Related epochs
 
-Even if Admin tombstones/hides an old client close event from distributed presentation history, the Client daemon MUST NOT treat the old AccessEpoch as valid again.
-
-Only a new client-signed reopen creates access.
+`TicketCryptoEpoch`, `KeyEpoch`, and other encryption-key epochs remain valid
+cryptographic rotation mechanisms. They have no relationship to shell
+authorization.

@@ -126,12 +126,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    {
-        let tx = cmd_tx.clone();
-        app.on_revoke_shell(move || {
-            let _ = tx.blocking_send(DesktopCommand::RevokeShell);
-        });
-    }
+    {}
 
     {
         let tx = cmd_tx.clone();
@@ -237,7 +232,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_selected_ticket_title(d.title.into());
                         ui.set_selected_ticket_priority(d.priority as i32);
                         ui.set_selected_ticket_state(d.state.into());
-                        ui.set_selected_ticket_epoch(d.access_epoch.unwrap_or_default().into());
                         let msgs: Vec<ChatMessageItem> = d
                             .messages
                             .into_iter()

@@ -746,6 +746,12 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             ticket_id,
             state: new_state,
         } => {
+            if !is_operator_authorized(state).await {
+                return IpcResponse::Error(
+                    "Seule une session Operator/Admin active peut modifier le cycle de vie du ticket"
+                        .to_string(),
+                );
+            }
             let local_peer_id = state.peer_id.to_string();
             let current = match state.ticket_store.db().get_ticket(&ticket_id) {
                 Ok(Some(ticket)) => ticket,
@@ -821,56 +827,6 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     IpcResponse::TicketUpdated(updated)
                 }
                 Err(e) => IpcResponse::Error(format!("Échec de mise à jour du statut: {e}")),
-            }
-        }
-        IpcRequest::SetRemoteAccess { ticket_id, enabled } => {
-            let local_peer_id = state.peer_id.to_string();
-            let is_client = state
-                .ticket_store
-                .db()
-                .get_ticket(&ticket_id)
-                .ok()
-                .flatten()
-                .is_some_and(|ticket| ticket.client_peer_id == local_peer_id);
-            if !is_client {
-                return IpcResponse::Error(
-                    "Seul le client propriétaire du ticket peut modifier l'accès à distance"
-                        .to_string(),
-                );
-            }
-            match state
-                .ticket_store
-                .db()
-                .set_remote_access(&ticket_id, enabled, &local_peer_id)
-            {
-                Ok(updated) => {
-                    if let Some(ref ticket) = updated {
-                        let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
-                            &ticket.operator_peer_id
-                        } else {
-                            &ticket.client_peer_id
-                        };
-                        if let Ok(peer) = target_str.parse::<PeerId>() {
-                            if let Some(ref sender) = state.p2p_sender {
-                                let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
-                                let _ = sender
-                                    .send(fortiq_p2p::P2pCommand::SyncTickets {
-                                        peer,
-                                        dial: None,
-                                        request: fortiq_p2p::TicketSyncRequest::PushTicket(
-                                            Box::new(ticket.clone()),
-                                        ),
-                                        reply: reply_tx,
-                                    })
-                                    .await;
-                            }
-                        }
-                    }
-                    IpcResponse::TicketUpdated(updated)
-                }
-                Err(e) => {
-                    IpcResponse::Error(format!("Échec de configuration de l'accès à distance: {e}"))
-                }
             }
         }
         IpcRequest::SendChatMessage { ticket_id, body } => {
@@ -1211,55 +1167,6 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 capabilities: Vec::new(),
             })
         }
-        IpcRequest::RevokeTicketAccess { ticket_id } => {
-            let local_peer_id = state.peer_id.to_string();
-            let current = match state.ticket_store.db().get_ticket(&ticket_id) {
-                Ok(Some(t)) => t,
-                Ok(None) => return IpcResponse::Error("Ticket introuvable".to_string()),
-                Err(e) => return IpcResponse::Error(format!("Erreur: {e}")),
-            };
-            let is_participant = current.client_peer_id == local_peer_id
-                || current.operator_peer_id == local_peer_id
-                || is_operator_authorized(state).await;
-            if !is_participant {
-                return IpcResponse::Error(
-                    "Non autorisé à révoquer l'accès pour ce ticket".to_string(),
-                );
-            }
-
-            match state
-                .ticket_store
-                .db()
-                .set_remote_access(&ticket_id, false, &local_peer_id)
-            {
-                Ok(updated) => {
-                    if let Some(ref ticket) = updated {
-                        let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
-                            &ticket.operator_peer_id
-                        } else {
-                            &ticket.client_peer_id
-                        };
-                        if let Ok(peer) = target_str.parse::<PeerId>() {
-                            if let Some(ref sender) = state.p2p_sender {
-                                let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
-                                let _ = sender
-                                    .send(fortiq_p2p::P2pCommand::SyncTickets {
-                                        peer,
-                                        dial: None,
-                                        request: fortiq_p2p::TicketSyncRequest::PushTicket(
-                                            Box::new(ticket.clone()),
-                                        ),
-                                        reply: reply_tx,
-                                    })
-                                    .await;
-                            }
-                        }
-                    }
-                    IpcResponse::Success
-                }
-                Err(e) => IpcResponse::Error(format!("Échec de révocation d'accès: {e}")),
-            }
-        }
     }
 }
 
@@ -1340,7 +1247,7 @@ where
             return Ok(());
         }
     };
-    let ticket = match state.ticket_store.db().get_ticket(&ticket_id)? {
+    let _ticket = match state.ticket_store.db().get_ticket(&ticket_id)? {
         Some(ticket) => ticket,
         None => {
             ipc_write
@@ -1349,18 +1256,6 @@ where
             return Ok(());
         }
     };
-    let access_epoch =
-        match fortiq_core::canonical::types::AccessEpoch::from_hex(&ticket.access_epoch) {
-            Ok(epoch) => epoch,
-            Err(_) => {
-                ipc_write
-                    .write_all(
-                        b"{\"status\":\"error\",\"message\":\"AccessEpoch ticket invalide\"}\n",
-                    )
-                    .await?;
-                return Ok(());
-            }
-        };
     let (certificate, session_signer, cancellation_token) = {
         let session = state.operator_session.read().await;
         let Some(session) = session.as_ref() else {
@@ -1384,7 +1279,6 @@ where
             fortiq_p2p::OpenShellNextCommand {
                 peer: target_peer,
                 ticket_id,
-                access_epoch,
                 segment_id,
                 certificate,
                 session_signer,

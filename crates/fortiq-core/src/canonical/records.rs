@@ -1,6 +1,6 @@
 use crate::canonical::types::{
-    AccessEpoch, BlobId, CryptoProfileId, KeyId, NetworkId, ObjectId, RsProfile, SegmentId,
-    StorageClass, StreamId, TicketId,
+    BlobId, CryptoProfileId, KeyId, NetworkId, ObjectId, RsProfile, SegmentId, StorageClass,
+    StreamId, TicketId,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -120,7 +120,6 @@ pub enum LogicalEvent {
     TicketCreated {
         ticket_id: TicketId,
         title: String,
-        initial_access_epoch: AccessEpoch,
     },
     TicketStateChanged {
         ticket_id: TicketId,
@@ -142,14 +141,6 @@ pub enum LogicalEvent {
         blob_id: BlobId,
         filename: String,
         size_bytes: u64,
-    },
-    AccessEpochGranted {
-        ticket_id: TicketId,
-        access_epoch: [u8; 16],
-    },
-    AccessEpochRevoked {
-        ticket_id: TicketId,
-        access_epoch: [u8; 16],
     },
 }
 

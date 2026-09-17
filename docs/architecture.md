@@ -195,18 +195,13 @@ The support ticket is the central coordination entity for client assistance. Ter
    |                                                                |
 ```
 
-### AccessEpoch Model
-- Only the **Client** can issue an `AccessEpoch`.
+### Ticket Lifecycle Model
+- Creating a ticket establishes the support authorization scope. There is no separate shell consent token or `remote_access_enabled` switch.
 - Shell authorization requires:
-  $$\text{TicketState} \in \{\text{OPEN}, \text{IN\_PROGRESS}\} \;\land\; \text{AccessEpoch is locally valid} \;\land\; \text{Operator Session Valid}$$
-- **Immediate Local Revocation:** When the client user revokes access or closes the ticket, the client node executes local termination synchronously before transmitting the event to the network:
-  1. Fsyncs the revocation event to local persistent storage.
-  2. Kills the running ConPTY/PTY process tree immediately.
-  3. Purges the active `AccessEpoch` from memory and local reducer state.
-  4. Flushes the event as a high-priority single-event EventPack to the swarm.
-- **Administrative Override Boundaries:** Operator/Admin may publish state overrides (e.g. `TicketStatus::RESOLVED` or presentation tombstones), but administrative overrides **cannot** revive an invalidated `AccessEpoch`. Only a new client-signed event can create a new epoch.
-
-In the current runtime, the managed node revalidates the ticket and `AccessEpoch` immediately before admitting `/fortiq/shell/next`. Active sessions are watched for ticket closure, consent withdrawal, and epoch rotation; the operator service separately cancels terminal forwarding on lock or session expiry. Legacy `/fortiq/shell/2.0` is rejected.
+  $$\text{TicketState} \in \{\text{OPEN}, \text{IN\_PROGRESS}\} \;\land\; \text{Valid Operator Session}$$
+- The Client creates tickets, exchanges chat/files, and observes state. Operator/Admin sessions own lifecycle transitions.
+- `RESOLVED` and `CLOSED` terminate active shell sessions. `RESOLVED -> IN_PROGRESS` is allowed; `CLOSED` is terminal and requires a new ticket.
+- The managed node revalidates ticket lifecycle immediately before admitting `/fortiq/shell/next`. Legacy `/fortiq/shell/2.0` is rejected.
 
 ---
 

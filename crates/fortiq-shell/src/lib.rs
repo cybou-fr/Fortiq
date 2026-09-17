@@ -8,7 +8,7 @@ use fortiq_core::{
     canonical::{
         portable::certificate::OperatorSessionCertificate,
         signing::{Signer, SigningError},
-        types::{AccessEpoch, NetworkId, SegmentId},
+        types::{NetworkId, SegmentId},
     },
     NodeInfo,
 };
@@ -32,7 +32,7 @@ pub const DENIED_TICKET_CLOSED: u8 = 4;
 pub const DENIED_REMOTE_ACCESS_DISABLED: u8 = 5;
 pub const DENIED_INVALID_AUTHORITY: u8 = 6;
 pub const DENIED_EPOCH_MISMATCH: u8 = 7;
-pub const SHELL_NEXT_SIGNATURE_DOMAIN: &[u8] = b"FORTIQ-SHELL-NEXT-v1:";
+pub const SHELL_NEXT_SIGNATURE_DOMAIN: &[u8] = b"FORTIQ-SHELL-v3:";
 pub const TICKET_SEGMENT_ID_DOMAIN: &[u8] = b"FORTIQ-TICKET-SEGMENT-ID-v1:";
 
 pub fn derive_ticket_segment_id(network_id: &NetworkId, ticket_id: &str) -> SegmentId {
@@ -74,7 +74,6 @@ pub struct ShellNextHandshake {
     pub network_id: NetworkId,
     pub segment_id: SegmentId,
     pub ticket_id: String,
-    pub access_epoch: AccessEpoch,
     pub operator_transport_peer_id: String,
     pub session_certificate: OperatorSessionCertificate,
     pub challenge_signature: Vec<u8>,
@@ -86,7 +85,6 @@ impl ShellNextHandshake {
         network_id: NetworkId,
         segment_id: SegmentId,
         ticket_id: String,
-        access_epoch: AccessEpoch,
         operator_transport_peer_id: String,
         session_certificate: OperatorSessionCertificate,
         challenge: &[u8; 32],
@@ -96,7 +94,6 @@ impl ShellNextHandshake {
             &network_id,
             &segment_id,
             &ticket_id,
-            &access_epoch,
             &operator_transport_peer_id,
             challenge,
         );
@@ -105,7 +102,6 @@ impl ShellNextHandshake {
             network_id,
             segment_id,
             ticket_id,
-            access_epoch,
             operator_transport_peer_id,
             session_certificate,
             challenge_signature,
@@ -116,7 +112,6 @@ impl ShellNextHandshake {
         network_id: &NetworkId,
         segment_id: &SegmentId,
         ticket_id: &str,
-        access_epoch: &AccessEpoch,
         operator_transport_peer_id: &str,
         challenge: &[u8; 32],
     ) -> Vec<u8> {
@@ -126,7 +121,6 @@ impl ShellNextHandshake {
         payload.extend_from_slice(segment_id.as_bytes());
         payload.extend_from_slice(&(ticket_id.len() as u32).to_be_bytes());
         payload.extend_from_slice(ticket_id.as_bytes());
-        payload.extend_from_slice(access_epoch.as_bytes());
         payload.extend_from_slice(&(operator_transport_peer_id.len() as u32).to_be_bytes());
         payload.extend_from_slice(operator_transport_peer_id.as_bytes());
         payload.extend_from_slice(challenge);
@@ -933,13 +927,11 @@ mod tests {
         let signer = Ed25519Signer::from_seed([0x42; 32]);
         let network = NetworkId::from_bytes([0x11; 32]);
         let segment = derive_ticket_segment_id(&network, "FTQ-test");
-        let epoch = AccessEpoch::from_bytes([0x22; 16]);
         let challenge = [0x33; 32];
         let payload = ShellNextHandshake::signing_payload(
             &network,
             &segment,
             "FTQ-test",
-            &epoch,
             "transport-peer",
             &challenge,
         );
@@ -951,7 +943,6 @@ mod tests {
             &network,
             &segment,
             "FTQ-other",
-            &epoch,
             "transport-peer",
             &challenge,
         );

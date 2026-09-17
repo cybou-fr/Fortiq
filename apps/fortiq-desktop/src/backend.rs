@@ -105,9 +105,6 @@ impl BackendActor {
             DesktopCommand::CloseShell => {
                 self.close_shell().await;
             }
-            DesktopCommand::RevokeShell => {
-                self.revoke_shell().await;
-            }
             DesktopCommand::UnlockOperator(mnemonic) => {
                 self.unlock_operator(&mnemonic).await;
             }
@@ -282,7 +279,6 @@ impl BackendActor {
                     created_at: detail.ticket.created_at,
                     client_peer_id: detail.ticket.client_peer_id,
                     operator_peer_id: detail.ticket.operator_peer_id,
-                    access_epoch: None,
                     messages: msgs,
                     attachments,
                 };
@@ -520,33 +516,6 @@ impl BackendActor {
         if let Some(tx) = self.terminal_tx.take() {
             let _ = tx.send(TerminalCommand::Close).await;
             let _ = self.event_tx.send(DesktopEvent::ShellClosed).await;
-        }
-    }
-
-    async fn revoke_shell(&mut self) {
-        self.close_shell().await;
-        if let Some(ticket_id) = &self.selected_ticket_id {
-            match self
-                .ipc
-                .send_request(&IpcRequest::RevokeTicketAccess {
-                    ticket_id: ticket_id.clone(),
-                })
-                .await
-            {
-                Ok(_) => {
-                    let _ = self
-                        .event_tx
-                        .send(DesktopEvent::Notification {
-                            level: "warning".into(),
-                            message: "Accès distant révoqué immédiatement.".into(),
-                        })
-                        .await;
-                    self.handle_refresh().await;
-                }
-                Err(e) => {
-                    let _ = self.event_tx.send(DesktopEvent::Error(e.to_string())).await;
-                }
-            }
         }
     }
 

@@ -50,7 +50,7 @@ enum Commands {
         state: Option<String>,
     },
 
-    /// Manage support tickets, chat, files, and remote access.
+    /// Manage support tickets, chat, and files.
     Ticket {
         #[command(subcommand)]
         action: TicketCommand,
@@ -123,16 +123,6 @@ enum TicketCommand {
         path: std::path::PathBuf,
     },
 
-    /// Toggle remote access permission for a ticket.
-    Access {
-        /// Ticket ID.
-        ticket_id: String,
-
-        /// enable (true) or disable (false).
-        #[arg(value_parser = clap::builder::BoolishValueParser::new())]
-        enabled: bool,
-    },
-
     /// Update ticket state (OPEN, IN_PROGRESS, RESOLVED, CLOSED).
     SetStatus {
         /// Ticket ID.
@@ -170,9 +160,6 @@ async fn main() -> Result<()> {
             }
             TicketCommand::SendFile { ticket_id, path } => {
                 cmd_ticket_send_file(pipe, &ticket_id, &path).await
-            }
-            TicketCommand::Access { ticket_id, enabled } => {
-                cmd_ticket_access(pipe, &ticket_id, enabled).await
             }
             TicketCommand::SetStatus { ticket_id, state } => {
                 cmd_ticket_set_status(pipe, &ticket_id, &state).await
@@ -279,23 +266,17 @@ async fn cmd_tickets_list(pipe: Option<&str>, state_filter: Option<String>) -> R
             }
 
             println!(
-                "{:<16} {:<12} {:<8} {:<15} {:<32}",
-                "ID", "STATUT", "PRIORITÉ", "ACCÈS DISTANT", "TITRE"
+                "{:<16} {:<12} {:<8} {:<32}",
+                "ID", "STATUT", "PRIORITÉ", "TITRE"
             );
-            println!("{:-<16} {:-<12} {:-<8} {:-<15} {:-<32}", "", "", "", "", "");
+            println!("{:-<16} {:-<12} {:-<8} {:-<32}", "", "", "", "");
 
             for t in tickets {
-                let access = if t.remote_access_enabled {
-                    "ACTIVÉ"
-                } else {
-                    "DÉSACTIVÉ"
-                };
                 println!(
-                    "{:<16} {:<12} {:<8} {:<15} {:<32}",
+                    "{:<16} {:<12} {:<8} {:<32}",
                     t.id,
                     t.state.as_str(),
                     t.priority.as_str(),
-                    access,
                     t.title
                 );
             }
@@ -325,14 +306,6 @@ async fn cmd_ticket_show(pipe: Option<&str>, ticket_id: &str) -> Result<()> {
             }
             println!("Statut:        {}", t.state.as_str());
             println!("Priorité:      {}", t.priority.as_str());
-            println!(
-                "Accès distant: {}",
-                if t.remote_access_enabled {
-                    "ACTIVÉ"
-                } else {
-                    "DÉSACTIVÉ"
-                }
-            );
             println!("Client:        {}", t.client_peer_id);
             println!("Opérateur:     {}", t.operator_peer_id);
             println!("Créé le:       {} (timestamp)", t.created_at);
@@ -402,14 +375,6 @@ async fn cmd_ticket_create(
             println!("Titre:         {}", ticket.title);
             println!("Statut:        {}", ticket.state.as_str());
             println!("Priorité:      {}", ticket.priority.as_str());
-            println!(
-                "Accès distant: {}",
-                if ticket.remote_access_enabled {
-                    "ACTIVÉ"
-                } else {
-                    "DÉSACTIVÉ"
-                }
-            );
             Ok(())
         }
         IpcResponse::Error(err) => bail!("Échec de création du ticket: {err}"),
@@ -482,34 +447,6 @@ async fn cmd_ticket_send_file(
             let _ = tokio::fs::remove_file(&staged_path).await;
             bail!("Réponse inattendue du démon")
         }
-    }
-}
-
-async fn cmd_ticket_access(pipe: Option<&str>, ticket_id: &str, enabled: bool) -> Result<()> {
-    match ipc::send_command(
-        &IpcRequest::SetRemoteAccess {
-            ticket_id: ticket_id.to_string(),
-            enabled,
-        },
-        pipe,
-    )
-    .await?
-    {
-        IpcResponse::TicketUpdated(Some(ticket)) => {
-            println!(
-                "Accès à distance {} pour le ticket {}.",
-                if ticket.remote_access_enabled {
-                    "ACTIVÉ"
-                } else {
-                    "DÉSACTIVÉ"
-                },
-                ticket.id
-            );
-            Ok(())
-        }
-        IpcResponse::TicketUpdated(None) => bail!("Ticket introuvable: {ticket_id}"),
-        IpcResponse::Error(err) => bail!("Échec: {err}"),
-        _ => bail!("Réponse inattendue du démon"),
     }
 }
 

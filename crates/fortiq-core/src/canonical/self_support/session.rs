@@ -14,9 +14,9 @@ use crate::canonical::self_support::this_device::{
     LocalDiagnostics, StorageDiagnostics, ThisDevice,
 };
 use crate::canonical::shell::challenge::{ShellAuthError, ShellAuthResponse, ShellChallenge};
-use crate::canonical::shell::session::{EpochRegistry, SessionRevocationGuard, SessionSafetyGate};
+use crate::canonical::shell::session::{SessionRevocationGuard, SessionSafetyGate};
 use crate::canonical::signing::Verifier;
-use crate::canonical::types::{AccessEpoch, EntityId, TicketId};
+use crate::canonical::types::{EntityId, TicketId};
 
 #[derive(Debug, Error)]
 pub enum SelfSupportError {
@@ -26,8 +26,6 @@ pub enum SelfSupportError {
     TicketClosed,
     #[error("Shell auth error: {0}")]
     Auth(#[from] ShellAuthError),
-    #[error("Epoch revoked or invalid")]
-    InvalidEpoch,
 }
 
 /// Metadata and state of a self-support ticket created on "This Device".
@@ -38,7 +36,6 @@ pub struct SelfSupportTicket {
     pub description: String,
     pub creator_id: EntityId,
     pub created_at: u64,
-    pub current_epoch: AccessEpoch,
     pub is_closed: bool,
     pub is_self_support: bool,
 }
@@ -46,7 +43,6 @@ pub struct SelfSupportTicket {
 /// Engine managing sovereign loopback self-support operations on "This Device".
 pub struct SelfSupportEngine {
     this_device: ThisDevice,
-    epoch_registry: EpochRegistry,
     active_guards: HashMap<TicketId, SessionRevocationGuard>,
     tickets: HashMap<TicketId, SelfSupportTicket>,
 }
@@ -56,7 +52,6 @@ impl SelfSupportEngine {
     pub fn new(this_device: ThisDevice) -> Self {
         Self {
             this_device,
-            epoch_registry: EpochRegistry::new(),
             active_guards: HashMap::new(),
             tickets: HashMap::new(),
         }
@@ -80,17 +75,10 @@ impl SelfSupportEngine {
         creator_id: EntityId,
     ) -> Result<SelfSupportTicket, SelfSupportError> {
         let ticket_id = TicketId::from_bytes(uuid::Uuid::new_v4().into_bytes());
-        let initial_epoch = AccessEpoch::from_bytes(uuid::Uuid::new_v4().into_bytes());
-
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-
-        // Register the epoch in the epoch registry.
-        self.epoch_registry
-            .register_epoch(ticket_id, initial_epoch)
-            .map_err(SelfSupportError::Auth)?;
 
         let ticket = SelfSupportTicket {
             ticket_id,
@@ -98,7 +86,6 @@ impl SelfSupportEngine {
             description,
             creator_id,
             created_at: now,
-            current_epoch: initial_epoch,
             is_closed: false,
             is_self_support: true,
         };
@@ -116,7 +103,6 @@ impl SelfSupportEngine {
     pub fn create_shell_challenge(
         &self,
         ticket_id: &TicketId,
-        epoch: &AccessEpoch,
     ) -> Result<ShellChallenge, SelfSupportError> {
         let ticket = self
             .tickets
@@ -127,11 +113,7 @@ impl SelfSupportEngine {
             return Err(SelfSupportError::TicketClosed);
         }
 
-        if !self.epoch_registry.is_epoch_valid(ticket_id, epoch) {
-            return Err(SelfSupportError::Auth(ShellAuthError::EpochRevoked(*epoch)));
-        }
-
-        Ok(ShellChallenge::new(*ticket_id, *epoch))
+        Ok(ShellChallenge::new(*ticket_id))
     }
 
     /// Verifies the operator's response to the challenge and establishes an authenticated shell session.
@@ -153,24 +135,13 @@ impl SelfSupportEngine {
         // Cryptographically verify the challenge signature.
         auth_response.verify(verifier, challenge)?;
 
-        // Ensure the epoch in the challenge matches the ticket's active epoch.
-        if challenge.client_access_epoch != ticket.current_epoch {
-            return Err(SelfSupportError::InvalidEpoch);
-        }
-
         let safety_state = TicketSafetyState {
             ticket_id: challenge.ticket_id,
             lifecycle: TicketLifecycle::Open,
-            access_epoch: challenge.client_access_epoch,
-            access_valid: true,
         };
 
-        let guard = SessionSafetyGate::authorize_session(
-            &safety_state,
-            &self.epoch_registry,
-            &challenge.client_access_epoch,
-        )
-        .map_err(SelfSupportError::Auth)?;
+        let guard =
+            SessionSafetyGate::authorize_session(&safety_state).map_err(SelfSupportError::Auth)?;
 
         self.active_guards
             .insert(challenge.ticket_id, guard.clone());
@@ -178,13 +149,11 @@ impl SelfSupportEngine {
     }
 
     /// Immediately revokes a shell session on "This Device".
-    pub fn revoke_shell(
+    pub fn close_shell(
         &mut self,
         ticket_id: &TicketId,
-        epoch: &AccessEpoch,
         reason: &str,
     ) -> Result<(), SelfSupportError> {
-        self.epoch_registry.invalidate_epoch(ticket_id, epoch);
         if let Some(guard) = self.active_guards.remove(ticket_id) {
             guard.revoke(reason);
         }
@@ -203,8 +172,7 @@ impl SelfSupportEngine {
             .ok_or(SelfSupportError::TicketNotFound(*ticket_id))?;
 
         ticket.is_closed = true;
-        let epoch = ticket.current_epoch;
-        self.revoke_shell(ticket_id, &epoch, reason)?;
+        self.close_shell(ticket_id, reason)?;
         Ok(())
     }
 }

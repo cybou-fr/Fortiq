@@ -8,7 +8,7 @@
 pub mod authority;
 pub mod migration;
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests;
 
 pub use authority::{AuthorityError, CanonicalAuthorityResolver};

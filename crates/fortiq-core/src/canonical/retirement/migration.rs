@@ -13,7 +13,7 @@ use crate::canonical::events::reducer::{reduce_ticket, SimpleRoleResolver};
 use crate::canonical::events::snapshot::TicketSnapshot;
 use crate::canonical::records::{EventPackPlaintext, LogicalEvent, ObjectTbs, SignedObject};
 use crate::canonical::types::{
-    AccessEpoch, CryptoProfileId, KeyId, NetworkId, StorageClass, StreamId, TicketId,
+    CryptoProfileId, KeyId, NetworkId, StorageClass, StreamId, TicketId,
 };
 
 #[derive(Debug, Error)]
@@ -74,19 +74,9 @@ impl LegacyTicketMigrator {
         let mut events = Vec::new();
 
         // 1. TicketCreated event
-        // Legacy rows did not contain an access epoch. Derive a stable, full-width
-        // migration epoch so repeated imports produce the same event graph without
-        // truncating the authority token to the old 64-bit timestamp.
-        let mut epoch_hasher = blake3::Hasher::new();
-        epoch_hasher.update(b"FORTIQ-LEGACY-ACCESS-EPOCH-v1:");
-        epoch_hasher.update(ticket.id.as_bytes());
-        epoch_hasher.update(&ticket.created_at.to_le_bytes());
-        let mut initial_epoch = [0u8; AccessEpoch::LEN];
-        initial_epoch.copy_from_slice(&epoch_hasher.finalize().as_bytes()[..AccessEpoch::LEN]);
         events.push(LogicalEvent::TicketCreated {
             ticket_id,
             title: ticket.title.clone(),
-            initial_access_epoch: AccessEpoch::from_bytes(initial_epoch),
         });
 
         // 2. Chat messages in chronological order
@@ -110,17 +100,6 @@ impl LegacyTicketMigrator {
             });
         }
 
-        // 4. Remote access epoch event if remote access was explicitly enabled
-        if ticket.remote_access_enabled {
-            let mut epoch_bytes = [0u8; 16];
-            let hash = blake3::hash(format!("{}-epoch", ticket.id).as_bytes());
-            epoch_bytes.copy_from_slice(&hash.as_bytes()[..16]);
-            events.push(LogicalEvent::AccessEpochGranted {
-                ticket_id,
-                access_epoch: epoch_bytes,
-            });
-        }
-
         Ok((ticket_id, events))
     }
 
@@ -136,7 +115,7 @@ impl LegacyTicketMigrator {
         let (ticket_id, events) = Self::migrate_ticket_events(ticket, messages)?;
 
         let plaintext = EventPackPlaintext {
-            schema_version: 1,
+            schema_version: 2,
             ticket_id: Some(ticket_id),
             ticket_crypto_epoch: Some(1),
             pack_nonce: [0u8; 16],

@@ -9,7 +9,6 @@ export component TicketDetail inherits Rectangle {
     in-out property <string> ticket-title: "";
     in-out property <int> priority: 2;
     in-out property <string> state: "OPEN";
-    in-out property <string> epoch: "";
     in-out property <int> sub-tab: 0;
 
     in-out property <[ChatMessageItem]> messages: [];
@@ -22,7 +21,6 @@ export component TicketDetail inherits Rectangle {
     callback pick-file();
     callback start-shell();
     callback close-shell();
-    callback revoke-shell();
     callback send-terminal-input(string);
 
     background: FortiqTheme.background;
@@ -88,7 +86,7 @@ export component TicketDetail inherits Rectangle {
                     }
 
                     Text {
-                        text: "ID: " + root.ticket-id + (root.epoch != "" ? " • Époque d'accès: " + root.epoch : "");
+                        text: "ID: " + root.ticket-id;
                         color: FortiqTheme.text-muted;
                         font-size: 11px;
                         font-family: "monospace";
@@ -168,7 +166,6 @@ export component TicketDetail inherits Rectangle {
             denied-message: root.terminal-denied;
             start-shell-clicked() => { root.start-shell(); }
             close-shell-clicked() => { root.close-shell(); }
-            revoke-shell-clicked() => { root.revoke-shell(); }
             send-input(str) => { root.send-terminal-input(str); }
         }
     }

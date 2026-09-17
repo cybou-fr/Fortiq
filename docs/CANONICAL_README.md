@@ -1,8 +1,14 @@
-# FORTIQ — Canonical Architecture v3
+# FORTIQ — Canonical Architecture v4
 
 **Status:** Active design source of truth  
 **Date:** 2026-09-17  
-**Supersedes:** Canonical Architecture v2 and all earlier FORTIQ architecture drafts.
+**Supersedes:** Canonical Architecture v3, v2, and all earlier FORTIQ architecture drafts.
+
+**v4 authority cut:** Ticket creation establishes the support scope. Shell
+authorization requires an `OPEN` or `IN_PROGRESS` ticket plus a valid
+Owner-signed Operator Session. `AccessEpoch`, `remote_access_enabled`, and
+separate client revoke/grant commands are superseded and are not current shell
+authority. See [ADR-007](adr/ADR-007-ticket-lifecycle-shell-authority.md).
 
 FORTIQ is a sovereign support network composed of ordinary P2P nodes. Its application state is an immutable signed object graph, encrypted end-to-end, erasure-coded where appropriate, and distributed across storage-capable peers.
 

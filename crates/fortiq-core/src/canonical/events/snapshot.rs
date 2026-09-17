@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 /// Current reducer schema version.
-pub const TICKET_REDUCER_VERSION: u16 = 1;
+pub const TICKET_REDUCER_VERSION: u16 = 2;
 
 /// Serializable point-in-time materialized state snapshot of a ticket.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,9 +113,7 @@ pub fn reduce_ticket_from_snapshot(
                         size_bytes: *size_bytes,
                     });
                 }
-                LogicalEvent::AccessEpochRevoked { .. }
-                | LogicalEvent::AccessEpochGranted { .. }
-                | LogicalEvent::TicketStateChanged { .. } => {
+                LogicalEvent::TicketStateChanged { .. } => {
                     view.safety.apply_transition(role, event);
                 }
                 LogicalEvent::TicketCreated { .. } => {}

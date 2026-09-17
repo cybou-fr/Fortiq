@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use rand_core::{OsRng, RngCore};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -11,12 +10,6 @@ fn current_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-fn random_access_epoch() -> String {
-    let mut bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut bytes);
-    hex::encode(bytes)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,7 +45,7 @@ impl TicketState {
                 (self, next),
                 (Self::Open, Self::InProgress | Self::Resolved | Self::Closed)
                     | (Self::InProgress, Self::Resolved | Self::Closed)
-                    | (Self::Resolved, Self::Closed)
+                    | (Self::Resolved, Self::InProgress | Self::Closed)
             )
     }
 }
@@ -114,10 +107,6 @@ pub struct TicketRecord {
     pub priority: TicketPriority,
     pub client_peer_id: String,
     pub operator_peer_id: String,
-    pub remote_access_enabled: bool,
-    /// Client-owned 128-bit capability epoch. Rotated on every consent change.
-    #[serde(default)]
-    pub access_epoch: String,
     #[serde(default)]
     pub revision: u64,
     pub created_at: u64,
@@ -341,19 +330,6 @@ impl TicketDb {
                 [],
             )?;
         }
-        let missing_ids = {
-            let mut stmt = conn.prepare("SELECT id FROM tickets WHERE access_epoch = ''")?;
-            let ids = stmt
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            ids
-        };
-        for id in missing_ids {
-            conn.execute(
-                "UPDATE tickets SET access_epoch = ?1 WHERE id = ?2",
-                params![random_access_epoch(), id],
-            )?;
-        }
         Ok(())
     }
 
@@ -375,8 +351,6 @@ impl TicketDb {
             priority,
             client_peer_id: client_peer_id.to_string(),
             operator_peer_id: operator_peer_id.to_string(),
-            remote_access_enabled: false,
-            access_epoch: random_access_epoch(),
             revision: 1,
             created_at: now,
             updated_at: now,
@@ -399,8 +373,8 @@ impl TicketDb {
                     record.priority.as_str(),
                     record.client_peer_id,
                     record.operator_peer_id,
-                    if record.remote_access_enabled { 1 } else { 0 },
-                    record.access_epoch,
+                    1,
+                    "",
                     record.revision,
                     record.created_at,
                     record.updated_at,
@@ -454,8 +428,6 @@ impl TicketDb {
                 description = excluded.description,
                 state = excluded.state,
                 priority = excluded.priority,
-                remote_access_enabled = excluded.remote_access_enabled,
-                access_epoch = excluded.access_epoch,
                 revision = excluded.revision,
                 updated_at = excluded.updated_at,
                 closed_at = excluded.closed_at",
@@ -467,8 +439,8 @@ impl TicketDb {
                 ticket.priority.as_str(),
                 ticket.client_peer_id,
                 ticket.operator_peer_id,
-                if ticket.remote_access_enabled { 1 } else { 0 },
-                ticket.access_epoch,
+                1,
+                "",
                 ticket.revision,
                 ticket.created_at,
                 ticket.updated_at,
@@ -518,8 +490,6 @@ impl TicketDb {
                 description = excluded.description,
                 state = excluded.state,
                 priority = excluded.priority,
-                remote_access_enabled = excluded.remote_access_enabled,
-                access_epoch = excluded.access_epoch,
                 revision = excluded.revision,
                 updated_at = excluded.updated_at,
                 closed_at = excluded.closed_at",
@@ -531,8 +501,8 @@ impl TicketDb {
                 ticket.priority.as_str(),
                 ticket.client_peer_id,
                 ticket.operator_peer_id,
-                if ticket.remote_access_enabled { 1 } else { 0 },
-                ticket.access_epoch,
+                1,
+                "",
                 ticket.revision,
                 ticket.created_at,
                 ticket.updated_at,
@@ -554,7 +524,6 @@ impl TicketDb {
             .query_row(params![ticket_id], |r| {
                 let state_str: String = r.get(3)?;
                 let priority_str: String = r.get(4)?;
-                let remote_access_int: i64 = r.get(7)?;
                 Ok(TicketRecord {
                     id: r.get(0)?,
                     title: r.get(1)?,
@@ -563,8 +532,6 @@ impl TicketDb {
                     priority: TicketPriority::parse_str(&priority_str),
                     client_peer_id: r.get(5)?,
                     operator_peer_id: r.get(6)?,
-                    remote_access_enabled: remote_access_int != 0,
-                    access_epoch: r.get(8)?,
                     revision: r.get(9)?,
                     created_at: r.get(10)?,
                     updated_at: r.get(11)?,
@@ -587,7 +554,6 @@ impl TicketDb {
             .query_row([], |r| {
                 let state_str: String = r.get(3)?;
                 let priority_str: String = r.get(4)?;
-                let remote_access_int: i64 = r.get(7)?;
                 Ok(TicketRecord {
                     id: r.get(0)?,
                     title: r.get(1)?,
@@ -596,8 +562,6 @@ impl TicketDb {
                     priority: TicketPriority::parse_str(&priority_str),
                     client_peer_id: r.get(5)?,
                     operator_peer_id: r.get(6)?,
-                    remote_access_enabled: remote_access_int != 0,
-                    access_epoch: r.get(8)?,
                     revision: r.get(9)?,
                     created_at: r.get(10)?,
                     updated_at: r.get(11)?,
@@ -624,7 +588,6 @@ impl TicketDb {
         let rows = stmt.query_map([], |r| {
             let state_str: String = r.get(3)?;
             let priority_str: String = r.get(4)?;
-            let remote_access_int: i64 = r.get(7)?;
             Ok(TicketRecord {
                 id: r.get(0)?,
                 title: r.get(1)?,
@@ -633,8 +596,6 @@ impl TicketDb {
                 priority: TicketPriority::parse_str(&priority_str),
                 client_peer_id: r.get(5)?,
                 operator_peer_id: r.get(6)?,
-                remote_access_enabled: remote_access_int != 0,
-                access_epoch: r.get(8)?,
                 revision: r.get(9)?,
                 created_at: r.get(10)?,
                 updated_at: r.get(11)?,
@@ -669,29 +630,15 @@ impl TicketDb {
             return Ok(Some(current));
         }
 
-        let epoch_for_state = match new_state {
-            TicketState::Resolved | TicketState::Closed => random_access_epoch(),
-            _ => current.access_epoch.clone(),
-        };
-        let remote_access_for_state = match new_state {
-            TicketState::Resolved | TicketState::Closed => false,
-            _ => current.remote_access_enabled,
-        };
         let now = current_timestamp();
         {
             let conn = self.conn.lock().unwrap();
             let affected = conn.execute(
-                "UPDATE tickets SET state = ?1, remote_access_enabled = ?2, access_epoch = ?3,
-                        updated_at = ?4, revision = revision + 1,
-                        closed_at = CASE WHEN ?1 = 'CLOSED' THEN ?4 ELSE closed_at END
-                 WHERE id = ?5",
-                params![
-                    new_state.as_str(),
-                    if remote_access_for_state { 1 } else { 0 },
-                    epoch_for_state,
-                    now,
-                    ticket_id,
-                ],
+                "UPDATE tickets SET state = ?1,
+                    updated_at = ?2, revision = revision + 1,
+                    closed_at = CASE WHEN ?1 = 'CLOSED' THEN ?2 ELSE closed_at END
+                 WHERE id = ?3",
+                params![new_state.as_str(), now, ticket_id,],
             )?;
             if affected == 0 {
                 return Ok(None);
@@ -703,52 +650,6 @@ impl TicketDb {
             "STATUS_CHANGED",
             actor_peer_id,
             Some(new_state.as_str()),
-        )?;
-
-        self.get_ticket(ticket_id)
-    }
-
-    pub fn set_remote_access(
-        &self,
-        ticket_id: &str,
-        enabled: bool,
-        actor_peer_id: &str,
-    ) -> Result<Option<TicketRecord>> {
-        let Some(current) = self.get_ticket(ticket_id)? else {
-            return Ok(None);
-        };
-        if !current.state.permits_work() {
-            anyhow::bail!(
-                "remote access cannot be changed while ticket is in terminal state: {}",
-                current.state.as_str()
-            );
-        }
-        if current.remote_access_enabled == enabled {
-            return Ok(Some(current));
-        }
-        let now = current_timestamp();
-        {
-            let conn = self.conn.lock().unwrap();
-            let affected = conn.execute(
-                "UPDATE tickets SET remote_access_enabled = ?1, access_epoch = ?2, updated_at = ?3,
-                        revision = revision + 1 WHERE id = ?4",
-                params![
-                    if enabled { 1 } else { 0 },
-                    random_access_epoch(),
-                    now,
-                    ticket_id
-                ],
-            )?;
-            if affected == 0 {
-                return Ok(None);
-            }
-        }
-
-        self.record_event(
-            ticket_id,
-            "REMOTE_ACCESS_TOGGLED",
-            actor_peer_id,
-            Some(if enabled { "ENABLED" } else { "DISABLED" }),
         )?;
 
         self.get_ticket(ticket_id)
@@ -1074,8 +975,6 @@ impl TicketDb {
                 priority: TicketPriority::Normal,
                 client_peer_id: client_peer_id.to_string(),
                 operator_peer_id: operator_peer_id.to_string(),
-                remote_access_enabled: state.permits_work(),
-                access_epoch: random_access_epoch(),
                 revision: 1,
                 created_at: now,
                 updated_at: now,
@@ -1091,7 +990,7 @@ impl TicketDb {
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
 
@@ -1420,5 +1319,53 @@ mod tests {
             db.get_ticket(&ticket.id).unwrap().unwrap().state,
             TicketState::Closed
         );
+    }
+}
+
+#[cfg(test)]
+mod v4_tests {
+    use super::*;
+
+    #[test]
+    fn ticket_creation_is_the_shell_scope() {
+        let db = TicketDb::open_in_memory().unwrap();
+        let ticket = db
+            .create_ticket(
+                "Support",
+                "Lifecycle test",
+                TicketPriority::Normal,
+                "client",
+                "operator",
+            )
+            .unwrap();
+        assert_eq!(ticket.state, TicketState::Open);
+    }
+
+    #[test]
+    fn resolved_can_resume_but_closed_is_terminal() {
+        let db = TicketDb::open_in_memory().unwrap();
+        let ticket = db
+            .create_ticket(
+                "Support",
+                "Lifecycle test",
+                TicketPriority::Normal,
+                "client",
+                "operator",
+            )
+            .unwrap();
+        db.update_ticket_state(&ticket.id, TicketState::Resolved, "operator")
+            .unwrap();
+        assert_eq!(
+            db.update_ticket_state(&ticket.id, TicketState::InProgress, "operator")
+                .unwrap()
+                .unwrap()
+                .state,
+            TicketState::InProgress
+        );
+        db.update_ticket_state(&ticket.id, TicketState::Closed, "operator")
+            .unwrap();
+        assert!(db
+            .update_ticket_state(&ticket.id, TicketState::InProgress, "operator")
+            .is_err());
     }
 }

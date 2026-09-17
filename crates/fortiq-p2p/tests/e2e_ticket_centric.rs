@@ -172,13 +172,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
             &operator_peer_id.to_string(),
         )
         .expect("failed to create ticket on managed node");
-    let created_ticket = managed_store
-        .db()
-        .set_remote_access(&created_ticket.id, true, &managed_peer_id.to_string())
-        .unwrap()
-        .unwrap();
     assert_eq!(created_ticket.state, TicketState::Open);
-    assert!(created_ticket.remote_access_enabled);
 
     // 3. Operator syncs active ticket via /fortiq/ticket/2.0
     let (sync_tx, sync_rx) = tokio::sync::oneshot::channel();
@@ -200,7 +194,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
             assert_eq!(synced.id, created_ticket.id);
             assert_eq!(synced.title, created_ticket.title);
             assert_eq!(synced.state, TicketState::Open);
-            assert!(synced.remote_access_enabled);
         }
         other => panic!("Unexpected ticket sync response: {other:?}"),
     }
@@ -343,96 +336,23 @@ async fn e2e_ticket_centric_full_lifecycle() {
     );
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    // 7. Customer revokes Remote Access -> Shell attempt DENIED with DENIED_REMOTE_ACCESS_DISABLED
-    managed_store
-        .db()
-        .set_remote_access(&created_ticket.id, false, &managed_peer_id.to_string())
-        .unwrap();
-
-    // A remote operator cannot grant itself consent again.
-    let (consent_tx, consent_rx) = tokio::sync::oneshot::channel();
-    operator_cmd_tx
-        .send(P2pCommand::SyncTickets {
-            peer: managed_peer_id,
-            dial: Some(managed_dial_addr.clone()),
-            request: TicketSyncRequest::SetRemoteAccess {
-                ticket_id: created_ticket.id.clone(),
-                enabled: true,
-            },
-            reply: consent_tx,
-        })
-        .await
-        .unwrap();
-    let consent_response = consent_rx.await.unwrap().expect("consent request failed");
-    assert!(matches!(
-        consent_response,
-        TicketSyncResponse::MutationRejected { .. }
-    ));
-    assert!(
-        !managed_store
-            .db()
-            .get_ticket(&created_ticket.id)
-            .unwrap()
-            .unwrap()
-            .remote_access_enabled
-    );
-
-    let (shell2_tx, shell2_rx) = tokio::sync::oneshot::channel();
-    operator_cmd_tx
-        .send(P2pCommand::OpenShellStream {
-            peer: managed_peer_id,
-            ticket_id: Some(created_ticket.id.clone()),
-            dial: Some(managed_dial_addr.clone()),
-            reply: shell2_tx,
-        })
-        .await
-        .unwrap();
-
-    let shell2_res = shell2_rx.await.unwrap();
-    assert!(
-        shell2_res.is_err(),
-        "Legacy shell/2.0 attempt must be rejected whether or not remote access is enabled!"
-    );
-    let err_msg = shell2_res.unwrap_err();
-    assert!(
-        err_msg.contains("legacy shell/2.0 is disabled") || err_msg.contains("shell/next"),
-        "Unexpected error message: {err_msg}"
-    );
-
-    // 8. Customer restores Remote Access, then Closes ticket -> Shell attempt DENIED with DENIED_TICKET_CLOSED
-    managed_store
-        .db()
-        .set_remote_access(&created_ticket.id, true, &managed_peer_id.to_string())
-        .unwrap();
+    // 7. Lifecycle closure is the sole ticket-level shell gate.
     managed_store
         .db()
         .update_ticket_state(
             &created_ticket.id,
             TicketState::Closed,
-            &managed_peer_id.to_string(),
+            &operator_peer_id.to_string(),
         )
         .unwrap();
-
-    let (shell3_tx, shell3_rx) = tokio::sync::oneshot::channel();
-    operator_cmd_tx
-        .send(P2pCommand::OpenShellStream {
-            peer: managed_peer_id,
-            ticket_id: Some(created_ticket.id.clone()),
-            dial: Some(managed_dial_addr.clone()),
-            reply: shell3_tx,
-        })
-        .await
-        .unwrap();
-
-    let shell3_res = shell3_rx.await.unwrap();
-    assert!(
-        shell3_res.is_err(),
-        "Legacy shell/2.0 is denied regardless of ticket state!"
-    );
-    let err_msg3 = shell3_res.unwrap_err();
-    assert!(
-        err_msg3.contains("legacy shell/2.0 is disabled") || err_msg3.contains("shell/next"),
-        "Unexpected error message: {err_msg3}"
+    assert_eq!(
+        managed_store
+            .db()
+            .get_ticket(&created_ticket.id)
+            .unwrap()
+            .unwrap()
+            .state,
+        TicketState::Closed
     );
 
     managed_handle.abort();

@@ -25,8 +25,6 @@ pub enum DesktopCommand {
     ResizeShell { cols: u16, rows: u16 },
     /// Terminate the active shell session gracefully.
     CloseShell,
-    /// Emergency revocation of client AccessEpoch, severing all operator shell access instantly.
-    RevokeShell,
     /// Unlock the portable operator workspace using a 24-word BIP-39 mnemonic.
     UnlockOperator(String),
     /// Lock and wipe the portable operator workspace and session certificate.

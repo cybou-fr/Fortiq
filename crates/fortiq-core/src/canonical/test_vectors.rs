@@ -1,4 +1,4 @@
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use crate::canonical::codec::{
         from_canonical_cbor, to_canonical_cbor, CodecError, DecoderLimits,

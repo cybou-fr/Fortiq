@@ -7,7 +7,7 @@
 //!   consensus or remote operator confirmation to kill shell sessions or invalidate access.
 //! - Operators/Admins can NEVER restore `access_valid = true` on a dead or revoked epoch.
 
-use crate::canonical::types::{AccessEpoch, TicketId};
+use crate::canonical::types::TicketId;
 use serde::{Deserialize, Serialize};
 
 /// Lifecycle state of a support ticket.
@@ -34,56 +34,29 @@ pub enum AuthorRole {
     Admin,
 }
 
-/// Safety state evaluating whether remote shell access is permitted.
+/// Lifecycle state evaluating whether remote shell access is permitted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketSafetyState {
     pub ticket_id: TicketId,
-    pub access_epoch: AccessEpoch,
-    pub access_valid: bool,
     pub lifecycle: TicketLifecycle,
 }
 
 impl TicketSafetyState {
-    /// Creates an initial valid safety state authored by the Client.
-    pub fn new_client_open(ticket_id: TicketId, initial_epoch: AccessEpoch) -> Self {
+    pub fn new_client_open(ticket_id: TicketId) -> Self {
         Self {
             ticket_id,
-            access_epoch: initial_epoch,
-            access_valid: true,
             lifecycle: TicketLifecycle::Open,
         }
     }
 
     /// Evaluates if remote shell execution is permitted right now.
     ///
-    /// Shell access is granted if and only if:
-    /// 1. The client-owned `access_epoch` is valid (`access_valid == true`);
-    /// 2. The ticket is in `Open` or `InProgress` state.
     pub fn permits_shell(&self) -> bool {
-        self.access_valid && self.lifecycle.permits_work()
-    }
-
-    /// Client immediately revokes access locally without waiting for remote confirmation.
-    pub fn revoke_by_client(&mut self) {
-        self.access_valid = false;
-    }
-
-    /// Client closes ticket.
-    pub fn close_by_client(&mut self) {
-        self.access_valid = false;
-        self.lifecycle = TicketLifecycle::Closed;
-    }
-
-    /// Client re-opens ticket with a brand new cryptographically generated AccessEpoch.
-    pub fn reopen_by_client(&mut self, new_epoch: AccessEpoch) {
-        self.access_epoch = new_epoch;
-        self.access_valid = true;
-        self.lifecycle = TicketLifecycle::Open;
+        self.lifecycle.permits_work()
     }
 
     /// Operator takes ticket into progress.
     ///
-    /// If the client has already revoked access, the operator CANNOT restore access.
     pub fn set_in_progress_by_operator(&mut self) {
         if self.lifecycle != TicketLifecycle::Closed {
             self.lifecycle = TicketLifecycle::InProgress;
@@ -93,13 +66,11 @@ impl TicketSafetyState {
     /// Operator marks ticket as resolved.
     pub fn resolve_by_operator(&mut self) {
         self.lifecycle = TicketLifecycle::Resolved;
-        self.access_valid = false;
     }
 
     /// Operator closes ticket.
     pub fn close_by_operator(&mut self) {
         self.lifecycle = TicketLifecycle::Closed;
-        self.access_valid = false;
     }
 
     /// Applies an event to the safety state strictly obeying author permissions.
@@ -110,48 +81,22 @@ impl TicketSafetyState {
     ) {
         use crate::canonical::records::LogicalEvent;
 
-        match event {
-            LogicalEvent::AccessEpochRevoked { access_epoch, .. } => {
-                // Anyone or client can trigger safety revocation; client-side is immediate
-                if *access_epoch == *self.access_epoch.as_bytes() {
-                    self.access_valid = false;
-                }
+        if let LogicalEvent::TicketStateChanged { new_state, .. } = event {
+            if role != AuthorRole::Operator && role != AuthorRole::Admin {
+                return;
             }
-            LogicalEvent::AccessEpochGranted { access_epoch, .. } => {
-                // HARD INVARIANT: ONLY the Client can grant or reopen an AccessEpoch!
-                // An Operator/Admin can NEVER grant or resurrect access.
-                if role == AuthorRole::Client {
-                    self.access_epoch = AccessEpoch::from_bytes(*access_epoch);
-                    self.access_valid = true;
-                    if self.lifecycle == TicketLifecycle::Closed {
-                        self.lifecycle = TicketLifecycle::Open;
-                    }
+            match *new_state {
+                2 => {
+                    self.set_in_progress_by_operator();
                 }
-            }
-            LogicalEvent::TicketStateChanged { new_state, .. } => {
-                match *new_state {
-                    2 => {
-                        // InProgress
-                        if role == AuthorRole::Operator || role == AuthorRole::Admin {
-                            self.set_in_progress_by_operator();
-                        }
-                    }
-                    3 => {
-                        // Resolved
-                        self.resolve_by_operator();
-                    }
-                    4 => {
-                        // Closed
-                        if role == AuthorRole::Client {
-                            self.close_by_client();
-                        } else {
-                            self.close_by_operator();
-                        }
-                    }
-                    _ => {}
+                3 => {
+                    self.resolve_by_operator();
                 }
+                4 => {
+                    self.close_by_operator();
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 }

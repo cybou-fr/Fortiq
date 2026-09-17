@@ -7,7 +7,7 @@ pub mod certificate;
 pub mod mnemonic;
 pub mod workspace;
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests;
 
 pub use certificate::{

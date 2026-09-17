@@ -70,8 +70,8 @@ Tickets / Chat / Files / Shell / UI
 10. **Nobody edits an object in place, including Admin.**
 11. **Ordinary actors create successor events/versions.**
 12. **Admin may publish authoritative presentation overrides and tombstones, but cannot use them to bypass a client's local shell revocation.**
-13. **Ticket access is controlled by a client-owned access epoch.**
-14. **A client-signed close/revoke invalidates shell access immediately on that client, before distributed convergence.**
+13. **Ticket creation establishes the support authorization scope.**
+14. **Shell access requires an active ticket and a valid Owner-signed Operator Session.**
 15. **Control-plane objects are highly replicated because they are tiny and needed for bootstrapping.**
 16. **Large state packs and blobs are encrypted first and Reed–Solomon encoded second.**
 17. **Shard integrity is verified independently before RS reconstruction.**
@@ -79,7 +79,7 @@ Tickets / Chat / Files / Shell / UI
 19. **Local materialized views are disposable caches.**
 20. **Protocol and cryptographic profiles are explicitly versioned and fail closed on downgrade.**
 
-The complete Canonical Architecture v3 specification suite and ADRs are published in [`docs/`](docs/README.md).
+The complete Canonical Architecture v4 specification suite and ADRs are published in [`docs/`](docs/README.md).
 See also the [Architecture Specification](docs/architecture.md), [Protocol Specification](docs/protocol.md), [Architecture Decision Records (ADRs)](docs/adr/ADR-001-genesis-owner-signing-only.md), [Detailed Specifications](docs/spec/00-architecture-review.md), and [Implementation Roadmap](docs/milestones.md).
 Deployment procedures for [WSL and OVH/VPS](docs/deployment-wsl-vps.md) are maintained separately.
 
@@ -128,7 +128,7 @@ Note the printed `Local PeerId` (e.g. `12D3KooW_OPERATOR_PEER_ID`).
 
 ### 2. Start the Managed Client Daemon
 
-On the managed machine, configure the operator PeerId in `examples/managed.toml` for current peer discovery and ticket routing, then start the client daemon. This deprecated setting is not an authority grant; shell authorization requires a valid Owner-signed session certificate and client-owned ticket AccessEpoch:
+On the managed machine, configure the operator PeerId in `examples/managed.toml` for current peer discovery and ticket routing, then start the client daemon. This deprecated setting is not an authority grant; shell authorization requires a valid Owner-signed session certificate and an active ticket:
 
 ```bash
 cargo run -p fortiq-service -- --config examples/managed.toml
@@ -147,21 +147,18 @@ cargo run -p fortiq -- status
 # Discover available managed peers registered on the relay/rendezvous
 cargo run -p fortiq -- peers
 
-# On the managed client, create a ticket (remote shell remains disabled)
+# On the managed client, create the support ticket
 cargo run -p fortiq -- ticket create --title "Outlook startup failure" --priority HIGH
 
 # Exchange ticket-scoped chat or files
 cargo run -p fortiq -- ticket message FTQ_TICKET_ID "I can reproduce the issue"
 cargo run -p fortiq -- ticket send-file FTQ_TICKET_ID ./diagnostics.zip
 
-# The managed user explicitly enables terminal access
-cargo run -p fortiq -- ticket access FTQ_TICKET_ID true
-
 # The operator opens a shell bound to that ticket
 cargo run -p fortiq -- shell 12D3KooW_MANAGED_PEER_ID --ticket-id FTQ_TICKET_ID
 ```
 
-The peers authenticate through mutual libp2p cryptographic handshake (`/fortiq/hello/1.0`). Interactive ConPTY/PTY access uses only the canonical `/fortiq/shell/next` handshake and is bound to the ticket, AccessEpoch, session certificate, and challenge signature. Legacy `/fortiq/shell/2.0` is rejected.
+The peers authenticate through mutual libp2p cryptographic handshake (`/fortiq/hello/1.0`). Interactive ConPTY/PTY access uses the versioned `/fortiq/shell/3.0` handshake and is bound to the ticket, session certificate, and challenge signature. Older shell protocol versions are rejected.
 
 
 ## Architecture Overview
@@ -180,20 +177,18 @@ matching service.
 
 Once the background service (`fortiq-service`) is running:
 
-1. The managed user creates a ticket. Creating it does not grant shell access:
+1. The managed user creates a ticket. Ticket creation establishes the support scope:
 
 ```bash
 fortiq ticket create --title "VPN connection failure" --description "Error 809" --priority HIGH
 fortiq ticket list
 ```
 
-2. Chat and files are available while the ticket permits work. The managed user
-   separately enables remote assistance:
+2. Chat and files are available while the ticket permits work:
 
 ```bash
 fortiq ticket message FTQ_TICKET_ID "The failure started this morning"
 fortiq ticket send-file FTQ_TICKET_ID ./vpn.log
-fortiq ticket access FTQ_TICKET_ID true
 ```
 
 3. The operator checks discovered peers and connects using the exact ticket ID:
@@ -209,7 +204,7 @@ fortiq shell 12D3KooW_TARGET --ticket-id FTQ_TICKET_ID
 fortiq shell 12D3KooW_TARGET --ticket-id FTQ_TICKET_ID --command "whoami; hostname; uptime"
 ```
 
-Only the configured operator PeerId is authorized to open terminal sessions. Only one concurrent shell session is permitted per managed peer. Revoking access terminates an active shell.
+Only a valid Operator Session is authorized to open terminal sessions. Only one concurrent shell session is permitted per managed peer. Resolving or closing the ticket terminates active shells.
 
 4. The operator resolves or closes the ticket through the canonical managed client:
 
@@ -369,13 +364,13 @@ When end peers establish a relayed connection, DCUtR automatically attempts a di
 
 For WSL/VPS instructions, see [docs/milestones.md](docs/milestones.md).
 
-## Security scope and guarantees (Canonical v3)
+## Security scope and guarantees (Canonical v4)
 
 FORTIQ guarantees tenant isolation, post-quantum confidentiality, and sovereign client control through its cryptographic model:
 
 1. **Cryptographic Segmentation:** Every client organization has an independent cryptographic `SegmentId`. The operator uses deterministic, distinct HPKE recipient keys for each Segment. An operator key leak for Client A **MUST NOT** decrypt data belonging to Client B.
-2. **Client-Owned Access Epochs:** Only a managed client can create a ticket and generate a `TicketAccessEpoch`. Shell access requires an active ticket, valid `TicketAccessEpoch`, and an unexpired `OperatorSessionCertificate`.
-3. **Immediate Synchronous Revocation:** When a client revokes consent or closes a ticket, the managed node immediately writes the revocation event, invalidates the local access epoch, and synchronously kills the running PTY process tree before transmitting the event across the network. Operator administrative overrides cannot revive an invalidated access epoch.
+2. **Ticket Lifecycle Authority:** Ticket creation establishes the support scope. Shell access requires `OPEN` or `IN_PROGRESS` lifecycle and an unexpired `OperatorSessionCertificate`; `RESOLVED` and `CLOSED` terminate active shells.
+3. **Lifecycle Cancellation:** Operator/Admin lifecycle transitions are authoritative. `RESOLVED -> IN_PROGRESS` is allowed; `CLOSED` is terminal and requires a new ticket.
 4. **Versioned Cryptography:** The runtime advertises `FortiqClassicalDev1` and uses classical development primitives. `FortiqPq1` (ML-KEM-768/X25519 HPKE and ML-DSA-65) is a reserved target and must not be claimed as deployed protection until implemented and verified.
 5. **Operator Session Lifecycle:** Operator lock, one-hour session expiry, or replacement of an active session cancels terminal forwarding and wipes the volatile operator workspace. In-flight shell handshakes fail closed.
 6. **Separation of Transport and Authority:** A libp2p `PeerId` represents transport identity only. Holding an active QUIC connection confers zero administrative privilege. Administrative authority is rooted in signed Genesis and portable via a 24-word mnemonic.
@@ -395,7 +390,7 @@ FORTIQ guarantees tenant isolation, post-quantum confidentiality, and sovereign 
 3. **Session Lifecycle:**
    - The managed user creates a ticket via GUI or `fortiq ticket create`.
    - The operator discovers the peer via Rendezvous, inspects metadata, and connects over the Relay circuit.
-   - The managed user explicitly enables remote access for that ticket.
+        - The managed user creates the ticket; its lifecycle determines shell availability.
    - Interactive shell sessions run through native PTY/ConPTY streaming. Abandoned sessions automatically release after 60 seconds of inactivity.
    - Intervention ends with `exit`, consent revocation, and a ticket transition to `RESOLVED` or `CLOSED`.
 

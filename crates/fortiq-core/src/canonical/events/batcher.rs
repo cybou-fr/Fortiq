@@ -69,11 +69,10 @@ impl EventPackBatcher {
 
     /// Determines if an event is an immediate safety event that must not be delayed.
     pub fn is_immediate_safety_event(event: &LogicalEvent) -> bool {
-        match event {
-            LogicalEvent::AccessEpochRevoked { .. } => true,
-            LogicalEvent::TicketStateChanged { new_state, .. } if *new_state == 4 => true,
-            _ => false,
-        }
+        matches!(
+            event,
+            LogicalEvent::TicketStateChanged { new_state, .. } if *new_state == 3 || *new_state == 4
+        )
     }
 
     /// Pushes an event into the batcher and returns whether it needs an immediate flush.
@@ -124,7 +123,7 @@ impl EventPackBatcher {
         self.first_event_at = None;
 
         Some(EventPackPlaintext {
-            schema_version: 1,
+            schema_version: 2,
             ticket_id: self.ticket_id,
             ticket_crypto_epoch: self.ticket_crypto_epoch,
             pack_nonce: nonce,
