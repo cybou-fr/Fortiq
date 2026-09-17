@@ -10,6 +10,7 @@ pub mod crypto;
 pub mod distribution;
 pub mod events;
 pub mod files;
+pub mod portable;
 pub mod records;
 pub mod shell;
 pub mod signing;

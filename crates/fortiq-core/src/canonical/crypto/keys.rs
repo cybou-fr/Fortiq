@@ -59,3 +59,33 @@ impl MnemonicEntropy {
         &self.0
     }
 }
+
+/// Seed for owner root signing key.
+/// Automatically zeroizes memory on drop.
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+pub struct OwnerRootSigningSeed(pub [u8; 32]);
+
+impl OwnerRootSigningSeed {
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+/// Seed for operator session ephemeral signing key.
+/// Automatically zeroizes memory on drop.
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+pub struct OperatorSessionSeed(pub [u8; 32]);
+
+impl OperatorSessionSeed {
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
