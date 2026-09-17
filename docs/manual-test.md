@@ -70,7 +70,7 @@ The complete installer:
 - Creates Start Menu shortcuts
 - Registers `fortiq-desktop.exe` for automatic start at interactive user logon
 
-### Check Identity and Open Support Ticket
+### Check Identity and Create a Support Ticket
 
 Open PowerShell or Command Prompt:
 
@@ -79,14 +79,15 @@ Open PowerShell or Command Prompt:
 fortiq status
 fortiq id
 
-# 7. Open support ticket (allowing remote access)
-fortiq ticket open
+# 7. Create a support ticket (remote access remains disabled)
+fortiq ticket create --title "Manual acceptance test" --priority NORMAL
 
-# 8. Confirm ticket state is OPEN
-fortiq ticket status
+# 8. Note the FTQ ticket ID, then explicitly enable terminal access
+fortiq ticket list
+fortiq ticket access <TICKET_ID> true
 ```
 
-*(Alternatively: right-click the FORTIQ tray icon in the taskbar notification area and click **Open Support Ticket**).*
+The same ticket and consent controls are available in the managed Desktop application.
 
 ---
 
@@ -114,7 +115,7 @@ Note the managed node's PeerId (e.g. `12D3KooW...`).
 
 ```powershell
 # 11. Connect interactively to remote terminal
-fortiq shell <MANAGED_PEER_ID>
+fortiq shell <MANAGED_PEER_ID> --ticket-id <TICKET_ID>
 ```
 
 You are now in an interactive ConPTY (Windows) or PTY (Linux) remote terminal session.
@@ -132,7 +133,7 @@ Type `exit` to detach from the remote shell session.
 
 ```powershell
 # 13. Execute a single command remotely and stream output
-fortiq shell <MANAGED_PEER_ID> --command "Get-Service FortiqService"
+fortiq shell <MANAGED_PEER_ID> --ticket-id <TICKET_ID> --command "Get-Service FortiqService"
 ```
 
 ---
@@ -140,8 +141,8 @@ fortiq shell <MANAGED_PEER_ID> --command "Get-Service FortiqService"
 ## 4. Closing the Ticket & Authorization Verification
 
 ```powershell
-# 14. Operator closes the ticket remotely
-fortiq ticket close <MANAGED_PEER_ID>
+# 14. Operator closes the canonical ticket
+fortiq ticket set-status <TICKET_ID> CLOSED
 ```
 
 ### Verify Access is Revoked
@@ -150,10 +151,10 @@ Back on the managed machine (or from the operator):
 
 ```powershell
 # 15. Check ticket state on managed machine (must show CLOSED)
-fortiq ticket status
+fortiq ticket show <TICKET_ID>
 
 # 16. Attempt to connect again as operator (must be denied)
-fortiq shell <MANAGED_PEER_ID>
+fortiq shell <MANAGED_PEER_ID> --ticket-id <TICKET_ID>
 # Expected output: Connection closed by remote host (Ticket CLOSED / Unauthorized)
 ```
 
@@ -184,7 +185,7 @@ Removing them requires a separate explicit `uninstall.ps1 -RemoveData` confirmat
 | `fortiq: command not found` | PATH not refreshed | Restart shell or run `C:\Program Files\FORTIQ\fortiq.exe` directly |
 | `Cannot connect to FORTIQ daemon` | `fortiq-service` not running | Run `Get-Service FortiqService` or `Start-Service FortiqService` |
 | Peer not showing in `fortiq peers` | Rendezvous not connected | Check firewall for UDP 4001 outgoing, check `fortiq status` |
-| `Access denied: ticket is CLOSED` | Support ticket closed | Run `fortiq ticket open` on the managed node |
+| `Access denied: ticket is CLOSED` | Support ticket closed | Create a new managed ticket with `fortiq ticket create` |
 
 ---
 
@@ -193,5 +194,5 @@ Removing them requires a separate explicit `uninstall.ps1 -RemoveData` confirmat
 Only one FORTIQ service node and one FORTIQ Desktop application may run on an
 operating system. For a complete manual workflow, use this host for the operator
 and a separate Windows 11 VM for the managed client. Install the managed package
-inside the VM, authorize the operator PeerId, open a ticket there, and perform the
+inside the VM, authorize the operator PeerId, create a ticket there, and perform the
 terminal workflow from the host operator console.

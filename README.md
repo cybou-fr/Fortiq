@@ -4,7 +4,7 @@
 
 <h1 align="center">FORTIQ</h1>
 
-<p align="center"><em>Sovereign peer-to-peer remote administration and supervision</em></p>
+<p align="center"><em>Sovereign peer-to-peer support platform</em></p>
 
 ---
 
@@ -28,9 +28,16 @@ a client, or fork it and take ownership of the changes.
 
 ---
 
-FORTIQ is a minimal peer-to-peer remote administration system in Rust. Every machine runs the same `fortiq-service`; milestones 0–13 provide persistent identity, configuration-derived operator/managed mode, direct and Circuit Relay v2 connectivity with DCUtR upgrade attempts, rendezvous discovery, HELLO metadata exchange, operator PeerId authorization, persistent support tickets, native Windows ConPTY and Linux PTY terminal streaming with xterm.js, local IPC, and background system service packaging (Windows Service / systemd).
+FORTIQ is a ticket-centric peer-to-peer support platform written in Rust. A ticket
+contains chat, file attachments, remote-access consent, shell sessions, and an
+activity history. The managed client owns the canonical ticket and revision; the
+operator keeps a synchronized mirror.
 
-Shell authorization requires both an open local ticket and an exact match with the configured operator PeerId.
+Every machine runs the same `fortiq-service`. Peers communicate over authenticated
+QUIC or Circuit Relay v2, discover one another through rendezvous, and authorize
+operations using the authenticated libp2p PeerId. Shell access additionally
+requires an active ticket and explicit remote-access consent from its managed
+client.
 
 ## Prerequisites
 
@@ -94,8 +101,18 @@ cargo run -p fortiq -- status
 # Discover available managed peers registered on the relay/rendezvous
 cargo run -p fortiq -- peers
 
-# Open an interactive remote shell session to the managed peer
-cargo run -p fortiq -- shell 12D3KooW_MANAGED_PEER_ID
+# On the managed client, create a ticket (remote shell remains disabled)
+cargo run -p fortiq -- ticket create --title "Outlook startup failure" --priority HIGH
+
+# Exchange ticket-scoped chat or files
+cargo run -p fortiq -- ticket message FTQ_TICKET_ID "I can reproduce the issue"
+cargo run -p fortiq -- ticket send-file FTQ_TICKET_ID ./diagnostics.zip
+
+# The managed user explicitly enables terminal access
+cargo run -p fortiq -- ticket access FTQ_TICKET_ID true
+
+# The operator opens a shell bound to that ticket
+cargo run -p fortiq -- shell 12D3KooW_MANAGED_PEER_ID --ticket-id FTQ_TICKET_ID
 ```
 
 The peers authenticate through mutual libp2p cryptographic handshake (`/fortiq/hello/1.0`), and the interactive ConPTY/PTY shell stream connects over the secure P2P transport.
@@ -110,49 +127,63 @@ FORTIQ follows a strict daemon / control-client architecture:
 
 FORTIQ permits exactly one service instance per operating system.
 
-## Remote shell & Terminal Streaming
+## Ticket lifecycle and terminal streaming
 
 Once the background service (`fortiq-service`) is running:
 
-1. The managed peer's user opens a local support ticket:
+1. The managed user creates a ticket. Creating it does not grant shell access:
 
 ```bash
-fortiq ticket open
-fortiq ticket status
+fortiq ticket create --title "VPN connection failure" --description "Error 809" --priority HIGH
+fortiq ticket list
 ```
 
-2. The operator checks discovered peers and connects to the managed peer:
+2. Chat and files are available while the ticket permits work. The managed user
+   separately enables remote assistance:
+
+```bash
+fortiq ticket message FTQ_TICKET_ID "The failure started this morning"
+fortiq ticket send-file FTQ_TICKET_ID ./vpn.log
+fortiq ticket access FTQ_TICKET_ID true
+```
+
+3. The operator checks discovered peers and connects using the exact ticket ID:
 
 ```bash
 # List discovered peers and connection status
 fortiq peers
 
 # Open an interactive terminal session
-fortiq shell 12D3KooW_TARGET
+fortiq shell 12D3KooW_TARGET --ticket-id FTQ_TICKET_ID
 
 # Or execute a single non-interactive command
-fortiq shell 12D3KooW_TARGET --command "whoami; hostname; uptime"
+fortiq shell 12D3KooW_TARGET --ticket-id FTQ_TICKET_ID --command "whoami; hostname; uptime"
 ```
 
-Only the configured operator PeerId is authorized to open terminal sessions. Only one concurrent shell session is permitted per managed peer.
+Only the configured operator PeerId is authorized to open terminal sessions. Only one concurrent shell session is permitted per managed peer. Revoking access terminates an active shell.
 
-3. The operator closes the managed peer's support ticket when intervention is complete:
+4. The operator resolves or closes the ticket through the canonical managed client:
 
 ```bash
-fortiq ticket close 12D3KooW_TARGET
+fortiq ticket set-status FTQ_TICKET_ID RESOLVED
+fortiq ticket set-status FTQ_TICKET_ID CLOSED
 ```
 
-If an active shell session is currently open, `ticket close` is rejected by the server (`cannot close ticket while shell session is active`). The contract is `exit shell -> ticket close -> CLOSED`. After closure, new shell streams are immediately rejected. By default, tickets are stored at `C:\ProgramData\FORTIQ\ticket.json` on Windows and `/var/lib/fortiq/ticket.json` on Linux.
+After closure, chat, file transfer, and new shell streams are rejected. Tickets,
+messages, attachments, events, sessions, and durable outbox records are stored in
+SQLite. A configured legacy `.json` ticket path is migrated to the corresponding
+`.db` path.
 
 A node whose own config sets `[ticket] auto_open = true` opens its ticket when
 the service starts, surviving restarts and reboots. It is intended for lab and
 infrastructure nodes, defaults to `false`, and is ignored on operator nodes,
-which hold no ticket. No remote peer can set it: on a client machine the ticket
-stays the user's own consent gesture.
+which hold no ticket. It creates a normal canonical ticket using the machine's
+real PeerId and configured operator PeerId. It still leaves remote shell access
+disabled. No remote peer can enable `auto_open`.
 
 ```toml
 [ticket]
-path = "/var/lib/fortiq/ticket.json"
+path = "/var/lib/fortiq/tickets.db"
 auto_open = true
 ```
 
@@ -284,13 +315,13 @@ For WSL/VPS instructions, see [docs/milestones.md](docs/milestones.md).
 
 ## Security scope
 
-The ticket is the supervised user's consent gesture. Only that user, on their own
-machine, can open one; the operator can never open a ticket remotely. A shell is
-accepted only while a ticket is open and only from the exactly configured
-operator PeerId, authenticated by libp2p. Closing a ticket is the operator's
-action, so a client cannot interrupt an operation in progress.
+Only a managed client can create a ticket, and that client remains its canonical
+owner. Creating a ticket enables support messaging and attachments, not a shell.
+A shell is accepted only while the ticket permits work, the client has explicitly
+enabled remote access, and the caller is the ticket's configured operator PeerId.
+The client can revoke consent at any time; an active shell is then terminated.
 
-`[ticket] auto_open = true` lets a machine open its own ticket at service start.
+`[ticket] auto_open = true` lets a managed machine create its own ticket at service start.
 It is meant for lab and infrastructure nodes that must stay reachable across
 restarts, it is set only in that machine's own local config, and no remote peer
 can turn it on. A real client machine leaves it off.
@@ -311,10 +342,11 @@ Identity files contain private keys and are ignored by Git. On Unix they are cre
    - On first launch, the daemon inspects `[identity] path`. If absent, a new Ed25519 keypair is cryptographically generated and safely saved with restricted permissions.
    - The daemon connects to the configured relay node, reserves a circuit slot, and registers its authenticated circuit address on the rendezvous point.
 3. **Session Lifecycle:**
-   - The managed user opens a ticket via GUI or `fortiq ticket open`.
+   - The managed user creates a ticket via GUI or `fortiq ticket create`.
    - The operator discovers the peer via Rendezvous, inspects metadata, and connects over the Relay circuit.
+   - The managed user explicitly enables remote access for that ticket.
    - Interactive shell sessions run through native PTY/ConPTY streaming. Abandoned sessions automatically release after 60 seconds of inactivity.
-   - Intervention ends with `exit` in the shell followed by `fortiq ticket close`.
+   - Intervention ends with `exit`, consent revocation, and a ticket transition to `RESOLVED` or `CLOSED`.
 
 ## Repository Governance & Branch Protection
 
@@ -327,4 +359,3 @@ To ensure unbroken stability across Linux and Windows targets, the following Git
   - `Tauri Desktop Frontend & Backend Check (ubuntu-latest)`
   - `Tauri Desktop Frontend & Backend Check (windows-latest)`
 - **Require linear history:** Enforce rebase or squash merges to maintain a clean git trajectory.
-
