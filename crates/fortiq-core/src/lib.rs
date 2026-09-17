@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 
+pub mod canonical;
 pub mod ipc;
 
 #[derive(Debug, Clone, Deserialize)]

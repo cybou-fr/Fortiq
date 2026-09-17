@@ -38,3 +38,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.11", features = ["v4"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 sha2 = "0.10"
+sha3 = "0.10"
+blake3 = "1.5"
+ciborium = "0.2"
+hex = "0.4"
+
