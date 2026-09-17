@@ -25,8 +25,12 @@
             <span>Tickets de Support</span>
           </button>
           <button class="nav-item" data-tab="peers" id="nav-tab-peers">
-            <i class="ph ph-desktop nav-icon"></i>
-            <span>Annuaire Réseau P2P</span>
+            <i class="ph ph-network nav-icon"></i>
+            <span>Réseau & Diagnostic</span>
+          </button>
+          <button class="nav-item" data-tab="settings" id="nav-tab-settings">
+            <i class="ph ph-gear-six nav-icon"></i>
+            <span>Paramètres</span>
           </button>
         </nav>
 
@@ -205,15 +209,24 @@
         </section>
       </main>
 
-      <!-- Operator P2P network inventory (separate technical directory) -->
+      <!-- Operator P2P network management and diagnostics -->
       <main id="peers-view" class="network-layout" style="display: none;">
         <section class="panel network-panel">
           <div class="panel-header">
             <div>
-              <h2>Annuaire Réseau P2P</h2>
-              <span class="panel-subtitle">Inventaire technique des nœuds détectés</span>
+              <h2>Réseau & Diagnostic</h2>
+              <span class="panel-subtitle">État du service, transports et nœuds P2P</span>
             </div>
-            <span id="network-count-badge" class="badge">0 Pair</span>
+            <div class="panel-actions">
+              <span id="network-count-badge" class="badge">0 Pair</span>
+              <button id="btn-network-refresh" class="btn btn-secondary btn-sm"><i class="ph ph-arrows-clockwise"></i> Actualiser</button>
+            </div>
+          </div>
+          <div class="diagnostic-grid">
+            <div class="diagnostic-item"><span>Service local</span><strong id="diag-service-state">Hors-ligne</strong></div>
+            <div class="diagnostic-item"><span>Pairs connectés</span><strong id="diag-connected-count">0</strong></div>
+            <div class="diagnostic-item"><span>Relais disponibles</span><strong id="diag-relay-count">0</strong></div>
+            <div class="diagnostic-item"><span>Peer ID local</span><strong id="diag-local-peer" class="code">—</strong></div>
           </div>
           <div class="network-security-note">
             <i class="ph ph-shield-check"></i>
@@ -223,6 +236,38 @@
             </div>
           </div>
           <div id="network-peer-list" class="network-peer-grid"></div>
+        </section>
+      </main>
+
+      <!-- Operator settings -->
+      <main id="settings-view" class="network-layout" style="display: none;">
+        <section class="panel network-panel settings-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Paramètres opérateur</h2>
+              <span class="panel-subtitle">Identité locale et comportement de la console</span>
+            </div>
+          </div>
+          <div class="settings-content">
+            <section class="settings-section">
+              <h3>Identité FORTIQ</h3>
+              <div class="settings-row"><span>Mode</span><strong>Opérateur</strong></div>
+              <div class="settings-row"><span>Version</span><strong id="settings-version">—</strong></div>
+              <div class="settings-row"><span>Peer ID local</span><strong id="settings-peer-id" class="code">—</strong></div>
+              <div class="settings-row"><span>État du service</span><strong id="settings-service-state">Hors-ligne</strong></div>
+            </section>
+            <section class="settings-section">
+              <h3>Actualisation</h3>
+              <label class="settings-control" for="settings-refresh-interval">
+                <span><strong>Fréquence de synchronisation</strong><small>Tickets, état réseau et diagnostics</small></span>
+                <select id="settings-refresh-interval" class="form-select">
+                  <option value="2500">2,5 secondes</option>
+                  <option value="5000">5 secondes</option>
+                  <option value="10000">10 secondes</option>
+                </select>
+              </label>
+            </section>
+          </div>
         </section>
       </main>
 

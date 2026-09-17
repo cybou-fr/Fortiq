@@ -91,7 +91,7 @@ export interface TicketDetail {
 
 // Application State
 let currentPeerId = "";
-let activeOperatorTab: "tickets" | "peers" = "tickets";
+let activeOperatorTab: "tickets" | "peers" | "settings" = "tickets";
 let ticketFilter: "ALL" | "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED" = "ALL";
 
 let ticketsCache: TicketRecord[] = [];
@@ -108,6 +108,7 @@ let isTerminalActive = false;
 let terminalTicketId: string | null = null;
 let terminalSwitchGeneration = 0;
 let terminalSwitchQueue: Promise<void> = Promise.resolve();
+let refreshTimer: number | null = null;
 
 function escapeHtml(text: string): string {
   const div = document.createElement("div");
@@ -138,6 +139,7 @@ function isPeerConnected(status: string): boolean {
 function applyMode(mode: "operator" | "managed", isOnline: boolean) {
   const operatorView = document.getElementById("operator-view");
   const peersView = document.getElementById("peers-view");
+  const settingsView = document.getElementById("settings-view");
   const managedView = document.getElementById("managed-view");
   const navMenu = document.querySelector(".nav-menu") as HTMLElement | null;
   const brandModeEl = document.getElementById("brand-mode");
@@ -146,6 +148,7 @@ function applyMode(mode: "operator" | "managed", isOnline: boolean) {
   if (mode === "operator") {
     if (operatorView) operatorView.style.display = activeOperatorTab === "tickets" ? "grid" : "none";
     if (peersView) peersView.style.display = activeOperatorTab === "peers" ? "grid" : "none";
+    if (settingsView) settingsView.style.display = activeOperatorTab === "settings" ? "grid" : "none";
     if (managedView) managedView.style.display = "none";
     if (navMenu) navMenu.style.display = "flex";
     if (brandModeEl) brandModeEl.textContent = "CONSOLE OPÉRATEUR";
@@ -153,6 +156,7 @@ function applyMode(mode: "operator" | "managed", isOnline: boolean) {
   } else {
     if (operatorView) operatorView.style.display = "none";
     if (peersView) peersView.style.display = "none";
+    if (settingsView) settingsView.style.display = "none";
     if (managedView) managedView.style.display = "flex";
     if (navMenu) navMenu.style.display = "none";
     if (brandModeEl) brandModeEl.textContent = "CLIENT MANAGÉ";
@@ -160,12 +164,14 @@ function applyMode(mode: "operator" | "managed", isOnline: boolean) {
   }
 }
 
-function setOperatorTab(tab: "tickets" | "peers") {
+function setOperatorTab(tab: "tickets" | "peers" | "settings") {
   activeOperatorTab = tab;
   const operatorView = document.getElementById("operator-view");
   const peersView = document.getElementById("peers-view");
+  const settingsView = document.getElementById("settings-view");
   if (operatorView) operatorView.style.display = tab === "tickets" ? "grid" : "none";
   if (peersView) peersView.style.display = tab === "peers" ? "grid" : "none";
+  if (settingsView) settingsView.style.display = tab === "settings" ? "grid" : "none";
   document.querySelectorAll<HTMLElement>(".nav-item").forEach((item) => {
     const selected = item.dataset.tab === tab;
     item.classList.toggle("active", selected);
@@ -415,6 +421,10 @@ async function loadSelectedTicketDetail(ticketId: string) {
       return;
     }
     currentTicketDetail = detail;
+    const shellAllowed = detail.ticket.state === "OPEN" || detail.ticket.state === "IN_PROGRESS";
+    if (isTerminalActive && terminalTicketId === ticketId && !shellAllowed) {
+      await invoke("close_terminal_session");
+    }
     renderTicketOverview(detail.ticket);
     renderOperatorChat(detail.messages);
     renderOperatorAttachments(detail.attachments);
@@ -478,6 +488,7 @@ function renderTicketOverview(ticket: TicketRecord) {
 
   const isClosed = ticket.state === "CLOSED";
   const isResolved = ticket.state === "RESOLVED";
+  const shellAllowed = ticket.state === "OPEN" || ticket.state === "IN_PROGRESS";
 
   if (btnTake) {
     btnTake.disabled = isClosed || ticket.state === "IN_PROGRESS";
@@ -490,8 +501,8 @@ function renderTicketOverview(ticket: TicketRecord) {
   }
 
   if (btnTermToggle) {
-    btnTermToggle.disabled = isClosed;
     const activeForTicket = isTerminalActive && terminalTicketId === ticket.id;
+    btnTermToggle.disabled = !activeForTicket && (!shellAllowed || !ticket.remote_access_enabled);
     btnTermToggle.textContent = activeForTicket ? "Fermer le shell" : "Démarrer le shell";
   }
 
@@ -503,9 +514,9 @@ function renderTicketOverview(ticket: TicketRecord) {
   // Update terminal denied banner if remote access is off or closed
   const deniedBanner = document.getElementById("terminal-denied-banner");
   const deniedMsg = document.getElementById("terminal-denied-msg");
-  if (isClosed) {
+  if (!shellAllowed) {
     if (deniedBanner) deniedBanner.style.display = "flex";
-    if (deniedMsg) deniedMsg.textContent = "Accès refusé : Le ticket est clôturé (DENIED_TICKET_CLOSED).";
+    if (deniedMsg) deniedMsg.textContent = "Shell indisponible : le ticket doit être ouvert ou en cours.";
   } else if (!ticket.remote_access_enabled) {
     if (deniedBanner) deniedBanner.style.display = "flex";
     if (deniedMsg) deniedMsg.textContent = "Accès refusé : Accès à distance révoqué par le client (DENIED_REMOTE_ACCESS_DISABLED).";
@@ -761,7 +772,21 @@ function renderClientAttachments(attachments: AttachmentRecord[]) {
 function renderNetworkPeers(peers: DesktopPeer[], isOnline: boolean) {
   const container = document.getElementById("network-peer-list");
   const countBadge = document.getElementById("network-count-badge");
+  const serviceState = document.getElementById("diag-service-state");
+  const connectedCount = document.getElementById("diag-connected-count");
+  const relayCount = document.getElementById("diag-relay-count");
+  const localPeer = document.getElementById("diag-local-peer");
   if (!container) return;
+
+  const connected = peers.filter((peer) => isPeerConnected(peer.status)).length;
+  const relays = peers.filter((peer) => peer.relay).length;
+  if (serviceState) {
+    serviceState.textContent = isOnline ? "En ligne" : "Hors-ligne";
+    serviceState.className = isOnline ? "online" : "offline";
+  }
+  if (connectedCount) connectedCount.textContent = String(connected);
+  if (relayCount) relayCount.textContent = String(relays);
+  if (localPeer) localPeer.textContent = currentPeerId || "—";
 
   if (countBadge) {
     countBadge.textContent = `${peers.length} Pair${peers.length > 1 ? "s" : ""}`;
@@ -796,6 +821,23 @@ function renderNetworkPeers(peers: DesktopPeer[], isOnline: boolean) {
     .join("");
 }
 
+function renderOperatorSettings(status: DesktopStatus, isOnline: boolean) {
+  const version = document.getElementById("settings-version");
+  const peerId = document.getElementById("settings-peer-id");
+  const serviceState = document.getElementById("settings-service-state");
+  if (version) version.textContent = status.version || "—";
+  if (peerId) peerId.textContent = status.peerId || "—";
+  if (serviceState) {
+    serviceState.textContent = isOnline ? "En ligne" : "Hors-ligne";
+    serviceState.className = isOnline ? "online" : "offline";
+  }
+}
+
+function scheduleRefresh(intervalMs: number) {
+  if (refreshTimer !== null) window.clearInterval(refreshTimer);
+  refreshTimer = window.setInterval(refresh, intervalMs);
+}
+
 // ----------------------------------------------------------------------------
 // Polling / State Refresh
 // ----------------------------------------------------------------------------
@@ -806,6 +848,7 @@ async function refresh() {
     const isOnline = status.agentState === "online";
     currentPeerId = status.peerId;
     updateStatusBadge(isOnline, isOnline ? "En Ligne (P2P)" : "Service Hors-Ligne");
+    renderOperatorSettings(status, isOnline);
 
     if (isOnline) {
       const mode = status.mode.toLowerCase() === "managed" ? "managed" : "operator";
@@ -1040,15 +1083,35 @@ async function connectTerminalSession(peerId: string, ticketId: string | null | 
 // ----------------------------------------------------------------------------
 
 function initEventListeners() {
-  // Navigation tabs (Tickets vs Peers)
+  // Operator navigation
   document.querySelectorAll<HTMLElement>(".nav-item").forEach((btn) => {
     btn.addEventListener("click", () => {
       const tab = btn.dataset.tab;
-      if (tab === "tickets" || tab === "peers") {
+      if (tab === "tickets" || tab === "peers" || tab === "settings") {
         setOperatorTab(tab);
       }
     });
   });
+
+  const btnNetworkRefresh = document.getElementById("btn-network-refresh") as HTMLButtonElement | null;
+  if (btnNetworkRefresh) {
+    btnNetworkRefresh.addEventListener("click", async () => {
+      btnNetworkRefresh.disabled = true;
+      await refresh();
+      btnNetworkRefresh.disabled = false;
+    });
+  }
+
+  const refreshSelect = document.getElementById("settings-refresh-interval") as HTMLSelectElement | null;
+  if (refreshSelect) {
+    const savedInterval = localStorage.getItem("fortiq.refreshInterval") || "2500";
+    refreshSelect.value = savedInterval;
+    refreshSelect.addEventListener("change", () => {
+      const intervalMs = Number(refreshSelect.value);
+      localStorage.setItem("fortiq.refreshInterval", String(intervalMs));
+      scheduleRefresh(intervalMs);
+    });
+  }
 
   // Ticket sub-tabs (overview, chat, files, events)
   document.querySelectorAll<HTMLElement>(".ticket-tab-btn[data-ttab]").forEach((btn) => {
@@ -1323,5 +1386,6 @@ window.addEventListener("DOMContentLoaded", () => {
   initTerminal();
   initEventListeners();
   refresh();
-  setInterval(refresh, 2500);
+  const savedInterval = Number(localStorage.getItem("fortiq.refreshInterval") || "2500");
+  scheduleRefresh(savedInterval);
 });

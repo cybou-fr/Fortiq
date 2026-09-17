@@ -215,6 +215,29 @@ body, html {
 .network-security-note div { display: flex; flex-direction: column; gap: 3px; }
 .network-security-note strong { color: var(--text-primary); }
 
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  padding: 18px 18px 0;
+}
+
+.diagnostic-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  padding: 14px;
+  background: rgba(8, 14, 24, 0.72);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.diagnostic-item span { color: var(--text-secondary); font-size: 12px; }
+.diagnostic-item strong { overflow: hidden; color: var(--text-primary); text-overflow: ellipsis; white-space: nowrap; }
+.diagnostic-item strong.online { color: #7ee787; }
+.diagnostic-item strong.offline { color: var(--accent-red); }
+
 .network-peer-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -238,6 +261,18 @@ body, html {
 .network-peer-card dt { color: var(--text-secondary); font-size: 12px; }
 .network-peer-card dd { margin: 0; overflow: hidden; color: var(--text-primary); text-overflow: ellipsis; white-space: nowrap; }
 .network-empty { grid-column: 1 / -1; min-height: 280px; }
+
+.settings-panel { max-width: 980px; margin: 0 auto; }
+.settings-content { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 18px; }
+.settings-section { padding: 18px; background: rgba(8, 14, 24, 0.72); border: 1px solid var(--border-color); border-radius: 10px; }
+.settings-section h3 { margin-bottom: 14px; font-size: 15px; }
+.settings-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; padding: 11px 0; border-top: 1px solid var(--border-color); }
+.settings-row span { color: var(--text-secondary); font-size: 13px; }
+.settings-row strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 500; }
+.settings-control { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-top: 12px; border-top: 1px solid var(--border-color); }
+.settings-control > span { display: flex; flex-direction: column; gap: 4px; }
+.settings-control small { color: var(--text-secondary); }
+.settings-control .form-select { width: 170px; }
 
 .user-badge {
   display: flex;
@@ -928,6 +963,8 @@ button:disabled, .btn:disabled {
   .detail-card { padding-top: 14px; gap: 9px; }
   .detail-row { padding-bottom: 8px; }
   .detail-actions { padding-top: 12px; padding-bottom: 12px; }
+  .diagnostic-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-content { grid-template-columns: 1fr; }
 }
 
 @media (max-height: 720px) {
