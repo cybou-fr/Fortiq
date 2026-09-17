@@ -361,7 +361,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
     let consent_response = consent_rx.await.unwrap().expect("consent request failed");
     assert!(matches!(
         consent_response,
-        TicketSyncResponse::Ack { success: false, .. }
+        TicketSyncResponse::MutationRejected { .. }
     ));
     assert!(
         !managed_store

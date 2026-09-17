@@ -587,29 +587,72 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             ticket_id,
             state: new_state,
         } => {
-            match state.ticket_store.db().update_ticket_state(
-                &ticket_id,
-                new_state,
-                &state.peer_id.to_string(),
-            ) {
+            let local_peer_id = state.peer_id.to_string();
+            let current = match state.ticket_store.db().get_ticket(&ticket_id) {
+                Ok(Some(ticket)) => ticket,
+                Ok(None) => return IpcResponse::Error("Ticket introuvable".to_string()),
+                Err(error) => return IpcResponse::Error(format!("Erreur: {error}")),
+            };
+            if current.client_peer_id != local_peer_id {
+                let peer = match current.client_peer_id.parse::<PeerId>() {
+                    Ok(peer) => peer,
+                    Err(error) => {
+                        return IpcResponse::Error(format!("PeerId client invalide: {error}"));
+                    }
+                };
+                let Some(sender) = state.p2p_sender.as_ref() else {
+                    return IpcResponse::Error("Sous-système P2P indisponible".to_string());
+                };
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                if sender
+                    .send(fortiq_p2p::P2pCommand::SyncTickets {
+                        peer,
+                        dial: None,
+                        request: fortiq_p2p::TicketSyncRequest::UpdateStatus {
+                            ticket_id,
+                            state: new_state,
+                        },
+                        reply: reply_tx,
+                    })
+                    .await
+                    .is_err()
+                {
+                    return IpcResponse::Error("Canal de commande P2P fermé".to_string());
+                }
+                return match tokio::time::timeout(std::time::Duration::from_secs(10), reply_rx)
+                    .await
+                {
+                    Ok(Ok(Ok(fortiq_p2p::TicketSyncResponse::MutationApplied(ticket)))) => {
+                        IpcResponse::TicketUpdated(Some(*ticket))
+                    }
+                    Ok(Ok(Ok(fortiq_p2p::TicketSyncResponse::MutationRejected {
+                        message,
+                        ..
+                    }))) => IpcResponse::Error(message),
+                    Ok(Ok(Err(error))) => IpcResponse::Error(error),
+                    _ => IpcResponse::Error(
+                        "Mutation mise en attente jusqu'à la reconnexion du client".to_string(),
+                    ),
+                };
+            }
+
+            match state
+                .ticket_store
+                .db()
+                .update_ticket_state(&ticket_id, new_state, &local_peer_id)
+            {
                 Ok(updated) => {
                     if let Some(ref ticket) = updated {
-                        let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
-                            &ticket.operator_peer_id
-                        } else {
-                            &ticket.client_peer_id
-                        };
-                        if let Ok(peer) = target_str.parse::<PeerId>() {
+                        if let Ok(peer) = ticket.operator_peer_id.parse::<PeerId>() {
                             if let Some(ref sender) = state.p2p_sender {
                                 let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
                                 let _ = sender
                                     .send(fortiq_p2p::P2pCommand::SyncTickets {
                                         peer,
                                         dial: None,
-                                        request: fortiq_p2p::TicketSyncRequest::UpdateStatus {
-                                            ticket_id: ticket.id.clone(),
-                                            state: new_state,
-                                        },
+                                        request: fortiq_p2p::TicketSyncRequest::PushTicket(
+                                            Box::new(ticket.clone()),
+                                        ),
                                         reply: reply_tx,
                                     })
                                     .await;
@@ -655,10 +698,9 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                                     .send(fortiq_p2p::P2pCommand::SyncTickets {
                                         peer,
                                         dial: None,
-                                        request: fortiq_p2p::TicketSyncRequest::SetRemoteAccess {
-                                            ticket_id: ticket.id.clone(),
-                                            enabled,
-                                        },
+                                        request: fortiq_p2p::TicketSyncRequest::PushTicket(
+                                            Box::new(ticket.clone()),
+                                        ),
                                         reply: reply_tx,
                                     })
                                     .await;

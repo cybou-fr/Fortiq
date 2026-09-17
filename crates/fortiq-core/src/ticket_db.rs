@@ -433,6 +433,60 @@ impl TicketDb {
         Ok(())
     }
 
+    /// Mirrors the record supplied by the ticket's authenticated client owner.
+    /// Unlike ordinary replication, the owner's snapshot may replace a locally
+    /// divergent record at the same or a higher local revision.
+    pub fn import_canonical_ticket(&self, ticket: &TicketRecord) -> Result<()> {
+        if ticket.revision == 0 {
+            anyhow::bail!("ticket revision must be greater than zero");
+        }
+        let conn = self.conn.lock().unwrap();
+        let participants: Option<(String, String)> = conn
+            .query_row(
+                "SELECT client_peer_id, operator_peer_id FROM tickets WHERE id = ?1",
+                params![ticket.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((client, operator)) = participants {
+            if client != ticket.client_peer_id || operator != ticket.operator_peer_id {
+                anyhow::bail!("canonical ticket participants do not match local record");
+            }
+        }
+        conn.execute(
+            "INSERT INTO tickets (
+                id, title, description, state, priority,
+                client_peer_id, operator_peer_id, remote_access_enabled, revision,
+                created_at, updated_at, closed_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                description = excluded.description,
+                state = excluded.state,
+                priority = excluded.priority,
+                remote_access_enabled = excluded.remote_access_enabled,
+                revision = excluded.revision,
+                updated_at = excluded.updated_at,
+                closed_at = excluded.closed_at",
+            params![
+                ticket.id,
+                ticket.title,
+                ticket.description,
+                ticket.state.as_str(),
+                ticket.priority.as_str(),
+                ticket.client_peer_id,
+                ticket.operator_peer_id,
+                if ticket.remote_access_enabled { 1 } else { 0 },
+                ticket.revision,
+                ticket.created_at,
+                ticket.updated_at,
+                ticket.closed_at,
+            ],
+        )
+        .context("failed to import canonical ticket record")?;
+        Ok(())
+    }
+
     pub fn get_ticket(&self, ticket_id: &str) -> Result<Option<TicketRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -1171,6 +1225,37 @@ mod tests {
         let stored = db.get_ticket(&ticket.id).unwrap().unwrap();
         assert!(stored.remote_access_enabled);
         assert_eq!(stored.revision, current.revision);
+    }
+
+    #[test]
+    fn canonical_owner_snapshot_replaces_a_divergent_operator_copy() {
+        let db = TicketDb::open_in_memory().unwrap();
+        let owner = db
+            .create_ticket(
+                "Canonical",
+                "owner wins",
+                TicketPriority::Normal,
+                "c1",
+                "op1",
+            )
+            .unwrap();
+        let mut divergent = owner.clone();
+        divergent.state = TicketState::Resolved;
+        divergent.revision = 7;
+        db.import_ticket(&divergent).unwrap();
+
+        let mut canonical = owner;
+        canonical.state = TicketState::InProgress;
+        canonical.revision = 2;
+        db.import_canonical_ticket(&canonical).unwrap();
+
+        let stored = db.get_ticket(&canonical.id).unwrap().unwrap();
+        assert_eq!(stored.state, TicketState::InProgress);
+        assert_eq!(stored.revision, 2);
+
+        let mut forged = canonical;
+        forged.client_peer_id = "attacker".to_string();
+        assert!(db.import_canonical_ticket(&forged).is_err());
     }
 
     #[test]

@@ -410,7 +410,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         .expect("ticket-aware close failed");
     assert!(matches!(
         close_response,
-        TicketSyncResponse::Ack { success: true, .. }
+        TicketSyncResponse::MutationApplied(_)
     ));
 
     // Step E: Verify ticket state is persisted as CLOSED on managed peer
@@ -765,7 +765,7 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         .expect("ticket-aware close failed");
     assert!(matches!(
         close_response,
-        TicketSyncResponse::Ack { success: true, .. }
+        TicketSyncResponse::MutationApplied(_)
     ));
 
     // Step D: Verify ticket state is persisted as CLOSED on managed peer

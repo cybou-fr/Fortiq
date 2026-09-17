@@ -179,7 +179,7 @@ async fn e2e_managed_operator_quic_interaction() {
     let close_result = rx.await.unwrap().expect("ticket-aware close failed");
     assert!(matches!(
         close_result,
-        TicketSyncResponse::Ack { success: true, .. }
+        TicketSyncResponse::MutationApplied(_)
     ));
 
     // Verify ticket state is persisted as CLOSED on managed peer
@@ -349,7 +349,7 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
     let close_result = rx.await.unwrap().expect("v2 response expected");
     assert!(matches!(
         close_result,
-        TicketSyncResponse::Ack { success: false, .. }
+        TicketSyncResponse::MutationRejected { .. }
     ));
 
     // Ticket must remain OPEN

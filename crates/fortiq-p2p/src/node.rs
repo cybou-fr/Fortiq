@@ -20,7 +20,7 @@ use tracing::{info, warn};
 
 pub const HELLO_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/hello/1.0");
 pub const SHELL_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/shell/2.0");
-pub const TICKET_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/ticket/2.0");
+pub const TICKET_PROTOCOL_V3: StreamProtocol = StreamProtocol::new("/fortiq/ticket/3.0");
 pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/2.0");
 pub const FILE_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/file/2.0");
 const MAX_HELLO_BYTES: usize = 16 * 1024;
@@ -58,7 +58,18 @@ pub enum TicketSyncRequest {
 pub enum TicketSyncResponse {
     Tickets(Vec<fortiq_core::TicketRecord>),
     Ticket(Option<fortiq_core::TicketRecord>),
-    Ack { success: bool, message: String },
+    MutationApplied(Box<fortiq_core::TicketRecord>),
+    MutationRejected {
+        kind: MutationRejectionKind,
+        message: String,
+        canonical: Option<Box<fortiq_core::TicketRecord>>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MutationRejectionKind {
+    Permanent,
+    Conflict,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -719,7 +730,7 @@ pub async fn run(
                 request_response::json::codec::Codec::default()
                     .set_request_size_maximum(64 * 1024)
                     .set_response_size_maximum(256 * 1024),
-                [(TICKET_PROTOCOL_V2, ProtocolSupport::Full)],
+                [(TICKET_PROTOCOL_V3, ProtocolSupport::Full)],
                 request_response::Config::default().with_request_timeout(Duration::from_secs(10)),
             );
             let chat = request_response::Behaviour::with_codec(
@@ -1147,7 +1158,10 @@ async fn event_loop(
                                             outbox_id: Some(record.id),
                                         });
                                     }
-                                    Err(error) => warn!(outbox_id = %record.id, %error, "invalid ticket sync outbox payload"),
+                                    Err(error) => {
+                                        warn!(outbox_id = %record.id, %error, "dropping invalid ticket sync outbox payload");
+                                        let _ = ticket_store.db().remove_outbox(&record.id);
+                                    }
                                 }
                             }
                         }
@@ -1227,7 +1241,10 @@ async fn event_loop(
                                             (Some(record.id), reply),
                                         );
                                     }
-                                    Err(error) => warn!(outbox_id = %record.id, %error, "invalid file outbox payload"),
+                                    Err(error) => {
+                                        warn!(outbox_id = %record.id, %error, "dropping invalid file outbox payload");
+                                        let _ = ticket_store.db().remove_outbox(&record.id);
+                                    }
                                 }
                             }
                         }
@@ -1540,35 +1557,39 @@ async fn handle_ticket_v2(
                         let remote = peer.to_string();
                         let authorized = ticket.client_peer_id == remote
                             && ticket.operator_peer_id == local_peer_id;
-                        let res = if authorized {
-                            ticket_store.db().import_ticket(&ticket)
+                        if !authorized {
+                            TicketSyncResponse::MutationRejected {
+                                kind: MutationRejectionKind::Permanent,
+                                message: "PeerId non autorisé à publier ce ticket".to_string(),
+                                canonical: None,
+                            }
                         } else {
-                            Err(anyhow::anyhow!("PeerId non autorisé à publier ce ticket"))
-                        };
-                        match res {
-                            Ok(()) => TicketSyncResponse::Ack {
-                                success: true,
-                                message: "Ticket synchronisé".to_string(),
-                            },
-                            Err(e) => TicketSyncResponse::Ack {
-                                success: false,
-                                message: format!("Erreur: {e}"),
-                            },
+                            match ticket_store.db().import_canonical_ticket(&ticket) {
+                                Ok(()) => TicketSyncResponse::MutationApplied(ticket),
+                                Err(error) => TicketSyncResponse::MutationRejected {
+                                    kind: MutationRejectionKind::Conflict,
+                                    message: format!("Erreur: {error}"),
+                                    canonical: ticket_store
+                                        .db()
+                                        .get_ticket(&ticket.id)
+                                        .ok()
+                                        .flatten()
+                                        .map(Box::new),
+                                },
+                            }
                         }
                     }
                     TicketSyncRequest::UpdateStatus { ticket_id, state } => {
-                        let authorized = ticket_store
-                            .db()
-                            .get_ticket(&ticket_id)
-                            .ok()
-                            .flatten()
-                            .is_some_and(|ticket| {
-                                is_ticket_counterparty(&ticket, local_peer_id, &peer)
-                            });
+                        let current = ticket_store.db().get_ticket(&ticket_id).ok().flatten();
+                        let authorized = current.as_ref().is_some_and(|ticket| {
+                            ticket.client_peer_id == local_peer_id
+                                && ticket.operator_peer_id == peer.to_string()
+                        });
                         if !authorized {
-                            TicketSyncResponse::Ack {
-                                success: false,
+                            TicketSyncResponse::MutationRejected {
+                                kind: MutationRejectionKind::Permanent,
                                 message: "PeerId non autorisé pour ce ticket".to_string(),
+                                canonical: current.map(Box::new),
                             }
                         } else {
                             match ticket_store.db().update_ticket_state(
@@ -1576,56 +1597,33 @@ async fn handle_ticket_v2(
                                 state,
                                 &peer.to_string(),
                             ) {
-                                Ok(Some(_)) => TicketSyncResponse::Ack {
-                                    success: true,
-                                    message: "Statut mis à jour".to_string(),
-                                },
-                                Ok(None) => TicketSyncResponse::Ack {
-                                    success: false,
+                                Ok(Some(ticket)) => {
+                                    TicketSyncResponse::MutationApplied(Box::new(ticket))
+                                }
+                                Ok(None) => TicketSyncResponse::MutationRejected {
+                                    kind: MutationRejectionKind::Permanent,
                                     message: "Ticket introuvable".to_string(),
+                                    canonical: None,
                                 },
-                                Err(e) => TicketSyncResponse::Ack {
-                                    success: false,
+                                Err(e) => TicketSyncResponse::MutationRejected {
+                                    kind: MutationRejectionKind::Permanent,
                                     message: format!("Erreur: {e}"),
+                                    canonical: current.map(Box::new),
                                 },
                             }
                         }
                     }
-                    TicketSyncRequest::SetRemoteAccess { ticket_id, enabled } => {
-                        let authorized = ticket_store
-                            .db()
-                            .get_ticket(&ticket_id)
-                            .ok()
-                            .flatten()
-                            .is_some_and(|ticket| {
-                                ticket.client_peer_id == peer.to_string()
-                                    && ticket.operator_peer_id == local_peer_id
-                            });
-                        if !authorized {
-                            TicketSyncResponse::Ack {
-                                success: false,
-                                message: "Seul le client authentifié peut modifier l'accès distant"
-                                    .to_string(),
-                            }
-                        } else {
-                            match ticket_store.db().set_remote_access(
-                                &ticket_id,
-                                enabled,
-                                &peer.to_string(),
-                            ) {
-                                Ok(Some(_)) => TicketSyncResponse::Ack {
-                                    success: true,
-                                    message: "Accès à distance mis à jour".to_string(),
-                                },
-                                Ok(None) => TicketSyncResponse::Ack {
-                                    success: false,
-                                    message: "Ticket introuvable".to_string(),
-                                },
-                                Err(e) => TicketSyncResponse::Ack {
-                                    success: false,
-                                    message: format!("Erreur: {e}"),
-                                },
-                            }
+                    TicketSyncRequest::SetRemoteAccess { ticket_id, .. } => {
+                        TicketSyncResponse::MutationRejected {
+                            kind: MutationRejectionKind::Permanent,
+                            message: "L'accès distant doit être modifié sur le client propriétaire"
+                                .to_string(),
+                            canonical: ticket_store
+                                .db()
+                                .get_ticket(&ticket_id)
+                                .ok()
+                                .flatten()
+                                .map(Box::new),
                         }
                     }
                 };
@@ -1639,12 +1637,27 @@ async fn handle_ticket_v2(
                 response,
             } => {
                 if let Some(pending) = pending_sync_tickets.remove(&request_id) {
-                    let acknowledged =
-                        matches!(response, TicketSyncResponse::Ack { success: true, .. });
-                    if acknowledged {
+                    let terminal = matches!(
+                        response,
+                        TicketSyncResponse::MutationApplied(_)
+                            | TicketSyncResponse::MutationRejected { .. }
+                    );
+                    if terminal {
                         if let Some(outbox_id) = pending.outbox_id.as_deref() {
                             let _ = ticket_store.db().remove_outbox(outbox_id);
                         }
+                    }
+                    match &response {
+                        TicketSyncResponse::MutationApplied(ticket) => {
+                            let _ = ticket_store.db().import_canonical_ticket(ticket);
+                        }
+                        TicketSyncResponse::MutationRejected {
+                            canonical: Some(ticket),
+                            ..
+                        } if ticket.client_peer_id != local_peer_id => {
+                            let _ = ticket_store.db().import_canonical_ticket(ticket);
+                        }
+                        _ => {}
                     }
                     let _ = pending.reply.send(Ok(response));
                 }
