@@ -288,12 +288,12 @@ body, html {
   color: var(--accent-red);
 }
 
-/* Main 3-panel layout (Operator View) */
+/* Ticket list + selected ticket workspace */
 .main-layout {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(240px, 280px) minmax(300px, 350px) minmax(360px, 1fr);
-  grid-template-areas: "list detail terminal";
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  grid-template-areas: "list detail";
   min-width: 0;
   height: 100vh;
   overflow: hidden;
@@ -301,7 +301,6 @@ body, html {
 
 .panel-list { grid-area: list; }
 .panel-detail { grid-area: detail; }
-.panel-terminal { grid-area: terminal; }
 
 .panel {
   display: flex;
@@ -588,7 +587,7 @@ button:disabled, .btn:disabled {
   border: 1px solid rgba(0, 180, 255, 0.25);
 }
 
-.panel-terminal {
+.ticket-terminal {
   background-color: rgba(9, 13, 20, 0.75);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -597,9 +596,11 @@ button:disabled, .btn:disabled {
   flex-direction: column;
   position: relative;
   transition: all 0.2s ease;
+  flex: 1;
+  min-height: 0;
 }
 
-.panel-terminal.fullscreen {
+.ticket-terminal.fullscreen {
   position: fixed;
   top: 0;
   left: 0;
@@ -900,7 +901,7 @@ button:disabled, .btn:disabled {
 @media (max-width: 1240px) {
   .sidebar { width: 200px; flex-basis: 200px; }
   .main-layout {
-    grid-template-columns: minmax(220px, 250px) minmax(270px, 310px) minmax(320px, 1fr);
+    grid-template-columns: minmax(240px, 290px) minmax(0, 1fr);
   }
   .panel-header, .detail-card, .detail-actions {
     padding-left: 16px;
@@ -922,10 +923,8 @@ button:disabled, .btn:disabled {
   .user-badge { justify-content: center; padding: 12px; }
   .main-layout {
     grid-template-columns: minmax(230px, 270px) minmax(0, 1fr);
-    grid-template-rows: minmax(250px, 42%) minmax(270px, 58%);
-    grid-template-areas: "list detail" "list terminal";
+    grid-template-areas: "list detail";
   }
-  .panel-detail { border-bottom: 1px solid var(--border-color); }
   .detail-card { padding-top: 14px; gap: 9px; }
   .detail-row { padding-bottom: 8px; }
   .detail-actions { padding-top: 12px; padding-bottom: 12px; }

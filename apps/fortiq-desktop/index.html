@@ -88,6 +88,7 @@
             <button class="ticket-tab-btn" data-ttab="chat"><i class="ph ph-chat-centered-text"></i> Chat</button>
             <button class="ticket-tab-btn" data-ttab="files"><i class="ph ph-paperclip"></i> Fichiers</button>
             <button class="ticket-tab-btn" data-ttab="events"><i class="ph ph-clock-counter-clockwise"></i> Journal</button>
+            <button class="ticket-tab-btn" data-ttab="terminal"><i class="ph ph-terminal-window"></i> Shell</button>
           </div>
 
           <!-- Tab 1: Overview -->
@@ -171,17 +172,16 @@
               </div>
             </div>
           </div>
-        </section>
 
-        <!-- Panel 3: Live Terminal -->
-        <section class="panel panel-terminal">
+          <!-- Tab 5: Ticket-scoped shell -->
+          <div id="ticket-pane-terminal" class="ticket-tab-pane ticket-terminal" style="display: none;">
           <div class="panel-header terminal-header">
             <div class="terminal-title">
               <span class="status-dot" id="terminal-dot"></span>
-              <span id="terminal-title-text">Terminal P2P</span>
+              <span id="terminal-title-text">Shell du ticket</span>
             </div>
             <div class="terminal-actions">
-              <button class="btn btn-secondary btn-sm" id="btn-terminal-toggle" disabled>Démarrer Terminal</button>
+              <button class="btn btn-secondary btn-sm" id="btn-terminal-toggle" disabled>Démarrer le shell</button>
               <button class="btn-icon" id="btn-term-clear" title="Effacer l'écran">
                 <i class="ph ph-trash"></i>
               </button>
@@ -198,8 +198,9 @@
             <div id="xterm-container" class="xterm-container"></div>
             <div class="terminal-placeholder" id="terminal-placeholder">
               <div class="terminal-line banner">Terminal P2P (ConPTY / POSIX PTY)</div>
-              <div class="terminal-line banner">Le terminal est strictement lié au ticket sélectionné et nécessite l'autorisation d'accès à distance du client.</div>
+              <div class="terminal-line banner">Ce shell appartient uniquement au ticket sélectionné et nécessite l'autorisation d'accès à distance du client.</div>
             </div>
+          </div>
           </div>
         </section>
       </main>

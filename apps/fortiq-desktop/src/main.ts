@@ -105,6 +105,7 @@ let managedActiveTicket: TicketRecord | null = null;
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let isTerminalActive = false;
+let terminalTicketId: string | null = null;
 let terminalSwitchGeneration = 0;
 let terminalSwitchQueue: Promise<void> = Promise.resolve();
 
@@ -172,15 +173,18 @@ function setOperatorTab(tab: "tickets" | "peers") {
   });
 }
 
-function setTicketSubTab(tab: "overview" | "chat" | "files" | "events") {
+function setTicketSubTab(tab: "overview" | "chat" | "files" | "events" | "terminal") {
   document.querySelectorAll<HTMLElement>(".ticket-tab-btn[data-ttab]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.ttab === tab);
   });
-  const panes = ["overview", "chat", "files", "events"];
+  const panes = ["overview", "chat", "files", "events", "terminal"];
   panes.forEach((p) => {
     const paneEl = document.getElementById(`ticket-pane-${p}`);
-    if (paneEl) paneEl.style.display = p === tab ? (p === "chat" || p === "files" ? "flex" : "block") : "none";
+    if (paneEl) paneEl.style.display = p === tab ? (p === "overview" || p === "events" ? "block" : "flex") : "none";
   });
+  if (tab === "terminal") {
+    window.setTimeout(() => fitAddon?.fit(), 0);
+  }
 }
 
 function setClientSubTab(tab: "chat" | "files") {
@@ -399,6 +403,12 @@ function clearTicketDetails() {
 
 async function loadSelectedTicketDetail(ticketId: string) {
   try {
+    if (isTerminalActive && terminalTicketId && terminalTicketId !== ticketId) {
+      await invoke("close_terminal_session");
+      isTerminalActive = false;
+      terminalTicketId = null;
+      term?.clear();
+    }
     const detail = await invoke<TicketDetail | null>("get_ticket", { ticketId });
     if (!detail) {
       clearTicketDetails();
@@ -481,7 +491,8 @@ function renderTicketOverview(ticket: TicketRecord) {
 
   if (btnTermToggle) {
     btnTermToggle.disabled = isClosed;
-    btnTermToggle.textContent = isTerminalActive ? "Fermer Terminal" : "Démarrer Terminal";
+    const activeForTicket = isTerminalActive && terminalTicketId === ticket.id;
+    btnTermToggle.textContent = activeForTicket ? "Fermer le shell" : "Démarrer le shell";
   }
 
   if (chatInput) chatInput.disabled = isClosed;
@@ -921,12 +932,17 @@ function initTerminal() {
 
   listen("terminal-closed", () => {
     isTerminalActive = false;
+    terminalTicketId = null;
+    const container = document.getElementById("xterm-container");
+    const placeholder = document.getElementById("terminal-placeholder");
     const termDot = document.getElementById("terminal-dot");
     const termTitle = document.getElementById("terminal-title-text");
     const btnToggle = document.getElementById("btn-terminal-toggle") as HTMLButtonElement | null;
     if (termDot) termDot.className = "status-dot";
-    if (termTitle) termTitle.textContent = "Terminal P2P — Session terminée";
-    if (btnToggle) btnToggle.textContent = "Démarrer Terminal";
+    if (termTitle) termTitle.textContent = "Shell du ticket — Session terminée";
+    if (btnToggle) btnToggle.textContent = "Démarrer le shell";
+    if (container) container.style.display = "none";
+    if (placeholder) placeholder.style.display = "flex";
     if (term) {
       term.write("\r\n\x1b[33m[FORTIQ] Session terminal fermée.\x1b[0m\r\n");
     }
@@ -985,12 +1001,14 @@ async function connectTerminalSession(peerId: string, ticketId: string | null | 
     });
     if (generation !== terminalSwitchGeneration) return;
     isTerminalActive = true;
+    terminalTicketId = ticketId || null;
     if (termDot) termDot.className = "status-dot online";
-    if (termTitle) termTitle.textContent = `Terminal actif — ${peerId.substring(0, 14)}`;
-    if (btnToggle) btnToggle.textContent = "Fermer Terminal";
+    if (termTitle) termTitle.textContent = `Shell actif — ticket ${(ticketId || "").substring(0, 8)}`;
+    if (btnToggle) btnToggle.textContent = "Fermer le shell";
   } catch (err: any) {
     if (generation !== terminalSwitchGeneration) return;
     isTerminalActive = false;
+    terminalTicketId = null;
     const errMsg = String(err);
     if (term) {
       term.write(`\r\n\x1b[1;31m[ACCÈS REFUSÉ]\x1b[0m ${errMsg}\r\n`);
@@ -1011,7 +1029,7 @@ async function connectTerminalSession(peerId: string, ticketId: string | null | 
     if (btnToggle) {
       btnToggle.disabled = false;
       if (!isTerminalActive) {
-        btnToggle.textContent = "Démarrer Terminal";
+        btnToggle.textContent = "Démarrer le shell";
       }
     }
   }
@@ -1035,7 +1053,7 @@ function initEventListeners() {
   // Ticket sub-tabs (overview, chat, files, events)
   document.querySelectorAll<HTMLElement>(".ticket-tab-btn[data-ttab]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const ttab = btn.dataset.ttab as "overview" | "chat" | "files" | "events";
+      const ttab = btn.dataset.ttab as "overview" | "chat" | "files" | "events" | "terminal";
       if (ttab) setTicketSubTab(ttab);
     });
   });
@@ -1156,14 +1174,8 @@ function initEventListeners() {
     btnTermToggle.addEventListener("click", () => {
       if (!currentTicketDetail) return;
       const ticket = currentTicketDetail.ticket;
-      if (isTerminalActive) {
-        // Stop current session
-        isTerminalActive = false;
-        const placeholder = document.getElementById("terminal-placeholder");
-        const container = document.getElementById("xterm-container");
-        if (placeholder) placeholder.style.display = "flex";
-        if (container) container.style.display = "none";
-        btnTermToggle.textContent = "Démarrer Terminal";
+      if (isTerminalActive && terminalTicketId === ticket.id) {
+        invoke("close_terminal_session").catch((err) => console.error("close_terminal_session error:", err));
         return;
       }
       queueTerminalSession(ticket.client_peer_id, ticket.id);
@@ -1179,7 +1191,7 @@ function initEventListeners() {
   }
 
   const btnTermFullscreen = document.getElementById("btn-term-fullscreen");
-  const panelTerminal = document.querySelector(".panel-terminal");
+  const panelTerminal = document.querySelector(".ticket-terminal");
   if (btnTermFullscreen && panelTerminal) {
     btnTermFullscreen.addEventListener("click", () => {
       panelTerminal.classList.toggle("fullscreen");
