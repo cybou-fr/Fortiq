@@ -487,21 +487,21 @@ impl TicketDb {
             anyhow::bail!("ticket revision must be greater than zero");
         }
         let conn = self.conn.lock().unwrap();
-        let local: Option<(String, String, u64, String)> = conn
+        let local: Option<(String, String, u64)> = conn
             .query_row(
-                "SELECT client_peer_id, operator_peer_id, revision, access_epoch
+                "SELECT client_peer_id, operator_peer_id, revision
                  FROM tickets WHERE id = ?1",
                 params![ticket.id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
-        if let Some((client, operator, local_revision, local_epoch)) = local {
+        if let Some((client, operator, local_revision)) = local {
             if client != ticket.client_peer_id || operator != ticket.operator_peer_id {
                 anyhow::bail!("canonical ticket participants do not match local record");
             }
-            if ticket.revision < local_revision && ticket.access_epoch == local_epoch {
+            if ticket.revision < local_revision {
                 anyhow::bail!(
-                    "stale canonical ticket revision {} reuses local AccessEpoch at revision {}",
+                    "stale canonical ticket revision {} cannot replace local revision {}",
                     ticket.revision,
                     local_revision
                 );
@@ -734,11 +734,7 @@ impl TicketDb {
                         revision = revision + 1 WHERE id = ?4",
                 params![
                     if enabled { 1 } else { 0 },
-                    if enabled {
-                        random_access_epoch()
-                    } else {
-                        random_access_epoch()
-                    },
+                    random_access_epoch(),
                     now,
                     ticket_id
                 ],
@@ -1347,12 +1343,12 @@ mod tests {
         let mut canonical = owner;
         canonical.state = TicketState::InProgress;
         canonical.access_epoch = "22222222222222222222222222222222".to_string();
-        canonical.revision = 2;
+        canonical.revision = 7;
         db.import_canonical_ticket(&canonical).unwrap();
 
         let stored = db.get_ticket(&canonical.id).unwrap().unwrap();
         assert_eq!(stored.state, TicketState::InProgress);
-        assert_eq!(stored.revision, 2);
+        assert_eq!(stored.revision, 7);
 
         let mut stale_same_epoch = canonical.clone();
         stale_same_epoch.revision = 1;

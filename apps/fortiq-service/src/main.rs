@@ -23,27 +23,33 @@ struct InstanceLock {
     _file: File,
 }
 
-fn instance_lock_path() -> PathBuf {
+fn instance_lock_path_for(config_path: &Path) -> PathBuf {
+    let config_path = fs::canonicalize(config_path).unwrap_or_else(|_| config_path.to_path_buf());
+    let config_key = blake3::hash(config_path.to_string_lossy().as_bytes());
+    let instance_id = config_key.to_hex().to_string();
+
     #[cfg(windows)]
     {
         let base = std::env::var_os("PROGRAMDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-        base.join("FORTIQ").join("fortiq-service.lock")
+        base.join("FORTIQ")
+            .join("instances")
+            .join(format!("fortiq-service-{instance_id}.lock"))
     }
 
     #[cfg(not(windows))]
     {
         if rustix::process::geteuid().is_root() {
-            PathBuf::from("/run/fortiq-service.lock")
+            PathBuf::from("/run/fortiq").join(format!("fortiq-service-{instance_id}.lock"))
         } else if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
             PathBuf::from(runtime_dir)
                 .join("fortiq")
-                .join("fortiq-service.lock")
+                .join(format!("fortiq-service-{instance_id}.lock"))
         } else {
             std::env::temp_dir()
                 .join("fortiq")
-                .join("fortiq-service.lock")
+                .join(format!("fortiq-service-{instance_id}.lock"))
         }
     }
 }
@@ -72,8 +78,8 @@ fn acquire_instance_lock_at(path: &Path) -> Result<InstanceLock> {
     Ok(InstanceLock { _file: file })
 }
 
-fn acquire_instance_lock() -> Result<InstanceLock> {
-    acquire_instance_lock_at(&instance_lock_path())
+fn acquire_instance_lock(config_path: &Path) -> Result<InstanceLock> {
+    acquire_instance_lock_at(&instance_lock_path_for(config_path))
 }
 
 #[derive(Debug, Parser)]
@@ -188,8 +194,8 @@ fn main() -> Result<()> {
 }
 
 pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
-    let _instance_lock = acquire_instance_lock()?;
     let config = Config::load(&config_path).await?;
+    let _instance_lock = acquire_instance_lock(&config_path)?;
     let mode = config.mode();
     let ticket_store = TicketStore::try_new(config.ticket_path())
         .context("Failed to open persistent ticket database")?;
@@ -273,7 +279,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
     if args.shell.is_some() && mode != NodeMode::Operator {
         anyhow::bail!("Administrative shell initiation is available only on the operator peer.");
     }
-    let _instance_lock = acquire_instance_lock()?;
+    let _instance_lock = acquire_instance_lock(&config_path)?;
     let (keypair, identity_status) = load_or_create_identity(&config.identity.path).await?;
     let peer_id = keypair.public().to_peer_id();
 
@@ -432,8 +438,16 @@ mod tests {
 
     #[test]
     fn instance_lock_path_is_accessible() {
-        let p = instance_lock_path();
-        assert!(p.to_string_lossy().contains("fortiq-service.lock"));
+        let p = instance_lock_path_for(Path::new("fortiq-test.toml"));
+        assert!(p.to_string_lossy().contains("fortiq-service-"));
+        assert!(p.to_string_lossy().ends_with(".lock"));
+    }
+
+    #[test]
+    fn different_config_paths_use_different_instance_namespaces() {
+        let first = instance_lock_path_for(Path::new("fortiq-first.toml"));
+        let second = instance_lock_path_for(Path::new("fortiq-second.toml"));
+        assert_ne!(first, second);
     }
 
     #[tokio::test]

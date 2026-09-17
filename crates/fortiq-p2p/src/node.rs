@@ -13,7 +13,7 @@ use fortiq_core::{
         control::Genesis,
         portable::certificate::OperatorSessionCertificate,
         retirement::authority::CanonicalAuthorityResolver,
-        signing::{Ed25519Signer, Ed25519Verifier, Verifier},
+        signing::{derive_signing_key_id, Ed25519Signer, Ed25519Verifier, Verifier},
         types::{AccessEpoch, SegmentId},
     },
     Config, NodeInfo, TicketStore,
@@ -30,7 +30,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 pub const HELLO_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/hello/1.0");
-pub const SHELL_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/shell/2.0");
 pub const SHELL_PROTOCOL_NEXT: StreamProtocol = StreamProtocol::new("/fortiq/shell/next");
 pub const TICKET_PROTOCOL_V3: StreamProtocol = StreamProtocol::new("/fortiq/ticket/3.0");
 pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/2.0");
@@ -131,6 +130,27 @@ struct PendingTicketSync {
     outbox_id: Option<String>,
 }
 
+struct PendingShellNext {
+    ticket_id: String,
+    access_epoch: AccessEpoch,
+    segment_id: SegmentId,
+    certificate: OperatorSessionCertificate,
+    session_signer: Arc<Ed25519Signer>,
+    reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
+}
+
+#[derive(Debug)]
+pub struct OpenShellNextCommand {
+    pub peer: PeerId,
+    pub ticket_id: String,
+    pub access_epoch: AccessEpoch,
+    pub segment_id: SegmentId,
+    pub certificate: OperatorSessionCertificate,
+    pub session_signer: Arc<Ed25519Signer>,
+    pub dial: Option<Multiaddr>,
+    pub reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
+}
+
 fn is_ticket_mutation(request: &TicketSyncRequest) -> bool {
     matches!(
         request,
@@ -157,16 +177,7 @@ pub enum P2pCommand {
         dial: Option<Multiaddr>,
         reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
     },
-    OpenShellNext {
-        peer: PeerId,
-        ticket_id: String,
-        access_epoch: AccessEpoch,
-        segment_id: SegmentId,
-        certificate: OperatorSessionCertificate,
-        session_signer: Arc<Ed25519Signer>,
-        dial: Option<Multiaddr>,
-        reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
-    },
+    OpenShellNext(Box<OpenShellNextCommand>),
     SyncTickets {
         peer: PeerId,
         dial: Option<Multiaddr>,
@@ -421,82 +432,31 @@ fn dial_peer_candidates(
     peer: PeerId,
     registry: &PeerRegistry,
     relay_peer: Option<&str>,
-) {
+) -> bool {
     use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
     let addresses = dial_candidates(peer, registry, relay_peer);
     if addresses.is_empty() {
         warn!(remote_peer_id = %peer, "no address available for peer dial");
-        return;
+        return false;
     }
     let opts = DialOpts::peer_id(peer)
         .addresses(addresses)
         .condition(PeerCondition::DisconnectedAndNotDialing)
         .build();
     match swarm.dial(opts) {
-        Ok(()) => info!(remote_peer_id = %peer, "dialing peer candidates"),
+        Ok(()) => {
+            info!(remote_peer_id = %peer, "dialing peer candidates");
+            true
+        }
         Err(libp2p::swarm::DialError::DialPeerConditionFalse(_)) => {
             // Discovery may refresh while the same peer is already connecting.
+            true
         }
-        Err(error) => warn!(remote_peer_id = %peer, %error, "dial attempt failed"),
+        Err(error) => {
+            warn!(remote_peer_id = %peer, %error, "dial attempt failed");
+            false
+        }
     }
-}
-
-fn spawn_open_shell_stream(
-    peer: PeerId,
-    ticket_id: Option<String>,
-    mut control: libp2p_stream::Control,
-    reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
-) {
-    tokio::spawn(async move {
-        use futures::AsyncReadExt;
-        let ticket_id = match ticket_id {
-            Some(ticket_id) if !ticket_id.trim().is_empty() => ticket_id,
-            _ => {
-                let _ = reply.send(Err(
-                    "Un identifiant de ticket est obligatoire pour ouvrir un terminal".to_string(),
-                ));
-                return;
-            }
-        };
-        let res = match tokio::time::timeout(
-            Duration::from_secs(12),
-            control.open_stream(peer, SHELL_PROTOCOL_V2),
-        )
-        .await
-        {
-            Ok(Ok(mut stream)) => {
-                let handshake = fortiq_shell::ShellHandshake::new(ticket_id);
-                if let Err(e) = handshake.write_to_async(&mut stream).await {
-                    Err(format!("Échec de l'envoi du handshake shell: {e}"))
-                } else {
-                    let mut auth = [0u8; 1];
-                    match stream.read_exact(&mut auth).await {
-                        Ok(()) => {
-                            if auth[0] == fortiq_shell::AUTHORIZED {
-                                Ok(stream)
-                            } else {
-                                Err(match auth[0] {
-                                    fortiq_shell::DENIED_NO_TICKET => "Aucun ticket ouvert sur le poste distant : son utilisateur doit l'ouvrir lui-même".to_string(),
-                                    fortiq_shell::DENIED_BUSY => "Une session terminal est déjà active sur le poste distant".to_string(),
-                                    fortiq_shell::DENIED_TICKET_CLOSED => "Le ticket associé à cette session est fermé".to_string(),
-                                    fortiq_shell::DENIED_REMOTE_ACCESS_DISABLED => "L'accès à distance est actuellement désactivé par le client sur ce ticket".to_string(),
-                                    _ => "Le poste distant a refusé l'accès au terminal (PeerId opérateur non autorisé)".to_string(),
-                                })
-                            }
-                        }
-                        Err(e) => Err(format!("Échec de lecture de l'autorisation shell: {e}")),
-                    }
-                }
-            }
-            Ok(Err(v2_err)) => Err(format!(
-                "Le poste distant ne prend pas en charge le protocole shell lié au ticket: {v2_err}"
-            )),
-            Err(_) => {
-                Err("Délai d'attente dépassé lors de l'établissement du flux shell".to_string())
-            }
-        };
-        let _ = reply.send(res);
-    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -958,10 +918,6 @@ async fn event_loop(
         libp2p::request_response::OutboundRequestId,
         tokio::sync::oneshot::Sender<Result<ChatAckWire, String>>,
     > = std::collections::HashMap::new();
-    type PendingShellOpen = (
-        Option<String>,
-        tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
-    );
     type PendingSyncDial = (
         TicketSyncRequest,
         tokio::sync::oneshot::Sender<Result<TicketSyncResponse, String>>,
@@ -978,7 +934,7 @@ async fn event_loop(
         Option<String>,
     );
 
-    let mut pending_shell_opens: std::collections::HashMap<PeerId, Vec<PendingShellOpen>> =
+    let mut pending_shell_next: std::collections::HashMap<PeerId, Vec<PendingShellNext>> =
         std::collections::HashMap::new();
     let mut pending_sync_dials: std::collections::HashMap<PeerId, Vec<PendingSyncDial>> =
         std::collections::HashMap::new();
@@ -1016,16 +972,17 @@ async fn event_loop(
                         ));
                         warn!(remote_peer_id = %peer, ticket_id = ?ticket_id, "legacy shell/2.0 request rejected");
                     }
-                    P2pCommand::OpenShellNext {
-                        peer,
-                        ticket_id,
-                        access_epoch,
-                        segment_id,
-                        certificate,
-                        session_signer,
-                        dial: _,
-                        reply,
-                    } => {
+                    P2pCommand::OpenShellNext(command) => {
+                        let OpenShellNextCommand {
+                            peer,
+                            ticket_id,
+                            access_epoch,
+                            segment_id,
+                            certificate,
+                            session_signer,
+                            dial,
+                            reply,
+                        } = *command;
                         if swarm.is_connected(&peer) {
                             spawn_open_shell_next(
                                 peer,
@@ -1039,10 +996,43 @@ async fn event_loop(
                                 reply,
                             );
                         } else {
-                            let _ = reply.send(Err(
-                                "Le protocole shell/next exige une connexion authentifiée préalable"
-                                    .to_string(),
-                            ));
+                            pending_shell_next
+                                .entry(peer)
+                                .or_default()
+                                .push(PendingShellNext {
+                                    ticket_id,
+                                    access_epoch,
+                                    segment_id,
+                                    certificate,
+                                    session_signer,
+                                    reply,
+                                });
+                            let dial_started = if let Some(addr) = dial {
+                                match swarm.dial(addr) {
+                                    Ok(()) => true,
+                                    Err(error) => {
+                                        warn!(remote_peer_id = %peer, %error, "shell/next dial failed");
+                                        false
+                                    }
+                                }
+                            } else {
+                                dial_peer_candidates(
+                                    swarm,
+                                    peer,
+                                    &peer_registry,
+                                    config.network.relay_peer.as_deref(),
+                                )
+                            };
+                            if !dial_started {
+                                if let Some(pending) = pending_shell_next.remove(&peer) {
+                                    for request in pending {
+                                        let _ = request.reply.send(Err(
+                                            "Impossible de joindre le pair distant: aucune adresse de dial disponible"
+                                                .to_string(),
+                                        ));
+                                    }
+                                }
+                            }
                         }
                     }
                     P2pCommand::SyncTickets { peer, dial, request, reply } => {
@@ -1201,9 +1191,19 @@ async fn event_loop(
                 libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                     info!(remote_peer_id = %peer_id, ?endpoint, "authenticated connection established");
                     peer_registry.record_connection(peer_id, &endpoint);
-                    if let Some(pending) = pending_shell_opens.remove(&peer_id) {
-                        for (tid, reply) in pending {
-                            spawn_open_shell_stream(peer_id, tid, stream_control.clone(), reply);
+                    if let Some(pending) = pending_shell_next.remove(&peer_id) {
+                        for request in pending {
+                            spawn_open_shell_next(
+                                peer_id,
+                                local_info.peer_id.parse().expect("local PeerId"),
+                                request.ticket_id,
+                                request.access_epoch,
+                                request.segment_id,
+                                request.certificate,
+                                request.session_signer,
+                                stream_control.clone(),
+                                request.reply,
+                            );
                         }
                     }
                     if let Some(pending) = pending_sync_dials.remove(&peer_id) {
@@ -1441,8 +1441,9 @@ async fn event_loop(
                     warn!(?peer_id, %error, "outgoing connection failed");
                     if let Some(peer) = peer_id {
                         if !swarm.is_connected(&peer) {
-                            if let Some(pending) = pending_shell_opens.remove(&peer) {
-                                for (_, reply) in pending {
+                            if let Some(pending) = pending_shell_next.remove(&peer) {
+                                for request in pending {
+                                    let reply = request.reply;
                                     let _ = reply.send(Err(format!(
                                         "Impossible d'établir la connexion avec le poste distant: {error}"
                                     )));
@@ -1932,7 +1933,10 @@ async fn handle_incoming_shell_next(
     let authority_valid = handshake.network_id == genesis.tbs.network_id
         && handshake.segment_id == expected_segment
         && handshake.operator_transport_peer_id == remote_peer.to_string()
+        && handshake.session_certificate.network_id == genesis.tbs.network_id
         && handshake.session_certificate.owner_id == genesis.tbs.owner_id
+        && handshake.session_certificate.operator_key_id
+            == derive_signing_key_id(&handshake.session_certificate.session_pubkey)
         && handshake.session_certificate.host_entity == expected_host
         && handshake
             .session_certificate
@@ -2025,6 +2029,7 @@ async fn handle_incoming_shell_next(
     let db = ticket_store.db().clone();
     let ticket_id = ticket.id.clone();
     let operator_transport = remote_peer.to_string();
+    let watched_certificate_expires_at = handshake.session_certificate.expires_at;
     tokio::spawn(async move {
         let _guard = ShellSessionGuard(shells_flag);
         let _ = db.record_shell_session_start(
@@ -2045,7 +2050,10 @@ async fn handle_incoming_shell_next(
                         ticket.state.permits_work()
                             && ticket.remote_access_enabled
                             && AccessEpoch::from_hex(&ticket.access_epoch).ok() == Some(watched_epoch)
-                    });
+                    }) && std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() < watched_certificate_expires_at;
                     if !valid { break; }
                 }
             } => Err(anyhow::anyhow!("ticket access epoch was revoked")),

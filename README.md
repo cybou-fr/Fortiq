@@ -100,9 +100,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Quickstart: Operator and Managed Peer
 
-FORTIQ permits exactly one service node and one Desktop application per operating
-system. Run the operator and managed client on separate machines or virtual
-machines.
+FORTIQ permits one service instance per configuration namespace. Separate
+configurations with distinct identity and listen paths can run on the same
+operating system; concurrent Desktop/service pairs should also set distinct
+`ipc.pipe` and `ipc.terminal_pipe` values.
 
 Both operator and managed peers connect to the sovereign public relay/rendezvous
 infrastructure for NAT traversal and peer discovery:
@@ -169,7 +170,10 @@ FORTIQ follows a strict daemon / control-client architecture:
 - **`fortiq`**: Lightweight command-line client communicating with `fortiq-service` via local IPC (UNIX domain socket on Linux, Named Pipe on Windows).
 - **`fortiq-desktop`**: Slint desktop GUI console with system tray integration and native terminal session support.
 
-FORTIQ permits exactly one service instance per operating system.
+FORTIQ permits one service instance per configuration path. The service lock is
+namespaced by the resolved config path, while an explicitly configured IPC
+endpoint remains the authoritative way to connect a Desktop instance to its
+matching service.
 
 ## Ticket lifecycle and terminal streaming
 

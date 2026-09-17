@@ -5,6 +5,10 @@
 must not be presented as deployed protection until its implementation and
 interoperability vectors are complete.
 
+Profile IDs are immutable: `1` is reserved for `FortiqPq1`; `2` is assigned to
+the current `FortiqClassicalDev1` development profile. Existing canonical bytes
+must never change meaning after an upgrade.
+
 ## Standards basis
 
 FORTIQ-PQ1 is designed around:

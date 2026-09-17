@@ -1380,16 +1380,18 @@ where
 
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     if p2p_sender
-        .send(fortiq_p2p::P2pCommand::OpenShellNext {
-            peer: target_peer,
-            ticket_id,
-            access_epoch,
-            segment_id,
-            certificate,
-            session_signer,
-            dial: dial_addr,
-            reply: reply_tx,
-        })
+        .send(fortiq_p2p::P2pCommand::OpenShellNext(Box::new(
+            fortiq_p2p::OpenShellNextCommand {
+                peer: target_peer,
+                ticket_id,
+                access_epoch,
+                segment_id,
+                certificate,
+                session_signer,
+                dial: dial_addr,
+                reply: reply_tx,
+            },
+        )))
         .await
         .is_err()
     {

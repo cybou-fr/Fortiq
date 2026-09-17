@@ -48,6 +48,10 @@ Storage payloads and individual Reed–Solomon shards additionally employ `BLAKE
 
 The wire format carries an explicit crypto profile. The current development runtime uses **`FortiqClassicalDev1`** with the classical primitives implemented by the Rust crates. **`FortiqPq1`** is reserved for the post-quantum target and is not a deployed security claim yet.
 
+Profile IDs are stable and are never reinterpreted: numeric `1` remains the
+reserved `FortiqPq1` profile, while numeric `2` identifies the current
+`FortiqClassicalDev1` runtime profile.
+
 The reserved **FORTIQ-PQ1** target is defined as:
 
 - **Key Encapsulation (KEM):** Hybrid `MLKEM768-X25519` via HPKE (RFC 9180 profile).

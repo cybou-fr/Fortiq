@@ -195,15 +195,15 @@ impl StorageClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(u16)]
 pub enum CryptoProfileId {
+    /// Reserved historical PQ-capable profile identifier.
+    FortiqPq1 = 1,
     /// Classical development profile currently used by the runtime.
     ///
     /// This profile uses Ed25519 signing, X25519 key agreement, HKDF-SHA256, and
     /// ChaCha20-Poly1305 AEAD. Real PQ-capable profiles remain reserved for a later
     /// implementation and must not claim to be active while the runtime does not
     /// provide the corresponding primitives.
-    FortiqClassicalDev1 = 1,
-    /// Reserved for a future PQ-capable profile.
-    FortiqPq1 = 2,
+    FortiqClassicalDev1 = 2,
 }
 
 impl CryptoProfileId {
@@ -213,10 +213,29 @@ impl CryptoProfileId {
 
     pub const fn from_u16(v: u16) -> Option<Self> {
         match v {
-            1 => Some(Self::FortiqClassicalDev1),
-            2 => Some(Self::FortiqPq1),
+            1 => Some(Self::FortiqPq1),
+            2 => Some(Self::FortiqClassicalDev1),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CryptoProfileId;
+
+    #[test]
+    fn crypto_profile_ids_never_change_meaning() {
+        assert_eq!(CryptoProfileId::FortiqPq1.as_u16(), 1);
+        assert_eq!(CryptoProfileId::FortiqClassicalDev1.as_u16(), 2);
+        assert_eq!(
+            CryptoProfileId::from_u16(1),
+            Some(CryptoProfileId::FortiqPq1)
+        );
+        assert_eq!(
+            CryptoProfileId::from_u16(2),
+            Some(CryptoProfileId::FortiqClassicalDev1)
+        );
     }
 }
 
