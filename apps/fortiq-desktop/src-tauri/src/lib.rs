@@ -639,6 +639,7 @@ pub fn run() {
         .manage(instance_lock)
         .manage(TerminalState(tokio::sync::Mutex::new(None)))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             log_diagnostic("[SETUP] Beginning application setup...");
 
