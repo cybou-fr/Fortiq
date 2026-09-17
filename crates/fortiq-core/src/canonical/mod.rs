@@ -7,6 +7,7 @@ pub mod codec;
 pub mod control;
 pub mod control_store;
 pub mod crypto;
+pub mod events;
 pub mod records;
 pub mod signing;
 pub mod types;
@@ -34,6 +35,6 @@ pub use signing::{
     SigningError, Verifier, OBJECT_ID_DOMAIN, OBJECT_SIG_DOMAIN,
 };
 pub use types::{
-    BlobId, CryptoProfileId, EntityId, KeyId, NetworkId, ObjectId, OwnerId, RsProfile, SegmentId,
-    StorageClass, StreamId, TicketId,
+    AccessEpoch, BlobId, CryptoProfileId, EntityId, KeyId, NetworkId, ObjectId, OwnerId, RsProfile,
+    SegmentId, StorageClass, StreamId, TicketId,
 };

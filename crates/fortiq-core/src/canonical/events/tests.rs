@@ -1,0 +1,349 @@
+use crate::canonical::events::batcher::{BatchPolicy, EventPackBatcher, FlushDecision};
+use crate::canonical::events::graph::EventGraph;
+use crate::canonical::events::reducer::{reduce_ticket_with_resolver, SimpleRoleResolver};
+use crate::canonical::events::safety::{TicketLifecycle, TicketSafetyState};
+use crate::canonical::events::stream::{StreamCursor, StreamError};
+use crate::canonical::events::tombstone::{CanonicalHeadSet, Tombstone};
+use crate::canonical::records::{EventPackPlaintext, LogicalEvent, ObjectTbs, SignedObject};
+use crate::canonical::types::{
+    AccessEpoch, BlobId, CryptoProfileId, KeyId, NetworkId, ObjectId, StorageClass, StreamId,
+    TicketId,
+};
+
+fn dummy_signed_object(
+    writer_key_id: KeyId,
+    stream_id: StreamId,
+    seq: u64,
+    prev_pack_id: Option<ObjectId>,
+    ciphertext_len: u64,
+) -> SignedObject {
+    let tbs = ObjectTbs {
+        version: 1,
+        network_id: NetworkId::from_bytes([0x11; 32]),
+        segment_id: None,
+        storage_class: StorageClass::StatePack,
+        writer_key_id,
+        writer_stream_id: stream_id,
+        writer_seq: seq,
+        prev_pack_id,
+        crypto_profile: CryptoProfileId::FortiqPq1,
+        envelope_set_digest: [0x22; 32],
+        ciphertext_digest: [0x33; 32],
+        ciphertext_len,
+    };
+    SignedObject {
+        tbs,
+        signature: vec![0xaa; 64],
+    }
+}
+
+#[test]
+fn test_writer_stream_append_and_fork_detection() {
+    let stream_id = StreamId::from_bytes([0x01; 16]);
+    let mut cursor = StreamCursor::new(stream_id);
+
+    let pack1 = ObjectId::from_bytes([0x10; 32]);
+    let pack2 = ObjectId::from_bytes([0x20; 32]);
+    let pack3 = ObjectId::from_bytes([0x30; 32]);
+
+    // Seq 1 with no prev -> OK
+    let entry1 = cursor
+        .accept_append(1, None, pack1)
+        .expect("seq 1 must succeed");
+    assert_eq!(entry1.seq, 1);
+    assert_eq!(entry1.prev_pack_id, None);
+    assert_eq!(entry1.pack_id, pack1);
+
+    // Seq 2 with prev pack1 -> OK
+    let entry2 = cursor
+        .accept_append(2, Some(pack1), pack2)
+        .expect("seq 2 must succeed");
+    assert_eq!(entry2.seq, 2);
+    assert_eq!(entry2.prev_pack_id, Some(pack1));
+    assert_eq!(entry2.pack_id, pack2);
+
+    // Fork: competing successor for seq 2 -> ForkDetected
+    let fork_err = cursor
+        .accept_append(2, Some(pack1), pack3)
+        .expect_err("competing seq 2 must be rejected as a fork");
+    assert!(matches!(fork_err, StreamError::ForkDetected { .. }));
+
+    // Gap: jumping to seq 5 -> SequenceGap
+    let gap_err = cursor
+        .accept_append(5, Some(pack2), pack3)
+        .expect_err("seq gap must be rejected");
+    assert!(matches!(gap_err, StreamError::SequenceGap { .. }));
+
+    // Wrong prev: seq 3 with wrong prev -> ForkDetected
+    let wrong_prev_err = cursor
+        .accept_append(3, Some(pack1), pack3)
+        .expect_err("wrong prev must be rejected");
+    assert!(matches!(wrong_prev_err, StreamError::ForkDetected { .. }));
+
+    // Correct seq 3 -> OK
+    let entry3 = cursor
+        .accept_append(3, Some(pack2), pack3)
+        .expect("seq 3 must succeed");
+    assert_eq!(entry3.seq, 3);
+    assert_eq!(entry3.prev_pack_id, Some(pack2));
+}
+
+#[test]
+fn test_event_pack_batcher_immediate_safety_flush() {
+    let ticket_id = TicketId::from_bytes([0x77; 16]);
+    let mut batcher = EventPackBatcher::new(Some(ticket_id), Some(1));
+
+    // Regular chat messages buffer normally
+    let chat1 = LogicalEvent::ChatMessage {
+        ticket_id,
+        seq: 1,
+        body: "Hello operator".into(),
+    };
+    assert_eq!(batcher.push(chat1), FlushDecision::Buffered);
+    assert_eq!(batcher.len(), 1);
+
+    let chat2 = LogicalEvent::ChatMessage {
+        ticket_id,
+        seq: 2,
+        body: "Here is more info".into(),
+    };
+    assert_eq!(batcher.push(chat2), FlushDecision::Buffered);
+    assert_eq!(batcher.len(), 2);
+
+    // Immediate safety event: AccessEpochRevoked must flush immediately!
+    let revoke = LogicalEvent::AccessEpochRevoked {
+        ticket_id,
+        access_epoch: [0x55; 16],
+    };
+    assert_eq!(batcher.push(revoke), FlushDecision::FlushImmediately);
+
+    // Flush creates valid pack
+    let pack = batcher.flush().expect("must flush accumulated events");
+    assert_eq!(pack.events.len(), 3);
+    assert_ne!(pack.pack_nonce, [0u8; 16]);
+    assert!(batcher.is_empty());
+}
+
+#[test]
+fn test_event_pack_batcher_max_events_threshold() {
+    let policy = BatchPolicy {
+        max_events: 3,
+        max_delay_ms: 1000,
+        target_plaintext_bytes: 64 * 1024,
+        hard_max_bytes: 256 * 1024,
+    };
+    let ticket_id = TicketId::from_bytes([0x77; 16]);
+    let mut batcher = EventPackBatcher::with_policy(Some(ticket_id), Some(1), policy);
+
+    let chat = |i| LogicalEvent::ChatMessage {
+        ticket_id,
+        seq: i,
+        body: format!("msg {}", i),
+    };
+
+    assert_eq!(batcher.push(chat(1)), FlushDecision::Buffered);
+    assert_eq!(batcher.push(chat(2)), FlushDecision::Buffered);
+    // 3rd reaches max_events threshold -> FlushImmediately
+    assert_eq!(batcher.push(chat(3)), FlushDecision::FlushImmediately);
+}
+
+#[test]
+fn test_client_access_epoch_safety_invariants() {
+    let ticket_id = TicketId::from_bytes([0x99; 16]);
+    let initial_epoch = AccessEpoch::from_bytes([0x11; 16]);
+    let mut safety = TicketSafetyState::new_client_open(ticket_id, initial_epoch);
+
+    // Invariant 8: Client-owned initial valid state
+    assert!(safety.permits_shell());
+    assert_eq!(safety.lifecycle, TicketLifecycle::Open);
+
+    // Operator moves to InProgress: still valid
+    safety.set_in_progress_by_operator();
+    assert!(safety.permits_shell());
+    assert_eq!(safety.lifecycle, TicketLifecycle::InProgress);
+
+    // Invariant 9: Client immediate revocation
+    safety.revoke_by_client();
+    assert!(!safety.permits_shell());
+    assert!(!safety.access_valid);
+
+    // Operator CANNOT restore access
+    safety.set_in_progress_by_operator();
+    assert!(
+        !safety.permits_shell(),
+        "Operator MUST NOT restore shell permission"
+    );
+
+    // Client reopens ticket with NEW epoch
+    let new_epoch = AccessEpoch::from_bytes([0x22; 16]);
+    safety.reopen_by_client(new_epoch);
+    assert!(
+        safety.permits_shell(),
+        "Client reopen with new epoch must grant access"
+    );
+    assert_eq!(safety.access_epoch, new_epoch);
+    assert_eq!(safety.lifecycle, TicketLifecycle::Open);
+}
+
+#[test]
+fn test_reducer_full_ticket_reconstruction_and_tombstone() {
+    let mut graph = EventGraph::new();
+    let ticket_id = TicketId::from_bytes([0x42; 16]);
+    let stream_id = StreamId::from_bytes([0x01; 16]);
+    let client_key = KeyId::from_bytes([0x01; 32]);
+    let operator_key = KeyId::from_bytes([0x02; 32]);
+    let resolver = SimpleRoleResolver::new()
+        .with_client(client_key)
+        .with_operator(operator_key);
+
+    // Pack 1: TicketCreated by Client
+    let initial_epoch = 12345u64;
+    let pack1_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x01; 16],
+        events: vec![LogicalEvent::TicketCreated {
+            ticket_id,
+            title: "Crashing Wi-Fi adapter".into(),
+            initial_epoch,
+        }],
+    };
+    let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
+    let pack1_id = graph
+        .append_pack(pack1_signed, pack1_plain, stream_id, 1, None)
+        .expect("pack 1 append failed");
+
+    // Pack 2: ChatMessage + FileAttached
+    let blob_id = BlobId::from_bytes([0xbb; 32]);
+    let pack2_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x02; 16],
+        events: vec![
+            LogicalEvent::ChatMessage {
+                ticket_id,
+                seq: 1,
+                body: "Attaching crash dump log".into(),
+            },
+            LogicalEvent::FileAttached {
+                ticket_id,
+                blob_id,
+                filename: "crash.log".into(),
+                size_bytes: 4096,
+            },
+        ],
+    };
+    let pack2_signed = dummy_signed_object(client_key, stream_id, 2, Some(pack1_id), 200);
+    let pack2_id = graph
+        .append_pack(pack2_signed, pack2_plain, stream_id, 2, Some(pack1_id))
+        .expect("pack 2 append failed");
+
+    // Reduce: both messages and attachments present
+    let view =
+        reduce_ticket_with_resolver(ticket_id, &graph, &resolver).expect("ticket view must exist");
+    assert_eq!(view.title, "Crashing Wi-Fi adapter");
+    assert_eq!(view.messages.len(), 1);
+    assert_eq!(view.attachments.len(), 1);
+    assert_eq!(view.attachments[0].filename, "crash.log");
+    assert!(view.safety.permits_shell());
+
+    // Logical Deletion via Tombstone: delete pack 2
+    let tombstone = Tombstone::new(
+        pack2_id,
+        crate::canonical::types::EntityId::from_bytes([0x99; 32]),
+        "User retracted log",
+        1000,
+    );
+    graph.add_tombstone(tombstone);
+
+    // Reduce again: pack 2 is logically excluded!
+    let view_after_tombstone =
+        reduce_ticket_with_resolver(ticket_id, &graph, &resolver).expect("ticket view must exist");
+    assert_eq!(view_after_tombstone.messages.len(), 0);
+    assert_eq!(view_after_tombstone.attachments.len(), 0);
+    assert!(view_after_tombstone.safety.permits_shell());
+}
+
+#[test]
+fn test_canonical_head_set_cannot_override_client_safety_revocation() {
+    let mut graph = EventGraph::new();
+    let ticket_id = TicketId::from_bytes([0x55; 16]);
+    let stream_client = StreamId::from_bytes([0x01; 16]);
+    let stream_op = StreamId::from_bytes([0x02; 16]);
+    let client_key = KeyId::from_bytes([0x01; 32]);
+    let operator_key = KeyId::from_bytes([0x02; 32]);
+    let resolver = SimpleRoleResolver::new()
+        .with_client(client_key)
+        .with_operator(operator_key);
+
+    // Pack 1: Client creates ticket
+    let pack1_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x01; 16],
+        events: vec![LogicalEvent::TicketCreated {
+            ticket_id,
+            title: "Security diagnosis".into(),
+            initial_epoch: 111,
+        }],
+    };
+    let pack1_signed = dummy_signed_object(client_key, stream_client, 1, None, 100);
+    let pack1_id = graph
+        .append_pack(pack1_signed, pack1_plain, stream_client, 1, None)
+        .expect("pack 1");
+
+    // Pack 2: Client revokes access immediately
+    let mut epoch_bytes = [0u8; 16];
+    epoch_bytes[..8].copy_from_slice(&111u64.to_le_bytes());
+    let pack2_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x02; 16],
+        events: vec![LogicalEvent::AccessEpochRevoked {
+            ticket_id,
+            access_epoch: epoch_bytes,
+        }],
+    };
+    let pack2_signed = dummy_signed_object(client_key, stream_client, 2, Some(pack1_id), 100);
+    let pack2_id = graph
+        .append_pack(pack2_signed, pack2_plain, stream_client, 2, Some(pack1_id))
+        .expect("pack 2");
+
+    // Pack 3: Operator tries to set InProgress
+    let pack3_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x03; 16],
+        events: vec![LogicalEvent::TicketStateChanged {
+            ticket_id,
+            new_state: 2, // InProgress
+            epoch: 1,
+        }],
+    };
+    let pack3_signed = dummy_signed_object(operator_key, stream_op, 1, None, 100);
+    let pack3_id = graph
+        .append_pack(pack3_signed, pack3_plain, stream_op, 1, None)
+        .expect("pack 3");
+
+    // Admin attempts to pick Pack 3 as CanonicalHeadSet
+    let head_set = CanonicalHeadSet::new(
+        ticket_id,
+        vec![pack1_id, pack2_id, pack3_id],
+        crate::canonical::types::EntityId::from_bytes([0x99; 32]),
+        2000,
+    );
+    graph.set_canonical_heads(head_set);
+
+    let view = reduce_ticket_with_resolver(ticket_id, &graph, &resolver).expect("ticket view");
+
+    // HARD INVARIANT 13: CanonicalHeadSet MUST NOT grant shell access when client revoked it!
+    assert!(
+        !view.safety.permits_shell(),
+        "Client safety revocation must remain authoritative"
+    );
+}
