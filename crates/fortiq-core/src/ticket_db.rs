@@ -38,6 +38,16 @@ impl TicketState {
     pub fn permits_work(&self) -> bool {
         matches!(self, Self::Open | Self::InProgress)
     }
+
+    pub fn can_transition_to(self, next: Self) -> bool {
+        self == next
+            || matches!(
+                (self, next),
+                (Self::Open, Self::InProgress | Self::Resolved | Self::Closed)
+                    | (Self::InProgress, Self::Resolved | Self::Closed)
+                    | (Self::Resolved, Self::InProgress | Self::Closed)
+            )
+    }
 }
 
 impl std::str::FromStr for TicketState {
@@ -98,6 +108,8 @@ pub struct TicketRecord {
     pub client_peer_id: String,
     pub operator_peer_id: String,
     pub remote_access_enabled: bool,
+    #[serde(default)]
+    pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,
     pub closed_at: Option<u64>,
@@ -180,8 +192,8 @@ impl TicketDb {
     }
 
     pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()
-            .context("failed to open in-memory sqlite database")?;
+        let conn =
+            Connection::open_in_memory().context("failed to open in-memory sqlite database")?;
         let db = Self {
             conn: Arc::new(Mutex::new(conn)),
             db_path: None,
@@ -210,6 +222,7 @@ impl TicketDb {
                 client_peer_id TEXT NOT NULL,
                 operator_peer_id TEXT NOT NULL,
                 remote_access_enabled INTEGER NOT NULL DEFAULT 1,
+                revision INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 closed_at INTEGER
@@ -263,6 +276,24 @@ impl TicketDb {
             ",
         )
         .context("failed to execute sqlite schema migration")?;
+        let has_revision = {
+            let mut stmt = conn.prepare("PRAGMA table_info(tickets)")?;
+            let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut found = false;
+            for column in columns {
+                if column? == "revision" {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+        if !has_revision {
+            conn.execute(
+                "ALTER TABLE tickets ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -285,6 +316,7 @@ impl TicketDb {
             client_peer_id: client_peer_id.to_string(),
             operator_peer_id: operator_peer_id.to_string(),
             remote_access_enabled: true,
+            revision: 1,
             created_at: now,
             updated_at: now,
             closed_at: None,
@@ -295,9 +327,9 @@ impl TicketDb {
             conn.execute(
                 "INSERT INTO tickets (
                     id, title, description, state, priority,
-                    client_peer_id, operator_peer_id, remote_access_enabled,
+                    client_peer_id, operator_peer_id, remote_access_enabled, revision,
                     created_at, updated_at, closed_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     record.id,
                     record.title,
@@ -307,6 +339,7 @@ impl TicketDb {
                     record.client_peer_id,
                     record.operator_peer_id,
                     if record.remote_access_enabled { 1 } else { 0 },
+                    record.revision,
                     record.created_at,
                     record.updated_at,
                     record.closed_at,
@@ -327,18 +360,40 @@ impl TicketDb {
 
     pub fn import_ticket(&self, ticket: &TicketRecord) -> Result<()> {
         let conn = self.conn.lock().unwrap();
+        let local_revision: Option<u64> = conn
+            .query_row(
+                "SELECT revision FROM tickets WHERE id = ?1",
+                params![ticket.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(local_revision) = local_revision {
+            if ticket.revision < local_revision {
+                anyhow::bail!(
+                    "stale ticket revision {} (local revision is {})",
+                    ticket.revision,
+                    local_revision
+                );
+            }
+            if ticket.revision == local_revision {
+                return Ok(());
+            }
+        } else if ticket.revision == 0 {
+            anyhow::bail!("ticket revision must be greater than zero");
+        }
         conn.execute(
             "INSERT INTO tickets (
                 id, title, description, state, priority,
-                client_peer_id, operator_peer_id, remote_access_enabled,
+                client_peer_id, operator_peer_id, remote_access_enabled, revision,
                 created_at, updated_at, closed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 description = excluded.description,
                 state = excluded.state,
                 priority = excluded.priority,
                 remote_access_enabled = excluded.remote_access_enabled,
+                revision = excluded.revision,
                 updated_at = excluded.updated_at,
                 closed_at = excluded.closed_at",
             params![
@@ -350,6 +405,7 @@ impl TicketDb {
                 ticket.client_peer_id,
                 ticket.operator_peer_id,
                 if ticket.remote_access_enabled { 1 } else { 0 },
+                ticket.revision,
                 ticket.created_at,
                 ticket.updated_at,
                 ticket.closed_at,
@@ -363,7 +419,7 @@ impl TicketDb {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
-                    remote_access_enabled, created_at, updated_at, closed_at
+                    remote_access_enabled, revision, created_at, updated_at, closed_at
              FROM tickets WHERE id = ?1",
         )?;
         let row = stmt
@@ -380,9 +436,10 @@ impl TicketDb {
                     client_peer_id: r.get(5)?,
                     operator_peer_id: r.get(6)?,
                     remote_access_enabled: remote_access_int != 0,
-                    created_at: r.get(8)?,
-                    updated_at: r.get(9)?,
-                    closed_at: r.get(10)?,
+                    revision: r.get(8)?,
+                    created_at: r.get(9)?,
+                    updated_at: r.get(10)?,
+                    closed_at: r.get(11)?,
                 })
             })
             .optional()?;
@@ -393,7 +450,7 @@ impl TicketDb {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
-                    remote_access_enabled, created_at, updated_at, closed_at
+                    remote_access_enabled, revision, created_at, updated_at, closed_at
              FROM tickets WHERE state IN ('OPEN', 'IN_PROGRESS')
              ORDER BY updated_at DESC LIMIT 1",
         )?;
@@ -411,9 +468,10 @@ impl TicketDb {
                     client_peer_id: r.get(5)?,
                     operator_peer_id: r.get(6)?,
                     remote_access_enabled: remote_access_int != 0,
-                    created_at: r.get(8)?,
-                    updated_at: r.get(9)?,
-                    closed_at: r.get(10)?,
+                    revision: r.get(8)?,
+                    created_at: r.get(9)?,
+                    updated_at: r.get(10)?,
+                    closed_at: r.get(11)?,
                 })
             })
             .optional()?;
@@ -422,9 +480,11 @@ impl TicketDb {
 
     pub fn list_tickets(&self, state_filter: Option<TicketState>) -> Result<Vec<TicketRecord>> {
         let conn = self.conn.lock().unwrap();
-        let mut query = "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
-                                remote_access_enabled, created_at, updated_at, closed_at
-                         FROM tickets".to_string();
+        let mut query =
+            "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
+                                remote_access_enabled, revision, created_at, updated_at, closed_at
+                         FROM tickets"
+                .to_string();
         if let Some(state) = state_filter {
             query.push_str(&format!(" WHERE state = '{}'", state.as_str()));
         }
@@ -444,9 +504,10 @@ impl TicketDb {
                 client_peer_id: r.get(5)?,
                 operator_peer_id: r.get(6)?,
                 remote_access_enabled: remote_access_int != 0,
-                created_at: r.get(8)?,
-                updated_at: r.get(9)?,
-                closed_at: r.get(10)?,
+                revision: r.get(8)?,
+                created_at: r.get(9)?,
+                updated_at: r.get(10)?,
+                closed_at: r.get(11)?,
             })
         })?;
 
@@ -463,11 +524,24 @@ impl TicketDb {
         new_state: TicketState,
         actor_peer_id: &str,
     ) -> Result<Option<TicketRecord>> {
+        let Some(current) = self.get_ticket(ticket_id)? else {
+            return Ok(None);
+        };
+        if !current.state.can_transition_to(new_state) {
+            anyhow::bail!(
+                "invalid ticket state transition: {} -> {}",
+                current.state.as_str(),
+                new_state.as_str()
+            );
+        }
+        if current.state == new_state {
+            return Ok(Some(current));
+        }
         let now = current_timestamp();
         {
             let conn = self.conn.lock().unwrap();
             let affected = conn.execute(
-                "UPDATE tickets SET state = ?1, updated_at = ?2,
+                "UPDATE tickets SET state = ?1, updated_at = ?2, revision = revision + 1,
                         closed_at = CASE WHEN ?1 = 'CLOSED' THEN ?2 ELSE closed_at END
                  WHERE id = ?3",
                 params![new_state.as_str(), now, ticket_id],
@@ -493,11 +567,18 @@ impl TicketDb {
         enabled: bool,
         actor_peer_id: &str,
     ) -> Result<Option<TicketRecord>> {
+        let Some(current) = self.get_ticket(ticket_id)? else {
+            return Ok(None);
+        };
+        if current.remote_access_enabled == enabled {
+            return Ok(Some(current));
+        }
         let now = current_timestamp();
         {
             let conn = self.conn.lock().unwrap();
             let affected = conn.execute(
-                "UPDATE tickets SET remote_access_enabled = ?1, updated_at = ?2 WHERE id = ?3",
+                "UPDATE tickets SET remote_access_enabled = ?1, updated_at = ?2,
+                        revision = revision + 1 WHERE id = ?3",
                 params![if enabled { 1 } else { 0 }, now, ticket_id],
             )?;
             if affected == 0 {
@@ -562,6 +643,40 @@ impl TicketDb {
             params![delivery_state, id],
         )?;
         Ok(())
+    }
+
+    pub fn list_pending_messages_for_peer(
+        &self,
+        local_peer_id: &str,
+        remote_peer_id: &str,
+    ) -> Result<Vec<ChatMessage>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.ticket_id, m.sender_peer_id, m.body, m.created_at, m.delivery_state
+             FROM messages m
+             JOIN tickets t ON t.id = m.ticket_id
+             WHERE m.delivery_state = 'PENDING'
+               AND m.sender_peer_id = ?1
+               AND t.state IN ('OPEN', 'IN_PROGRESS')
+               AND ((t.client_peer_id = ?1 AND t.operator_peer_id = ?2)
+                 OR (t.operator_peer_id = ?1 AND t.client_peer_id = ?2))
+             ORDER BY m.created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![local_peer_id, remote_peer_id], |r| {
+            Ok(ChatMessage {
+                id: r.get(0)?,
+                ticket_id: r.get(1)?,
+                sender_peer_id: r.get(2)?,
+                body: r.get(3)?,
+                created_at: r.get(4)?,
+                delivery_state: r.get(5)?,
+            })
+        })?;
+        let mut list = Vec::new();
+        for row in rows {
+            list.push(row?);
+        }
+        Ok(list)
     }
 
     pub fn add_attachment(&self, attachment: &AttachmentRecord) -> Result<()> {
@@ -763,6 +878,7 @@ impl TicketDb {
                 client_peer_id: client_peer_id.to_string(),
                 operator_peer_id: operator_peer_id.to_string(),
                 remote_access_enabled: state.permits_work(),
+                revision: 1,
                 created_at: now,
                 updated_at: now,
                 closed_at: if state == TicketState::Closed {
@@ -824,7 +940,13 @@ mod tests {
     fn chat_idempotency_and_ordering() {
         let db = TicketDb::open_in_memory().unwrap();
         let ticket = db
-            .create_ticket("Chat test", "Testing chat", TicketPriority::Normal, "c1", "op1")
+            .create_ticket(
+                "Chat test",
+                "Testing chat",
+                TicketPriority::Normal,
+                "c1",
+                "op1",
+            )
             .unwrap();
 
         let msg1 = ChatMessage {
@@ -857,6 +979,38 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].body, "Bonjour");
         assert_eq!(messages[1].body, "Je vous écoute");
+    }
+
+    #[test]
+    fn pending_chat_outbox_is_scoped_to_authenticated_counterparty() {
+        let db = TicketDb::open_in_memory().unwrap();
+        let ticket = db
+            .create_ticket("Outbox", "offline", TicketPriority::Normal, "c1", "op1")
+            .unwrap();
+        db.add_chat_message(&ChatMessage {
+            id: "pending-1".to_string(),
+            ticket_id: ticket.id,
+            sender_peer_id: "c1".to_string(),
+            body: "queued".to_string(),
+            created_at: 1,
+            delivery_state: "PENDING".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            db.list_pending_messages_for_peer("c1", "op1")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(db
+            .list_pending_messages_for_peer("c1", "intruder")
+            .unwrap()
+            .is_empty());
+        assert!(db
+            .list_pending_messages_for_peer("op1", "c1")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -898,7 +1052,11 @@ mod tests {
     fn legacy_migration() {
         let temp_dir = tempfile::tempdir().unwrap();
         let legacy_file = temp_dir.path().join("ticket.json");
-        std::fs::write(&legacy_file, r#"{"id": "legacy-uuid-123", "state": "OPEN"}"#).unwrap();
+        std::fs::write(
+            &legacy_file,
+            r#"{"id": "legacy-uuid-123", "state": "OPEN"}"#,
+        )
+        .unwrap();
 
         let db_file = temp_dir.path().join("tickets.db");
         let db = TicketDb::open(&db_file).unwrap();
@@ -910,5 +1068,58 @@ mod tests {
         assert_eq!(tickets[0].id, "legacy-uuid-123");
         assert_eq!(tickets[0].state, TicketState::Open);
         assert!(tickets[0].remote_access_enabled);
+    }
+
+    #[test]
+    fn stale_ticket_import_cannot_roll_back_consent() {
+        let db = TicketDb::open_in_memory().unwrap();
+        let ticket = db
+            .create_ticket(
+                "Consent",
+                "revision test",
+                TicketPriority::Normal,
+                "c1",
+                "op1",
+            )
+            .unwrap();
+        let stale = ticket.clone();
+
+        let current = db
+            .set_remote_access(&ticket.id, false, "c1")
+            .unwrap()
+            .unwrap();
+        assert!(current.revision > stale.revision);
+        assert!(db.import_ticket(&stale).is_err());
+
+        let stored = db.get_ticket(&ticket.id).unwrap().unwrap();
+        assert!(!stored.remote_access_enabled);
+        assert_eq!(stored.revision, current.revision);
+    }
+
+    #[test]
+    fn closed_ticket_cannot_be_reopened() {
+        let db = TicketDb::open_in_memory().unwrap();
+        let ticket = db
+            .create_ticket(
+                "State",
+                "transition test",
+                TicketPriority::Normal,
+                "c1",
+                "op1",
+            )
+            .unwrap();
+        let closed = db
+            .update_ticket_state(&ticket.id, TicketState::Closed, "c1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(closed.revision, ticket.revision + 1);
+
+        assert!(db
+            .update_ticket_state(&ticket.id, TicketState::Open, "c1")
+            .is_err());
+        assert_eq!(
+            db.get_ticket(&ticket.id).unwrap().unwrap().state,
+            TicketState::Closed
+        );
     }
 }

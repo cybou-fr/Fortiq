@@ -274,20 +274,22 @@ pub struct TicketStore {
 }
 
 impl TicketStore {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn try_new(path: PathBuf) -> Result<Self> {
         let (db_path, legacy_path) = if path.extension().is_some_and(|ext| ext == "json") {
             let db_p = path.with_extension("db");
             (db_p, Some(path))
         } else {
             (path, None)
         };
-        let db = TicketDb::open(&db_path).unwrap_or_else(|_| {
-            TicketDb::open_in_memory().expect("in-memory db must open")
-        });
+        let db = TicketDb::open(&db_path)?;
         if let Some(ref leg) = legacy_path {
-            let _ = db.migrate_from_legacy_file(leg, "local", "operator");
+            db.migrate_from_legacy_file(leg, "local", "operator")?;
         }
-        Self { db }
+        Ok(Self { db })
+    }
+
+    pub fn new(path: PathBuf) -> Self {
+        Self::try_new(path).expect("persistent ticket database must open")
     }
 
     pub fn in_memory() -> Self {
@@ -332,7 +334,9 @@ impl TicketStore {
 
     pub async fn is_open(&self) -> Result<bool> {
         let tickets = self.db.list_tickets(None)?;
-        Ok(tickets.iter().any(|t| t.state.permits_work() && t.remote_access_enabled))
+        Ok(tickets
+            .iter()
+            .any(|t| t.state.permits_work() && t.remote_access_enabled))
     }
 
     pub async fn open(&self) -> Result<Ticket> {
@@ -361,7 +365,10 @@ impl TicketStore {
         let mut closed_ticket = None;
         for t in tickets {
             if t.state.permits_work() {
-                if let Ok(Some(updated)) = self.db.update_ticket_state(&t.id, TicketState::Closed, "local") {
+                if let Ok(Some(updated)) =
+                    self.db
+                        .update_ticket_state(&t.id, TicketState::Closed, "local")
+                {
                     closed_ticket = Some(Ticket {
                         id: updated.id,
                         state: updated.state,

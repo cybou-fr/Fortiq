@@ -2,9 +2,7 @@ use fortiq_core::{
     AuthorizationConfig, CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig,
     NodeInfo, NodeMode, TicketConfig, TicketPriority, TicketState, TicketStore,
 };
-use fortiq_p2p::{
-    ChatMessageWire, P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse,
-};
+use fortiq_p2p::{ChatMessageWire, P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
 use libp2p::{identity::Keypair, Multiaddr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -92,11 +90,8 @@ async fn e2e_ticket_centric_full_lifecycle() {
         .unwrap();
     let operator_listen_addr: Multiaddr = "/ip4/127.0.0.1/udp/0/quic-v1".parse().unwrap();
 
-    let managed_info = NodeInfo::local(
-        managed_peer_id,
-        "managed-pc".to_string(),
-        NodeMode::Managed,
-    );
+    let managed_info =
+        NodeInfo::local(managed_peer_id, "managed-pc".to_string(), NodeMode::Managed);
     let operator_info = NodeInfo::local(
         operator_peer_id,
         "operator-console".to_string(),
@@ -154,7 +149,10 @@ async fn e2e_ticket_centric_full_lifecycle() {
             .is_ok()
         {
             if let Ok(peers) = rx.await {
-                if peers.iter().any(|p| p.peer_id == managed_peer_id.to_string()) {
+                if peers
+                    .iter()
+                    .any(|p| p.peer_id == managed_peer_id.to_string())
+                {
                     discovered = true;
                     break;
                 }
@@ -216,7 +214,9 @@ async fn e2e_ticket_centric_full_lifecycle() {
             message: ChatMessageWire {
                 id: op_msg_id.clone(),
                 ticket_id: created_ticket.id.clone(),
-                sender_peer_id: operator_peer_id.to_string(),
+                // Deliberately forged claim: the receiver must bind the sender
+                // to the authenticated libp2p peer instead.
+                sender_peer_id: managed_peer_id.to_string(),
                 body: "Bonjour, je prends en charge votre demande.".to_string(),
                 created_at: now_secs(),
             },
@@ -235,7 +235,10 @@ async fn e2e_ticket_centric_full_lifecycle() {
         .list_messages(&created_ticket.id)
         .unwrap();
     assert_eq!(managed_msgs.len(), 1);
-    assert_eq!(managed_msgs[0].body, "Bonjour, je prends en charge votre demande.");
+    assert_eq!(
+        managed_msgs[0].body,
+        "Bonjour, je prends en charge votre demande."
+    );
     assert_eq!(managed_msgs[0].sender_peer_id, operator_peer_id.to_string());
 
     // (b) Managed -> Operator
@@ -257,7 +260,10 @@ async fn e2e_ticket_centric_full_lifecycle() {
         .await
         .unwrap();
 
-    let ack2 = chat2_rx.await.unwrap().expect("client chat delivery failed");
+    let ack2 = chat2_rx
+        .await
+        .unwrap()
+        .expect("client chat delivery failed");
     assert!(ack2.success);
     assert_eq!(ack2.message_id, client_msg_id);
 
@@ -265,12 +271,17 @@ async fn e2e_ticket_centric_full_lifecycle() {
         .db()
         .list_messages(&created_ticket.id)
         .unwrap();
-    assert!(op_msgs.iter().any(|m| m.body == "Merci, voici les logs d'erreur."));
+    assert!(op_msgs
+        .iter()
+        .any(|m| m.body == "Merci, voici les logs d'erreur."));
 
     // 5. File Transfer via /fortiq/file/1.0
     let test_file_path = dir_operator.path().join("crash_report.log");
-    let test_file_data = b"FATAL ERROR: Exception 0xC0000005 at memory address 0x7FFAA010\nStack trace: ...\n";
-    tokio::fs::write(&test_file_path, test_file_data).await.unwrap();
+    let test_file_data =
+        b"FATAL ERROR: Exception 0xC0000005 at memory address 0x7FFAA010\nStack trace: ...\n";
+    tokio::fs::write(&test_file_path, test_file_data)
+        .await
+        .unwrap();
 
     let (file_tx, file_rx) = tokio::sync::oneshot::channel();
     operator_cmd_tx
@@ -296,9 +307,14 @@ async fn e2e_ticket_centric_full_lifecycle() {
         .unwrap();
     assert_eq!(managed_attachments.len(), 1);
     assert_eq!(managed_attachments[0].filename, "crash_report.log");
-    assert_eq!(managed_attachments[0].size_bytes, test_file_data.len() as u64);
+    assert_eq!(
+        managed_attachments[0].size_bytes,
+        test_file_data.len() as u64
+    );
 
-    let saved_file = tokio::fs::read(&managed_attachments[0].local_path).await.unwrap();
+    let saved_file = tokio::fs::read(&managed_attachments[0].local_path)
+        .await
+        .unwrap();
     assert_eq!(saved_file, test_file_data);
 
     // 6. Operator opens Shell Stream bound to ticket -> Succeeds
@@ -329,6 +345,34 @@ async fn e2e_ticket_centric_full_lifecycle() {
         .set_remote_access(&created_ticket.id, false, &managed_peer_id.to_string())
         .unwrap();
 
+    // A remote operator cannot grant itself consent again.
+    let (consent_tx, consent_rx) = tokio::sync::oneshot::channel();
+    operator_cmd_tx
+        .send(P2pCommand::SyncTickets {
+            peer: managed_peer_id,
+            dial: Some(managed_dial_addr.clone()),
+            request: TicketSyncRequest::SetRemoteAccess {
+                ticket_id: created_ticket.id.clone(),
+                enabled: true,
+            },
+            reply: consent_tx,
+        })
+        .await
+        .unwrap();
+    let consent_response = consent_rx.await.unwrap().expect("consent request failed");
+    assert!(matches!(
+        consent_response,
+        TicketSyncResponse::Ack { success: false, .. }
+    ));
+    assert!(
+        !managed_store
+            .db()
+            .get_ticket(&created_ticket.id)
+            .unwrap()
+            .unwrap()
+            .remote_access_enabled
+    );
+
     let (shell2_tx, shell2_rx) = tokio::sync::oneshot::channel();
     operator_cmd_tx
         .send(P2pCommand::OpenShellStream {
@@ -358,7 +402,11 @@ async fn e2e_ticket_centric_full_lifecycle() {
         .unwrap();
     managed_store
         .db()
-        .update_ticket_state(&created_ticket.id, TicketState::Closed, &managed_peer_id.to_string())
+        .update_ticket_state(
+            &created_ticket.id,
+            TicketState::Closed,
+            &managed_peer_id.to_string(),
+        )
         .unwrap();
 
     let (shell3_tx, shell3_rx) = tokio::sync::oneshot::channel();

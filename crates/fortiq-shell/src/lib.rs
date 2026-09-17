@@ -36,7 +36,9 @@ pub fn describe_denial(code: u8) -> &'static str {
         DENIED_NO_TICKET => "no open ticket on the remote host: its user has not opened one",
         DENIED_BUSY => "another shell session is already active on the remote host",
         DENIED_TICKET_CLOSED => "the ticket for this session is closed",
-        DENIED_REMOTE_ACCESS_DISABLED => "remote access for this ticket is currently disabled by the client",
+        DENIED_REMOTE_ACCESS_DISABLED => {
+            "remote access for this ticket is currently disabled by the client"
+        }
         _ => "the remote host refused the terminal",
     }
 }
@@ -51,7 +53,10 @@ impl ShellHandshake {
         Self { ticket_id }
     }
 
-    pub async fn write_to_async<W: futures::AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
+    pub async fn write_to_async<W: futures::AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<()> {
         use futures::AsyncWriteExt;
         let json = serde_json::to_vec(self)?;
         let len = u16::try_from(json.len()).map_err(|_| anyhow::anyhow!("handshake too large"))?;
@@ -72,7 +77,10 @@ impl ShellHandshake {
         Ok(handshake)
     }
 
-    pub async fn write_to_tokio<W: tokio::io::AsyncWrite + Unpin>(&self, writer: &mut W) -> Result<()> {
+    pub async fn write_to_tokio<W: tokio::io::AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<()> {
         use tokio::io::AsyncWriteExt;
         let json = serde_json::to_vec(self)?;
         let len = u16::try_from(json.len()).map_err(|_| anyhow::anyhow!("handshake too large"))?;

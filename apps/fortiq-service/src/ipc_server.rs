@@ -556,9 +556,9 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                                     .send(fortiq_p2p::P2pCommand::SyncTickets {
                                         peer,
                                         dial: None,
-                                        request: fortiq_p2p::TicketSyncRequest::PushTicket(Box::new(
-                                            record.clone(),
-                                        )),
+                                        request: fortiq_p2p::TicketSyncRequest::PushTicket(
+                                            Box::new(record.clone()),
+                                        ),
                                         reply: reply_tx,
                                     })
                                     .await;
@@ -574,11 +574,11 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             ticket_id,
             state: new_state,
         } => {
-            match state
-                .ticket_store
-                .db()
-                .update_ticket_state(&ticket_id, new_state, &state.peer_id.to_string())
-            {
+            match state.ticket_store.db().update_ticket_state(
+                &ticket_id,
+                new_state,
+                &state.peer_id.to_string(),
+            ) {
                 Ok(updated) => {
                     if let Some(ref ticket) = updated {
                         let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
@@ -609,10 +609,24 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             }
         }
         IpcRequest::SetRemoteAccess { ticket_id, enabled } => {
+            let local_peer_id = state.peer_id.to_string();
+            let is_client = state
+                .ticket_store
+                .db()
+                .get_ticket(&ticket_id)
+                .ok()
+                .flatten()
+                .is_some_and(|ticket| ticket.client_peer_id == local_peer_id);
+            if !is_client {
+                return IpcResponse::Error(
+                    "Seul le client propriétaire du ticket peut modifier l'accès à distance"
+                        .to_string(),
+                );
+            }
             match state
                 .ticket_store
                 .db()
-                .set_remote_access(&ticket_id, enabled, &state.peer_id.to_string())
+                .set_remote_access(&ticket_id, enabled, &local_peer_id)
             {
                 Ok(updated) => {
                     if let Some(ref ticket) = updated {
@@ -640,9 +654,9 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     }
                     IpcResponse::TicketUpdated(updated)
                 }
-                Err(e) => IpcResponse::Error(format!(
-                    "Échec de configuration de l'accès à distance: {e}"
-                )),
+                Err(e) => {
+                    IpcResponse::Error(format!("Échec de configuration de l'accès à distance: {e}"))
+                }
             }
         }
         IpcRequest::SendChatMessage { ticket_id, body } => {
@@ -708,11 +722,9 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                                             .db()
                                             .update_message_delivery(&chat_msg.id, "DELIVERED");
                                     } else {
-                                        return IpcResponse::Error(
-                                            ack.error.unwrap_or_else(|| {
-                                                "Erreur du destinataire".to_string()
-                                            }),
-                                        );
+                                        return IpcResponse::Error(ack.error.unwrap_or_else(
+                                            || "Erreur du destinataire".to_string(),
+                                        ));
                                     }
                                 }
                                 Ok(Ok(Err(err))) => return IpcResponse::Error(err),
@@ -735,60 +747,54 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
         IpcRequest::SendFile {
             ticket_id,
             file_path,
-        } => {
-            match state.ticket_store.db().get_ticket(&ticket_id) {
-                Ok(Some(ticket)) => {
-                    if !ticket.state.permits_work() {
-                        return IpcResponse::Error(
-                            "Impossible d'envoyer un fichier : le ticket est fermé".to_string(),
-                        );
-                    }
-                    let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
-                        &ticket.operator_peer_id
-                    } else {
-                        &ticket.client_peer_id
-                    };
-                    let peer = match target_str.parse::<PeerId>() {
-                        Ok(p) => p,
-                        Err(e) => {
-                            return IpcResponse::Error(format!("PeerId distant invalide: {e}"))
-                        }
-                    };
-                    if let Some(ref sender) = state.p2p_sender {
-                        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                        if sender
-                            .send(fortiq_p2p::P2pCommand::SendFile {
-                                peer,
-                                dial: None,
-                                ticket_id: ticket_id.clone(),
-                                file_path: std::path::PathBuf::from(file_path),
-                                reply: reply_tx,
-                            })
-                            .await
-                            .is_err()
-                        {
-                            return IpcResponse::Error("Canal de commande P2P fermé".to_string());
-                        }
-                        match tokio::time::timeout(std::time::Duration::from_secs(60), reply_rx)
-                            .await
-                        {
-                            Ok(Ok(Ok(attachment))) => IpcResponse::FileSent(attachment),
-                            Ok(Ok(Err(err))) => IpcResponse::Error(err),
-                            Ok(Err(_)) => {
-                                IpcResponse::Error("Canal de réponse fichier abandonné".to_string())
-                            }
-                            Err(_) => IpcResponse::Error(
-                                "Délai d'attente dépassé pour l'envoi du fichier (60s)".to_string(),
-                            ),
-                        }
-                    } else {
-                        IpcResponse::Error("Sous-système P2P indisponible".to_string())
-                    }
+        } => match state.ticket_store.db().get_ticket(&ticket_id) {
+            Ok(Some(ticket)) => {
+                if !ticket.state.permits_work() {
+                    return IpcResponse::Error(
+                        "Impossible d'envoyer un fichier : le ticket est fermé".to_string(),
+                    );
                 }
-                Ok(None) => IpcResponse::Error("Ticket introuvable".to_string()),
-                Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
+                let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
+                    &ticket.operator_peer_id
+                } else {
+                    &ticket.client_peer_id
+                };
+                let peer = match target_str.parse::<PeerId>() {
+                    Ok(p) => p,
+                    Err(e) => return IpcResponse::Error(format!("PeerId distant invalide: {e}")),
+                };
+                if let Some(ref sender) = state.p2p_sender {
+                    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                    if sender
+                        .send(fortiq_p2p::P2pCommand::SendFile {
+                            peer,
+                            dial: None,
+                            ticket_id: ticket_id.clone(),
+                            file_path: std::path::PathBuf::from(file_path),
+                            reply: reply_tx,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        return IpcResponse::Error("Canal de commande P2P fermé".to_string());
+                    }
+                    match tokio::time::timeout(std::time::Duration::from_secs(60), reply_rx).await {
+                        Ok(Ok(Ok(attachment))) => IpcResponse::FileSent(attachment),
+                        Ok(Ok(Err(err))) => IpcResponse::Error(err),
+                        Ok(Err(_)) => {
+                            IpcResponse::Error("Canal de réponse fichier abandonné".to_string())
+                        }
+                        Err(_) => IpcResponse::Error(
+                            "Délai d'attente dépassé pour l'envoi du fichier (60s)".to_string(),
+                        ),
+                    }
+                } else {
+                    IpcResponse::Error("Sous-système P2P indisponible".to_string())
+                }
             }
-        }
+            Ok(None) => IpcResponse::Error("Ticket introuvable".to_string()),
+            Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
+        },
         IpcRequest::ListAttachments { ticket_id } => {
             match state.ticket_store.db().list_attachments(&ticket_id) {
                 Ok(attachments) => IpcResponse::Attachments(attachments),

@@ -1,8 +1,8 @@
 use fortiq_core::{
     AuthorizationConfig, CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig,
-    NodeInfo, NodeMode, TicketConfig, TicketState, TicketStore,
+    NodeInfo, NodeMode, TicketConfig, TicketPriority, TicketState, TicketStore,
 };
-use fortiq_p2p::{P2pCommand, RunOptions};
+use fortiq_p2p::{P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
 use libp2p::{identity::Keypair, Multiaddr};
 use std::time::Duration;
 
@@ -28,7 +28,16 @@ async fn e2e_managed_operator_quic_interaction() {
 
     let managed_ticket_path = dir_managed.path().join("ticket.json");
     let ticket_store = TicketStore::new(managed_ticket_path.clone());
-    let opened_ticket = ticket_store.open().await.unwrap();
+    let opened_ticket = ticket_store
+        .db()
+        .create_ticket(
+            "Direct QUIC test",
+            "Ticket-scoped close test",
+            TicketPriority::Normal,
+            &managed_peer_id.to_string(),
+            &operator_peer_id.to_string(),
+        )
+        .unwrap();
     assert_eq!(opened_ticket.state, TicketState::Open);
 
     let managed_config = Config {
@@ -154,23 +163,26 @@ async fn e2e_managed_operator_quic_interaction() {
         "Operator did not discover Managed node via HELLO handshake"
     );
 
-    // Close the ticket remotely as the authorized operator
+    // Close the exact ticket remotely as the authorized counterparty.
     let (tx, rx) = tokio::sync::oneshot::channel();
     op_cmd_tx
-        .send(P2pCommand::CloseTicket {
+        .send(P2pCommand::SyncTickets {
             peer: managed_peer_id,
             dial: Some(managed_dial_addr),
+            request: TicketSyncRequest::UpdateStatus {
+                ticket_id: opened_ticket.id.clone(),
+                state: TicketState::Closed,
+            },
             reply: tx,
         })
         .await
         .unwrap();
 
-    let close_result = rx.await.unwrap();
-    assert!(
-        close_result.is_ok(),
-        "Remote ticket close request failed: {:?}",
-        close_result
-    );
+    let close_result = rx.await.unwrap().expect("ticket-aware close failed");
+    assert!(matches!(
+        close_result,
+        TicketSyncResponse::Ack { success: true, .. }
+    ));
 
     // Verify ticket state is persisted as CLOSED on managed peer
     tokio::time::sleep(Duration::from_millis(300)).await;

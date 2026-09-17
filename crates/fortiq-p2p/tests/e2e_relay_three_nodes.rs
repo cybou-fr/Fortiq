@@ -1,8 +1,8 @@
 use fortiq_core::{
     AuthorizationConfig, CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig,
-    NodeInfo, NodeMode, TicketConfig, TicketState, TicketStore,
+    NodeInfo, NodeMode, TicketConfig, TicketPriority, TicketState, TicketStore,
 };
-use fortiq_p2p::{P2pCommand, RunOptions};
+use fortiq_p2p::{P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
 use fortiq_shell::ShellFrame;
 use libp2p::{identity::Keypair, Multiaddr};
 use std::time::Duration;
@@ -81,7 +81,16 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     // 2. Managed Node configuration
     let managed_ticket_path = dir_managed.path().join("ticket.json");
     let ticket_store = TicketStore::new(managed_ticket_path.clone());
-    let opened_ticket = ticket_store.open().await.unwrap();
+    let opened_ticket = ticket_store
+        .db()
+        .create_ticket(
+            "Relay test",
+            "Ticket-scoped shell test",
+            TicketPriority::Normal,
+            &managed_peer_id.to_string(),
+            &operator_peer_id.to_string(),
+        )
+        .unwrap();
     assert_eq!(opened_ticket.state, TicketState::Open);
 
     let managed_config = Config {
@@ -221,7 +230,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     op_cmd_tx
         .send(P2pCommand::OpenShellStream {
             peer: managed_peer_id,
-            ticket_id: None,
+            ticket_id: Some(opened_ticket.id.clone()),
             dial: None,
             reply: shell_tx,
         })
@@ -317,7 +326,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         if op_cmd_tx
             .send(P2pCommand::OpenShellStream {
                 peer: managed_peer_id,
-                ticket_id: None,
+                ticket_id: Some(opened_ticket.id.clone()),
                 dial: None,
                 reply: shell_tx2,
             })
@@ -378,28 +387,29 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     drop(write_half2);
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Step D: Remote ticket close via Relay once second shell exits
-    let mut close_ok = false;
-    for _ in 0..20 {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let (close_tx, close_rx) = tokio::sync::oneshot::channel();
-        if op_cmd_tx
-            .send(P2pCommand::CloseTicket {
-                peer: managed_peer_id,
-                dial: None,
-                reply: close_tx,
-            })
-            .await
-            .is_ok()
-        {
-            if let Ok(Ok(Ok(()))) = tokio::time::timeout(Duration::from_secs(4), close_rx).await {
-                close_ok = true;
-                break;
-            }
-        }
-    }
-
-    assert!(close_ok, "Remote ticket close request failed");
+    // Step D: Close the exact ticket through the ticket-aware protocol.
+    let (close_tx, close_rx) = tokio::sync::oneshot::channel();
+    op_cmd_tx
+        .send(P2pCommand::SyncTickets {
+            peer: managed_peer_id,
+            dial: None,
+            request: TicketSyncRequest::UpdateStatus {
+                ticket_id: opened_ticket.id.clone(),
+                state: TicketState::Closed,
+            },
+            reply: close_tx,
+        })
+        .await
+        .unwrap();
+    let close_response = tokio::time::timeout(Duration::from_secs(4), close_rx)
+        .await
+        .expect("ticket-aware close timed out")
+        .expect("channel dropped")
+        .expect("ticket-aware close failed");
+    assert!(matches!(
+        close_response,
+        TicketSyncResponse::Ack { success: true, .. }
+    ));
 
     // Step E: Verify ticket state is persisted as CLOSED on managed peer
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -492,7 +502,16 @@ async fn e2e_relay_production_rate_limiting_smoke() {
     // 2. Managed Node configuration
     let managed_ticket_path = dir_managed.path().join("ticket.json");
     let ticket_store = TicketStore::new(managed_ticket_path.clone());
-    let opened_ticket = ticket_store.open().await.unwrap();
+    let opened_ticket = ticket_store
+        .db()
+        .create_ticket(
+            "Relay rate-limit test",
+            "Ticket-scoped shell test",
+            TicketPriority::Normal,
+            &managed_peer_id.to_string(),
+            &operator_peer_id.to_string(),
+        )
+        .unwrap();
     assert_eq!(opened_ticket.state, TicketState::Open);
 
     let managed_config = Config {
@@ -632,7 +651,7 @@ async fn e2e_relay_production_rate_limiting_smoke() {
     op_cmd_tx
         .send(P2pCommand::OpenShellStream {
             peer: managed_peer_id,
-            ticket_id: None,
+            ticket_id: Some(opened_ticket.id.clone()),
             dial: None,
             reply: shell_tx,
         })
@@ -721,31 +740,29 @@ async fn e2e_relay_production_rate_limiting_smoke() {
     drop(write_half);
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Step C: Remote ticket close via Relay
-    let mut close_ok = false;
-    for _ in 0..20 {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let (close_tx, close_rx) = tokio::sync::oneshot::channel();
-        if op_cmd_tx
-            .send(P2pCommand::CloseTicket {
-                peer: managed_peer_id,
-                dial: None,
-                reply: close_tx,
-            })
-            .await
-            .is_ok()
-        {
-            if let Ok(Ok(Ok(()))) = tokio::time::timeout(Duration::from_secs(4), close_rx).await {
-                close_ok = true;
-                break;
-            }
-        }
-    }
-
-    assert!(
-        close_ok,
-        "Remote ticket close request failed under rate limits"
-    );
+    // Step C: Close the exact ticket through the ticket-aware protocol.
+    let (close_tx, close_rx) = tokio::sync::oneshot::channel();
+    op_cmd_tx
+        .send(P2pCommand::SyncTickets {
+            peer: managed_peer_id,
+            dial: None,
+            request: TicketSyncRequest::UpdateStatus {
+                ticket_id: opened_ticket.id.clone(),
+                state: TicketState::Closed,
+            },
+            reply: close_tx,
+        })
+        .await
+        .unwrap();
+    let close_response = tokio::time::timeout(Duration::from_secs(4), close_rx)
+        .await
+        .expect("ticket-aware close timed out")
+        .expect("channel dropped")
+        .expect("ticket-aware close failed");
+    assert!(matches!(
+        close_response,
+        TicketSyncResponse::Ack { success: true, .. }
+    ));
 
     // Step D: Verify ticket state is persisted as CLOSED on managed peer
     tokio::time::sleep(Duration::from_millis(300)).await;

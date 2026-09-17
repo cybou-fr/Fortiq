@@ -197,7 +197,8 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
     let _instance_lock = acquire_instance_lock()?;
     let config = Config::load(&config_path).await?;
     let mode = config.mode();
-    let ticket_store = TicketStore::new(config.ticket_path());
+    let ticket_store = TicketStore::try_new(config.ticket_path())
+        .context("Failed to open persistent ticket database")?;
     let (keypair, _) = load_or_create_identity(&config.identity.path).await?;
     let peer_id = keypair.public().to_peer_id();
 
@@ -241,7 +242,8 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
 async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
     let config = Config::load(&config_path).await?;
     let mode = config.mode();
-    let ticket_store = TicketStore::new(config.ticket_path());
+    let ticket_store = TicketStore::try_new(config.ticket_path())
+        .context("Failed to open persistent ticket database")?;
     let mut dial = args.dial;
     let mut close_ticket_peer = None;
 

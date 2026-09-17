@@ -277,7 +277,14 @@ async fn cmd_peers(pipe: Option<&str>) -> Result<()> {
 
 async fn cmd_tickets_list(pipe: Option<&str>, state_filter: Option<String>) -> Result<()> {
     let filter = state_filter.and_then(|s| TicketState::parse_str(&s.to_uppercase()));
-    match ipc::send_command(&IpcRequest::ListTickets { state_filter: filter }, pipe).await? {
+    match ipc::send_command(
+        &IpcRequest::ListTickets {
+            state_filter: filter,
+        },
+        pipe,
+    )
+    .await?
+    {
         IpcResponse::Tickets(tickets) => {
             if tickets.is_empty() {
                 println!("Aucun ticket trouvé.");
@@ -288,10 +295,7 @@ async fn cmd_tickets_list(pipe: Option<&str>, state_filter: Option<String>) -> R
                 "{:<16} {:<12} {:<8} {:<15} {:<32}",
                 "ID", "STATUT", "PRIORITÉ", "ACCÈS DISTANT", "TITRE"
             );
-            println!(
-                "{:-<16} {:-<12} {:-<8} {:-<15} {:-<32}",
-                "", "", "", "", ""
-            );
+            println!("{:-<16} {:-<12} {:-<8} {:-<15} {:-<32}", "", "", "", "", "");
 
             for t in tickets {
                 let access = if t.remote_access_enabled {
@@ -352,10 +356,7 @@ async fn cmd_ticket_show(pipe: Option<&str>, ticket_id: &str) -> Result<()> {
 
             println!("\n--- Messages ({}) ---", detail.messages.len());
             for m in &detail.messages {
-                println!(
-                    "[{}] {}: {}",
-                    m.delivery_state, m.sender_peer_id, m.body
-                );
+                println!("[{}] {}: {}", m.delivery_state, m.sender_peer_id, m.body);
             }
 
             println!("\n--- Fichiers joints ({}) ---", detail.attachments.len());
@@ -366,10 +367,7 @@ async fn cmd_ticket_show(pipe: Option<&str>, ticket_id: &str) -> Result<()> {
                 );
             }
 
-            println!(
-                "\n--- Sessions Shell ({}) ---",
-                detail.shell_sessions.len()
-            );
+            println!("\n--- Sessions Shell ({}) ---", detail.shell_sessions.len());
             for s in &detail.shell_sessions {
                 println!(
                     "Session {} par {} ({}) - Résultat: {:?}",
@@ -512,8 +510,11 @@ async fn cmd_ticket_access(pipe: Option<&str>, ticket_id: &str, enabled: bool) -
 }
 
 async fn cmd_ticket_set_status(pipe: Option<&str>, ticket_id: &str, state_str: &str) -> Result<()> {
-    let state = TicketState::parse_str(&state_str.to_uppercase())
-        .ok_or_else(|| anyhow::anyhow!("Statut invalide: {state_str}. Valeurs acceptées: OPEN, IN_PROGRESS, RESOLVED, CLOSED"))?;
+    let state = TicketState::parse_str(&state_str.to_uppercase()).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Statut invalide: {state_str}. Valeurs acceptées: OPEN, IN_PROGRESS, RESOLVED, CLOSED"
+        )
+    })?;
     match ipc::send_command(
         &IpcRequest::UpdateTicketStatus {
             ticket_id: ticket_id.to_string(),
@@ -524,7 +525,11 @@ async fn cmd_ticket_set_status(pipe: Option<&str>, ticket_id: &str, state_str: &
     .await?
     {
         IpcResponse::TicketUpdated(Some(ticket)) => {
-            println!("Statut du ticket {} mis à jour: {}.", ticket.id, ticket.state.as_str());
+            println!(
+                "Statut du ticket {} mis à jour: {}.",
+                ticket.id,
+                ticket.state.as_str()
+            );
             Ok(())
         }
         IpcResponse::TicketUpdated(None) => bail!("Ticket introuvable: {ticket_id}"),
