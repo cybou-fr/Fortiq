@@ -225,6 +225,13 @@ impl RsProfile {
         parity_shards: 2,
     };
 
+    pub const fn new(data_shards: u8, parity_shards: u8) -> Self {
+        Self {
+            data_shards,
+            parity_shards,
+        }
+    }
+
     pub fn total_shards(&self) -> usize {
         (self.data_shards as usize) + (self.parity_shards as usize)
     }

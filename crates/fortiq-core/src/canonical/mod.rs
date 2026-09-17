@@ -9,6 +9,7 @@ pub mod control_store;
 pub mod crypto;
 pub mod distribution;
 pub mod events;
+pub mod files;
 pub mod records;
 pub mod signing;
 pub mod storage;
