@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use fortiq_core::{
     AuthorizationConfig, CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig,
     NodeInfo, NodeMode, TicketConfig, TicketPriority, TicketState, TicketStore,

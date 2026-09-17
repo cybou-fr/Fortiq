@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::io::Write;
 
 use anyhow::{bail, Context, Result};

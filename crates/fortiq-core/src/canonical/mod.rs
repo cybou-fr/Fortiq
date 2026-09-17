@@ -13,6 +13,7 @@ pub mod events;
 pub mod files;
 pub mod portable;
 pub mod records;
+pub mod retirement;
 pub mod self_support;
 pub mod shell;
 pub mod signing;

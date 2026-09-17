@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::{
     fs::{self, File, OpenOptions},
     net::SocketAddr,

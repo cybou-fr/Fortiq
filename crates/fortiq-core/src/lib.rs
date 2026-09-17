@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::{fmt, path::Path, path::PathBuf};
 
 use anyhow::{Context, Result};
@@ -34,6 +36,13 @@ impl Config {
         Ok(config)
     }
 
+    /// Deprecated: Static node mode is deprecated in Canonical Architecture v3.
+    /// Nodes are sovereign participants whose capabilities are determined dynamically
+    /// by Segment Descriptors and Owner-signed Session Certificates.
+    #[deprecated(
+        since = "0.3.0",
+        note = "Canonical Architecture v3 replaces static node roles with sovereign cryptographic capability profiles and dynamic Owner-signed Session Certificates."
+    )]
     pub fn mode(&self) -> NodeMode {
         if self.authorization.operator_peer_id.is_some() {
             NodeMode::Managed
@@ -165,6 +174,12 @@ impl Config {
 /// The caller must pass the authenticated PeerId supplied by libp2p, never a
 /// PeerId claimed inside application payload data. Operator-mode nodes have no
 /// configured remote operator and therefore return false.
+/// Deprecated: Static operator authorization via `operator_peer_id` is deprecated in favor of
+/// `CanonicalAuthorityResolver` and cryptographic `OperatorSessionCertificate`s.
+#[deprecated(
+    since = "0.3.0",
+    note = "is_authorized_operator based on config.authorization.operator_peer_id is deprecated. Use CanonicalAuthorityResolver with Owner-signed Session Certificates."
+)]
 pub fn is_authorized_operator(remote_peer: PeerId, config: &Config) -> bool {
     config
         .authorization
@@ -186,6 +201,11 @@ pub struct IdentityConfig {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct AuthorizationConfig {
+    /// Deprecated: Static operator_peer_id is formally retired in Canonical Architecture v3.
+    #[deprecated(
+        since = "0.3.0",
+        note = "operator_peer_id is deprecated. FORTIQ Canonical Architecture v3 replaces static peer ID authorization with cryptographic Segment capabilities, Session Certificates, and client-owned AccessEpochs."
+    )]
     pub operator_peer_id: Option<String>,
 }
 
@@ -334,6 +354,12 @@ impl TicketStore {
     }
 }
 
+/// Deprecated: Static node roles (OPERATOR / MANAGED) are formally retired in Canonical Architecture v3.
+/// Sovereign authority is governed dynamically by Owner-signed Session Certificates and Segment capabilities.
+#[deprecated(
+    since = "0.3.0",
+    note = "NodeMode (OPERATOR/MANAGED) is deprecated. FORTIQ Canonical Architecture v3 replaces static node roles with sovereign cryptographic capability profiles and dynamic Owner-signed Session Certificates."
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum NodeMode {
