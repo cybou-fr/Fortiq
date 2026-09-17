@@ -314,14 +314,31 @@ pub async fn serve<S>(stream: S, local_info: NodeInfo) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    serve_with_revocation(
+        stream,
+        local_info,
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+}
+
+pub async fn serve_with_revocation<S>(
+    stream: S,
+    local_info: NodeInfo,
+    revocation_token: tokio_util::sync::CancellationToken,
+) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let (network_read, network_write) = tokio::io::split(stream.compat());
-    serve_pty(network_read, network_write, local_info).await
+    serve_pty(network_read, network_write, local_info, revocation_token).await
 }
 
 async fn serve_pty<R, W>(
     mut network_read: R,
     mut network_write: W,
     local_info: NodeInfo,
+    revocation_token: tokio_util::sync::CancellationToken,
 ) -> Result<()>
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
@@ -472,6 +489,9 @@ where
     let mut send_completed = false;
 
     tokio::select! {
+        _ = revocation_token.cancelled() => {
+            tracing::warn!("Remote shell session cancelled immediately by client revocation");
+        }
         res = &mut child_task => {
             child_completed = true;
             tracing::debug!("Child shell process exited: {:?}", res);

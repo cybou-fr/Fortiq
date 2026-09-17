@@ -11,6 +11,7 @@ pub mod distribution;
 pub mod events;
 pub mod files;
 pub mod records;
+pub mod shell;
 pub mod signing;
 pub mod storage;
 pub mod sync;
