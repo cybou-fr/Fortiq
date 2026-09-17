@@ -19,7 +19,7 @@ mod tests {
             writer_stream_id: StreamId::from_bytes([0x44; 16]),
             writer_seq: 42,
             prev_pack_id: Some(ObjectId::from_bytes([0x55; 32])),
-            crypto_profile: CryptoProfileId::FortiqPq1,
+            crypto_profile: CryptoProfileId::FortiqClassicalDev1,
             envelope_set_digest: [0x66; 32],
             ciphertext_digest: [0x77; 32],
             ciphertext_len: 1024,

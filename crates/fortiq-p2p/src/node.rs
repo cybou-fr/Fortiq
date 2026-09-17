@@ -16,7 +16,7 @@ use fortiq_core::{
         signing::{Ed25519Signer, Ed25519Verifier, Verifier},
         types::{AccessEpoch, SegmentId},
     },
-    is_authorized_operator, Config, NodeInfo, TicketStore,
+    Config, NodeInfo, TicketStore,
 };
 use futures::StreamExt;
 use libp2p::{
@@ -896,9 +896,6 @@ pub async fn run(
     }
 
     let mut stream_control = swarm.behaviour().stream.new_control();
-    let incoming_shells_v2 = stream_control
-        .accept(SHELL_PROTOCOL_V2)
-        .context("shell v2 protocol already registered")?;
     let incoming_shells_next = stream_control
         .accept(SHELL_PROTOCOL_NEXT)
         .context("shell next protocol already registered")?;
@@ -918,7 +915,6 @@ pub async fn run(
     };
     event_loop(
         &mut swarm,
-        incoming_shells_v2,
         incoming_shells_next,
         incoming_files,
         stream_control,
@@ -929,7 +925,6 @@ pub async fn run(
 
 async fn event_loop(
     swarm: &mut Swarm<Behaviour>,
-    mut incoming_shells_v2: libp2p_stream::IncomingStreams,
     mut incoming_shells_next: libp2p_stream::IncomingStreams,
     mut incoming_files: libp2p_stream::IncomingStreams,
     stream_control: libp2p_stream::Control,
@@ -1015,55 +1010,11 @@ async fn event_loop(
                         }
                         let _ = reply.send(peer_registry.to_summaries());
                     }
-                    P2pCommand::OpenShellStream { peer, ticket_id, dial, reply } => {
-                        if swarm.is_connected(&peer) {
-                            spawn_open_shell_stream(peer, ticket_id, stream_control.clone(), reply);
-                        } else {
-                            pending_shell_opens.entry(peer).or_default().push((ticket_id, reply));
-
-                            let candidates: Vec<Multiaddr> = if let Some(addr) = dial {
-                                vec![addr]
-                            } else {
-                                dial_candidates(peer, &peer_registry, config.network.relay_peer.as_deref())
-                            };
-
-                            if candidates.is_empty() {
-                                warn!(remote_peer_id = %peer, "no dial candidates for shell stream");
-                                if let Some(pending) = pending_shell_opens.remove(&peer) {
-                                    for (_, reply) in pending {
-                                        let _ = reply.send(Err(format!("Aucune adresse connue pour joindre le poste {peer}")));
-                                    }
-                                }
-                            } else {
-                                use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
-                                let opts = DialOpts::peer_id(peer)
-                                    .addresses(candidates)
-                                    .condition(PeerCondition::DisconnectedAndNotDialing)
-                                    .build();
-                                match swarm.dial(opts) {
-                                    Ok(()) => info!(remote_peer_id = %peer, "dialing peer for pending shell stream"),
-                                    Err(libp2p::swarm::DialError::DialPeerConditionFalse(_)) => {
-                                        if swarm.is_connected(&peer) {
-                                            if let Some(pending) = pending_shell_opens.remove(&peer) {
-                                                for (tid, reply) in pending {
-                                                    spawn_open_shell_stream(peer, tid, stream_control.clone(), reply);
-                                                }
-                                            }
-                                        } else {
-                                            info!(remote_peer_id = %peer, "shell request joined an existing dial attempt");
-                                        }
-                                    }
-                                    Err(error) => {
-                                        warn!(remote_peer_id = %peer, %error, "dial attempt failed for shell stream");
-                                        if let Some(pending) = pending_shell_opens.remove(&peer) {
-                                            for (_, reply) in pending {
-                                                let _ = reply.send(Err(format!("Échec de la tentative de connexion vers {peer}: {error}")));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    P2pCommand::OpenShellStream { peer, ticket_id, dial: _, reply } => {
+                        let _ = reply.send(Err(
+                            "legacy shell/2.0 is disabled; use the canonical shell/next handshake through the service IPC".to_string(),
+                        ));
+                        warn!(remote_peer_id = %peer, ticket_id = ?ticket_id, "legacy shell/2.0 request rejected");
                     }
                     P2pCommand::OpenShellNext {
                         peer,
@@ -1175,16 +1126,6 @@ async fn event_loop(
                         }
                     }
                 }
-            }
-            Some((remote_peer, stream)) = incoming_shells_v2.next() => {
-                handle_incoming_shell_v2(
-                    stream,
-                    remote_peer,
-                    &config,
-                    &ticket_store,
-                    &active_shells,
-                    &local_info,
-                ).await;
             }
             Some((remote_peer, stream)) = incoming_shells_next.next() => {
                 handle_incoming_shell_next(
@@ -2008,13 +1949,44 @@ async fn handle_incoming_shell_next(
         && session_verifier
             .and_then(|verifier| verifier.verify(&payload, &handshake.challenge_signature))
             .is_ok();
+    let ticket = match ticket_store
+        .db()
+        .get_ticket(&handshake.ticket_id)
+        .ok()
+        .flatten()
+    {
+        Some(ticket) => ticket,
+        None => {
+            let _ =
+                fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_NO_TICKET)
+                    .await;
+            return;
+        }
+    };
+    let current_epoch = match AccessEpoch::from_hex(&ticket.access_epoch) {
+        Ok(epoch) => epoch,
+        Err(_) => {
+            let _ = fortiq_shell::send_authorization_code(
+                &mut stream,
+                fortiq_shell::DENIED_EPOCH_MISMATCH,
+            )
+            .await;
+            return;
+        }
+    };
     if !authority_valid {
-        let code = if handshake.access_epoch != active_epoch {
+        let code = if handshake.access_epoch != current_epoch {
             fortiq_shell::DENIED_EPOCH_MISMATCH
         } else {
             fortiq_shell::DENIED_INVALID_AUTHORITY
         };
         let _ = fortiq_shell::send_authorization_code(&mut stream, code).await;
+        return;
+    }
+    if handshake.access_epoch != current_epoch {
+        let _ =
+            fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_EPOCH_MISMATCH)
+                .await;
         return;
     }
     if ticket.client_peer_id != local_info.peer_id || !ticket.state.permits_work() {
@@ -2085,151 +2057,6 @@ async fn handle_incoming_shell_next(
             } else {
                 "REVOKED_OR_ERROR"
             }),
-        );
-    });
-}
-
-async fn handle_incoming_shell_v2(
-    mut stream: libp2p::Stream,
-    remote_peer: PeerId,
-    config: &Config,
-    ticket_store: &TicketStore,
-    active_shells: &Arc<AtomicBool>,
-    local_info: &NodeInfo,
-) {
-    if !is_authorized_operator(remote_peer, config) {
-        warn!(remote_peer_id = %remote_peer, "denied shell v2 from unauthorized peer");
-        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED).await;
-        return;
-    }
-
-    let handshake = match tokio::time::timeout(
-        Duration::from_secs(5),
-        fortiq_shell::ShellHandshake::read_from_async(&mut stream),
-    )
-    .await
-    {
-        Ok(Ok(h)) => h,
-        Ok(Err(e)) => {
-            warn!(remote_peer_id = %remote_peer, %e, "failed to read shell handshake");
-            let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED).await;
-            return;
-        }
-        Err(_) => {
-            warn!(remote_peer_id = %remote_peer, "timeout reading shell handshake");
-            let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED).await;
-            return;
-        }
-    };
-
-    if handshake.ticket_id.trim().is_empty() {
-        warn!(remote_peer_id = %remote_peer, "denied shell v2: missing ticket id");
-        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_NO_TICKET)
-            .await;
-        return;
-    }
-    let ticket_id = handshake.ticket_id;
-    let ticket_opt = ticket_store.db().get_ticket(&ticket_id).ok().flatten();
-
-    let ticket = match ticket_opt {
-        Some(t) => t,
-        None => {
-            warn!(remote_peer_id = %remote_peer, "denied shell v2: ticket not found");
-            let _ =
-                fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_NO_TICKET)
-                    .await;
-            return;
-        }
-    };
-
-    if !is_ticket_counterparty(&ticket, &local_info.peer_id, &remote_peer) {
-        warn!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "denied shell v2: peer is not ticket counterparty");
-        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED).await;
-        return;
-    }
-
-    if !ticket.state.permits_work() {
-        warn!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "denied shell v2: ticket is closed");
-        let _ =
-            fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_TICKET_CLOSED)
-                .await;
-        return;
-    }
-
-    if !ticket.remote_access_enabled {
-        warn!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "denied shell v2: remote access disabled on ticket");
-        let _ = fortiq_shell::send_authorization_code(
-            &mut stream,
-            fortiq_shell::DENIED_REMOTE_ACCESS_DISABLED,
-        )
-        .await;
-        return;
-    }
-
-    if active_shells
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        warn!(remote_peer_id = %remote_peer, "denied shell v2: another shell session is already active");
-        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_BUSY).await;
-        return;
-    }
-
-    if let Err(error) = fortiq_shell::send_authorization(&mut stream, true).await {
-        warn!(remote_peer_id = %remote_peer, %error, "failed to send shell authorization result");
-        active_shells.store(false, Ordering::SeqCst);
-        return;
-    }
-
-    info!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "accepted authorized shell v2");
-    let info = local_info.clone();
-    let shells_flag = active_shells.clone();
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let db = ticket_store.db().clone();
-    let tid = ticket.id.clone();
-    let op_peer_str = remote_peer.to_string();
-
-    tokio::spawn(async move {
-        let _guard = ShellSessionGuard(shells_flag);
-        let _ = db.record_shell_session_start(&session_id, &tid, &op_peer_str, "QUIC/Relay");
-        let _ = db.record_event(
-            &tid,
-            "SHELL_SESSION_STARTED",
-            &op_peer_str,
-            Some("Session shell démarrée"),
-        );
-
-        let watcher_db = db.clone();
-        let watcher_ticket_id = tid.clone();
-        let res = tokio::select! {
-            result = fortiq_shell::serve(stream, info) => result,
-            () = async move {
-                loop {
-                    tokio::time::sleep(Duration::from_millis(250)).await;
-                    let still_authorized = watcher_db
-                        .get_ticket(&watcher_ticket_id)
-                        .ok()
-                        .flatten()
-                        .is_some_and(|ticket| {
-                            ticket.state.permits_work() && ticket.remote_access_enabled
-                        });
-                    if !still_authorized {
-                        break;
-                    }
-                }
-            } => Err(anyhow::anyhow!("ticket authorization was revoked")),
-        };
-        let result_str = if res.is_ok() {
-            "SUCCESS"
-        } else {
-            "REVOKED_OR_ERROR"
-        };
-        let _ = db.record_shell_session_end(&session_id, Some(result_str));
-        let _ = db.record_event(
-            &tid,
-            "SHELL_SESSION_ENDED",
-            &op_peer_str,
-            Some("Session shell terminée"),
         );
     });
 }

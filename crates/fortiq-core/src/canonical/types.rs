@@ -195,8 +195,15 @@ impl StorageClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(u16)]
 pub enum CryptoProfileId {
-    /// MLKEM768-X25519 hybrid HPKE + ML-DSA-65 signatures + ChaCha20Poly1305 AEAD.
-    FortiqPq1 = 1,
+    /// Classical development profile currently used by the runtime.
+    ///
+    /// This profile uses Ed25519 signing, X25519 key agreement, HKDF-SHA256, and
+    /// ChaCha20-Poly1305 AEAD. Real PQ-capable profiles remain reserved for a later
+    /// implementation and must not claim to be active while the runtime does not
+    /// provide the corresponding primitives.
+    FortiqClassicalDev1 = 1,
+    /// Reserved for a future PQ-capable profile.
+    FortiqPq1 = 2,
 }
 
 impl CryptoProfileId {
@@ -206,7 +213,8 @@ impl CryptoProfileId {
 
     pub const fn from_u16(v: u16) -> Option<Self> {
         match v {
-            1 => Some(Self::FortiqPq1),
+            1 => Some(Self::FortiqClassicalDev1),
+            2 => Some(Self::FortiqPq1),
             _ => None,
         }
     }

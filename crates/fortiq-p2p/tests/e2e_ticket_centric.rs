@@ -332,12 +332,15 @@ async fn e2e_ticket_centric_full_lifecycle() {
 
     let shell1_res = shell1_rx.await.unwrap();
     assert!(
-        shell1_res.is_ok(),
-        "Shell stream with valid ticket failed: {:?}",
-        shell1_res.err()
+        shell1_res.is_err(),
+        "Legacy shell/2.0 must be rejected, even with a valid ticket: {:?}",
+        shell1_res
     );
-    // Close stream to release shell session
-    drop(shell1_res.unwrap());
+    let shell1_err = shell1_res.unwrap_err();
+    assert!(
+        shell1_err.contains("legacy shell/2.0 is disabled") || shell1_err.contains("shell/next"),
+        "Unexpected legacy-shell denial: {shell1_err}"
+    );
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // 7. Customer revokes Remote Access -> Shell attempt DENIED with DENIED_REMOTE_ACCESS_DISABLED
@@ -388,11 +391,11 @@ async fn e2e_ticket_centric_full_lifecycle() {
     let shell2_res = shell2_rx.await.unwrap();
     assert!(
         shell2_res.is_err(),
-        "Shell stream should be rejected when remote access is disabled!"
+        "Legacy shell/2.0 attempt must be rejected whether or not remote access is enabled!"
     );
     let err_msg = shell2_res.unwrap_err();
     assert!(
-        err_msg.contains("désactivé") || err_msg.contains("remote access"),
+        err_msg.contains("legacy shell/2.0 is disabled") || err_msg.contains("shell/next"),
         "Unexpected error message: {err_msg}"
     );
 
@@ -424,11 +427,11 @@ async fn e2e_ticket_centric_full_lifecycle() {
     let shell3_res = shell3_rx.await.unwrap();
     assert!(
         shell3_res.is_err(),
-        "Shell stream should be rejected when ticket is closed!"
+        "Legacy shell/2.0 is denied regardless of ticket state!"
     );
     let err_msg3 = shell3_res.unwrap_err();
     assert!(
-        err_msg3.contains("fermé") || err_msg3.contains("closed"),
+        err_msg3.contains("legacy shell/2.0 is disabled") || err_msg3.contains("shell/next"),
         "Unexpected error message: {err_msg3}"
     );
 

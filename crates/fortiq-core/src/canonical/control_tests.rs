@@ -19,7 +19,7 @@ mod tests {
             owner_id,
             owner_root_signing_public_key: owner_pk,
             recovery_public_key: None,
-            initial_crypto_profile: CryptoProfileId::FortiqPq1,
+            initial_crypto_profile: CryptoProfileId::FortiqClassicalDev1,
             initial_policy_hash: [0x88; 32],
             created_at: 1726570000,
         };

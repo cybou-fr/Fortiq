@@ -17,15 +17,18 @@ use fortiq_core::{
 };
 use libp2p::PeerId;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio_util::sync::CancellationToken;
 
 pub const MAX_IPC_LINE_BYTES: usize = 64 * 1024;
 
 pub struct ActiveOperatorSession {
+    pub session_id: uuid::Uuid,
     pub owner_id: OwnerId,
     pub cert: OperatorSessionCertificate,
     pub workspace: MemoryWorkspace,
     pub expires_at: u64,
     pub session_signer: Arc<Ed25519Signer>,
+    pub cancellation_token: CancellationToken,
 }
 
 pub struct IpcState {
@@ -43,7 +46,7 @@ pub async fn is_operator_authorized(state: &IpcState) -> bool {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let session_guard = state.operator_session.read().await;
+    let mut session_guard = state.operator_session.write().await;
     if let Some(session) = session_guard.as_ref() {
         if session.expires_at > now
             && session
@@ -52,6 +55,12 @@ pub async fn is_operator_authorized(state: &IpcState) -> bool {
                 .has(OperatorCapabilities::SHELL_EXEC)
         {
             return true;
+        }
+        if now >= session.expires_at {
+            if let Some(mut expired) = session_guard.take() {
+                expired.cancellation_token.cancel();
+                expired.workspace.wipe();
+            }
         }
     }
     false
@@ -1118,17 +1127,40 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
 
             let mut workspace = MemoryWorkspace::new();
             workspace.unlock(net_id, owner_id, segment_master_seed);
+            let session_id = uuid::Uuid::new_v4();
+            let cancellation_token = CancellationToken::new();
 
             {
                 let mut guard = state.operator_session.write().await;
+                if let Some(mut previous) = guard.take() {
+                    previous.cancellation_token.cancel();
+                    previous.workspace.wipe();
+                }
                 *guard = Some(ActiveOperatorSession {
+                    session_id,
                     owner_id,
                     cert,
                     workspace,
                     expires_at,
                     session_signer,
+                    cancellation_token,
                 });
             }
+
+            let operator_session = Arc::clone(&state.operator_session);
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(ttl)).await;
+                let mut guard = operator_session.write().await;
+                let is_current = guard
+                    .as_ref()
+                    .is_some_and(|session| session.session_id == session_id);
+                if is_current {
+                    if let Some(mut expired) = guard.take() {
+                        expired.cancellation_token.cancel();
+                        expired.workspace.wipe();
+                    }
+                }
+            });
 
             IpcResponse::OperatorStatus(OperatorSessionStatus {
                 is_unlocked: true,
@@ -1140,7 +1172,9 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
         IpcRequest::LockOperator => {
             let mut guard = state.operator_session.write().await;
             if let Some(mut session) = guard.take() {
+                session.cancellation_token.cancel();
                 session.workspace.wipe();
+                session.session_signer = Arc::new(Ed25519Signer::from_seed([0u8; 32]));
             }
             IpcResponse::Success
         }
@@ -1153,6 +1187,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             if let Some(session) = guard.as_ref() {
                 if now >= session.expires_at {
                     if let Some(mut expired) = guard.take() {
+                        expired.cancellation_token.cancel();
                         expired.workspace.wipe();
                     }
                     return IpcResponse::OperatorStatus(OperatorSessionStatus {
@@ -1326,12 +1361,20 @@ where
                 return Ok(());
             }
         };
-    let (certificate, session_signer) = {
+    let (certificate, session_signer, cancellation_token) = {
         let session = state.operator_session.read().await;
-        let session = session
-            .as_ref()
-            .expect("authorization checked before terminal init");
-        (session.cert.clone(), session.session_signer.clone())
+        let Some(session) = session.as_ref() else {
+            ipc_write
+                .write_all(b"{\"status\":\"error\",\"message\":\"Operator session inactive\"}\n")
+                .await?;
+            ipc_write.flush().await?;
+            return Ok(());
+        };
+        (
+            session.cert.clone(),
+            session.session_signer.clone(),
+            session.cancellation_token.clone(),
+        )
     };
     let segment_id = fortiq_shell::derive_ticket_segment_id(&certificate.network_id, &ticket_id);
 
@@ -1356,7 +1399,10 @@ where
         return Ok(());
     }
 
-    let p2p_stream = match reply_rx.await {
+    let p2p_stream = match tokio::select! {
+        _ = cancellation_token.cancelled() => Err("La session opérateur a été verrouillée ou a expiré".to_string()),
+        result = reply_rx => result.map_err(|_| "Délai dépassé ou canal P2P abandonné".to_string()),
+    } {
         Ok(Ok(stream)) => stream,
         Ok(Err(err)) => {
             let err_msg = format!("{{\"status\":\"error\",\"message\":\"{err}\"}}\n");
@@ -1364,9 +1410,8 @@ where
             ipc_write.flush().await?;
             return Ok(());
         }
-        Err(_) => {
-            let err_msg =
-                "{\"status\":\"error\",\"message\":\"Délai dépassé ou canal P2P abandonné\"}\n";
+        Err(err) => {
+            let err_msg = format!("{{\"status\":\"error\",\"message\":\"{err}\"}}\n");
             ipc_write.write_all(err_msg.as_bytes()).await?;
             ipc_write.flush().await?;
             return Ok(());
@@ -1405,6 +1450,12 @@ where
     });
 
     tokio::select! {
+        _ = cancellation_token.cancelled() => {
+            forward_in.abort();
+            forward_out.abort();
+            let _ = forward_in.await;
+            let _ = forward_out.await;
+        }
         _ = &mut forward_in => {
             forward_out.abort();
             let _ = forward_out.await;
@@ -1446,7 +1497,7 @@ mod tests {
             owner_id: derive_owner_id(&public_key),
             owner_root_signing_public_key: public_key.to_vec(),
             recovery_public_key: None,
-            initial_crypto_profile: CryptoProfileId::FortiqPq1,
+            initial_crypto_profile: CryptoProfileId::FortiqClassicalDev1,
             initial_policy_hash: [0x88; 32],
             created_at: 1,
         };
@@ -1653,6 +1704,14 @@ mod tests {
             .expect("active operator session")
             .workspace
             .is_unlocked());
+        let session_cancellation = state
+            .operator_session
+            .read()
+            .await
+            .as_ref()
+            .expect("active operator session")
+            .cancellation_token
+            .clone();
 
         // 5. GetStatus reports is_operator_unlocked = true
         let status_res = process_request(IpcRequest::GetStatus, &state).await;
@@ -1666,6 +1725,7 @@ mod tests {
         let lock_res = process_request(IpcRequest::LockOperator, &state).await;
         assert_eq!(lock_res, IpcResponse::Success);
         assert!(!is_operator_authorized(&state).await);
+        assert!(session_cancellation.is_cancelled());
 
         // 7. GetOperatorStatus reports is_unlocked = false
         let op_status = process_request(IpcRequest::GetOperatorStatus, &state).await;

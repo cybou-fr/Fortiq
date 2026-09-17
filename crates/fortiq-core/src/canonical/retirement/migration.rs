@@ -152,7 +152,7 @@ impl LegacyTicketMigrator {
             writer_stream_id,
             writer_seq: 1,
             prev_pack_id: None,
-            crypto_profile: CryptoProfileId::FortiqPq1,
+            crypto_profile: CryptoProfileId::FortiqClassicalDev1,
             envelope_set_digest: [0u8; 32],
             ciphertext_digest: [0u8; 32],
             ciphertext_len: 0,

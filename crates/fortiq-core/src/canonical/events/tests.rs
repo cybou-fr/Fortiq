@@ -26,7 +26,7 @@ fn dummy_signed_object(
         writer_stream_id: stream_id,
         writer_seq: seq,
         prev_pack_id,
-        crypto_profile: CryptoProfileId::FortiqPq1,
+        crypto_profile: CryptoProfileId::FortiqClassicalDev1,
         envelope_set_digest: [0x22; 32],
         ciphertext_digest: [0x33; 32],
         ciphertext_len,

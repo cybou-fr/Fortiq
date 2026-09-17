@@ -5,10 +5,8 @@ use fortiq_core::{
     NodeInfo, NodeMode, TicketConfig, TicketPriority, TicketState, TicketStore,
 };
 use fortiq_p2p::{P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
-use fortiq_shell::ShellFrame;
 use libp2p::{identity::Keypair, Multiaddr};
 use std::time::Duration;
-use tokio_util::compat::FuturesAsyncReadCompatExt;
 
 #[tokio::test]
 async fn e2e_relay_rendezvous_three_nodes_interaction() {
@@ -247,148 +245,16 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         .expect("Channel dropped");
 
     assert!(
-        stream_res.is_ok(),
-        "First shell stream failed: {:?}",
-        stream_res.err()
+        stream_res.is_err(),
+        "Legacy shell/2.0 must be rejected by the hardened runtime: {:?}",
+        stream_res
     );
-
-    let stream = stream_res.unwrap();
-    let (mut read_half, mut write_half) = tokio::io::split(stream.compat());
-
-    // Drain initial banner so shell process is fully initialized to accept stdin
-    for _ in 0..30 {
-        if let Ok(Ok(Some(ShellFrame::Data(_)))) = tokio::time::timeout(
-            Duration::from_millis(100),
-            ShellFrame::read_from(&mut read_half),
-        )
-        .await
-        {
-            break;
-        }
-    }
-
-    // Send a command to the remote shell
-    let echo_cmd = b"echo P2P_RELAY_OK\r\nexit\r\n".to_vec();
-    ShellFrame::Data(echo_cmd)
-        .write_to(&mut write_half)
-        .await
-        .unwrap();
-
-    // Read response frames
-    let mut got_output = false;
-    for _ in 0..20 {
-        match tokio::time::timeout(
-            Duration::from_millis(500),
-            ShellFrame::read_from(&mut read_half),
-        )
-        .await
-        {
-            Ok(Ok(Some(ShellFrame::Data(bytes)))) => {
-                let s = String::from_utf8_lossy(&bytes);
-                if s.contains("P2P_RELAY_OK") {
-                    got_output = true;
-                    break;
-                }
-            }
-            Ok(Ok(Some(_))) => {}
-            Ok(Ok(None)) => break,
-            Ok(Err(err)) => panic!("shell stream 1 read error: {err}"),
-            Err(_) => {}
-        }
-    }
+    let err = stream_res.unwrap_err();
     assert!(
-        got_output,
-        "Did not receive shell output through relay stream"
+        err.contains("legacy shell/2.0 is disabled") || err.contains("shell/next"),
+        "Unexpected legacy-shell rejection: {err}"
     );
 
-    // Wait for clean EOF from remote shell process
-    let mut saw_eof1 = false;
-    for _ in 0..25 {
-        match tokio::time::timeout(
-            Duration::from_millis(200),
-            ShellFrame::read_from(&mut read_half),
-        )
-        .await
-        {
-            Ok(Ok(None)) => {
-                saw_eof1 = true;
-                break;
-            }
-            Ok(Err(err)) => panic!("shell stream 1 failed before clean EOF: {err}"),
-            _ => {}
-        }
-    }
-    assert!(saw_eof1, "Shell stream 1 did not reach EOF after exit");
-    drop(read_half);
-    drop(write_half);
-
-    // Step C: Open a second shell stream to prove no lockup / busy deadlock once first session exits
-    let mut stream_res2 = None;
-    for _ in 0..20 {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let (shell_tx2, shell_rx2) = tokio::sync::oneshot::channel();
-        if op_cmd_tx
-            .send(P2pCommand::OpenShellStream {
-                peer: managed_peer_id,
-                ticket_id: Some(opened_ticket.id.clone()),
-                dial: None,
-                reply: shell_tx2,
-            })
-            .await
-            .is_ok()
-        {
-            if let Ok(Ok(Ok(s))) = tokio::time::timeout(Duration::from_secs(4), shell_rx2).await {
-                stream_res2 = Some(s);
-                break;
-            }
-        }
-    }
-
-    assert!(
-        stream_res2.is_some(),
-        "Second shell stream failed to open within retry window"
-    );
-
-    let stream2 = stream_res2.unwrap();
-    let (mut read_half2, mut write_half2) = tokio::io::split(stream2.compat());
-
-    // Drain initial banner so shell process is fully initialized to accept stdin
-    for _ in 0..30 {
-        if let Ok(Ok(Some(ShellFrame::Data(_)))) = tokio::time::timeout(
-            Duration::from_millis(100),
-            ShellFrame::read_from(&mut read_half2),
-        )
-        .await
-        {
-            break;
-        }
-    }
-
-    // Send exit\r\n and wait for EOF/clean exit before the ticket-aware status update.
-    ShellFrame::Data(b"exit\r\n".to_vec())
-        .write_to(&mut write_half2)
-        .await
-        .unwrap();
-
-    let mut saw_eof2 = false;
-    for _ in 0..25 {
-        match tokio::time::timeout(
-            Duration::from_millis(200),
-            ShellFrame::read_from(&mut read_half2),
-        )
-        .await
-        {
-            Ok(Ok(None)) => {
-                saw_eof2 = true;
-                break;
-            }
-            Ok(Err(err)) => panic!("shell stream 2 failed before clean EOF: {err}"),
-            _ => {}
-        }
-    }
-    assert!(saw_eof2, "Shell stream 2 did not reach EOF after exit");
-    drop(read_half2);
-    drop(write_half2);
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Step D: Close the exact ticket through the ticket-aware protocol.
@@ -670,80 +536,16 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         .expect("Channel dropped");
 
     assert!(
-        stream_res.is_ok(),
-        "Shell stream under production rate limits failed: {:?}",
-        stream_res.err()
+        stream_res.is_err(),
+        "Legacy shell/2.0 should be denied under production rate limits: {:?}",
+        stream_res
     );
-
-    let stream = stream_res.unwrap();
-    let (mut read_half, mut write_half) = tokio::io::split(stream.compat());
-
-    // Drain initial banner so shell process is fully initialized to accept stdin
-    for _ in 0..30 {
-        if let Ok(Ok(Some(ShellFrame::Data(_)))) = tokio::time::timeout(
-            Duration::from_millis(100),
-            ShellFrame::read_from(&mut read_half),
-        )
-        .await
-        {
-            break;
-        }
-    }
-
-    // Send a command to the remote shell
-    let echo_cmd = b"echo SMOKE_RATE_LIMIT_OK\r\nexit\r\n".to_vec();
-    ShellFrame::Data(echo_cmd)
-        .write_to(&mut write_half)
-        .await
-        .unwrap();
-
-    // Read response frames
-    let mut got_output = false;
-    for _ in 0..20 {
-        match tokio::time::timeout(
-            Duration::from_millis(500),
-            ShellFrame::read_from(&mut read_half),
-        )
-        .await
-        {
-            Ok(Ok(Some(ShellFrame::Data(bytes)))) => {
-                let s = String::from_utf8_lossy(&bytes);
-                if s.contains("SMOKE_RATE_LIMIT_OK") {
-                    got_output = true;
-                    break;
-                }
-            }
-            Ok(Ok(Some(_))) => {}
-            Ok(Ok(None)) => break,
-            Ok(Err(err)) => panic!("shell stream read error: {err}"),
-            Err(_) => {}
-        }
-    }
+    let err = stream_res.unwrap_err();
     assert!(
-        got_output,
-        "Did not receive shell output through rate-limited relay stream"
+        err.contains("legacy shell/2.0 is disabled") || err.contains("shell/next"),
+        "Unexpected legacy-shell rejection under rate limits: {err}"
     );
 
-    // Wait for clean EOF from remote shell process
-    let mut saw_eof = false;
-    for _ in 0..25 {
-        match tokio::time::timeout(
-            Duration::from_millis(200),
-            ShellFrame::read_from(&mut read_half),
-        )
-        .await
-        {
-            Ok(Ok(None)) => {
-                saw_eof = true;
-                break;
-            }
-            Ok(Err(err)) => panic!("shell stream failed before clean EOF: {err}"),
-            _ => {}
-        }
-    }
-    assert!(saw_eof, "Shell stream did not reach EOF after exit");
-    drop(read_half);
-    drop(write_half);
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Step C: Close the exact ticket through the ticket-aware protocol.

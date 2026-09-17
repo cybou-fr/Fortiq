@@ -52,7 +52,7 @@ impl TicketState {
                 (self, next),
                 (Self::Open, Self::InProgress | Self::Resolved | Self::Closed)
                     | (Self::InProgress, Self::Resolved | Self::Closed)
-                    | (Self::Resolved, Self::InProgress | Self::Closed)
+                    | (Self::Resolved, Self::Closed)
             )
     }
 }
@@ -487,16 +487,24 @@ impl TicketDb {
             anyhow::bail!("ticket revision must be greater than zero");
         }
         let conn = self.conn.lock().unwrap();
-        let participants: Option<(String, String)> = conn
+        let local: Option<(String, String, u64, String)> = conn
             .query_row(
-                "SELECT client_peer_id, operator_peer_id FROM tickets WHERE id = ?1",
+                "SELECT client_peer_id, operator_peer_id, revision, access_epoch
+                 FROM tickets WHERE id = ?1",
                 params![ticket.id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?;
-        if let Some((client, operator)) = participants {
+        if let Some((client, operator, local_revision, local_epoch)) = local {
             if client != ticket.client_peer_id || operator != ticket.operator_peer_id {
                 anyhow::bail!("canonical ticket participants do not match local record");
+            }
+            if ticket.revision < local_revision && ticket.access_epoch == local_epoch {
+                anyhow::bail!(
+                    "stale canonical ticket revision {} reuses local AccessEpoch at revision {}",
+                    ticket.revision,
+                    local_revision
+                );
             }
         }
         conn.execute(
@@ -660,14 +668,30 @@ impl TicketDb {
         if current.state == new_state {
             return Ok(Some(current));
         }
+
+        let epoch_for_state = match new_state {
+            TicketState::Resolved | TicketState::Closed => random_access_epoch(),
+            _ => current.access_epoch.clone(),
+        };
+        let remote_access_for_state = match new_state {
+            TicketState::Resolved | TicketState::Closed => false,
+            _ => current.remote_access_enabled,
+        };
         let now = current_timestamp();
         {
             let conn = self.conn.lock().unwrap();
             let affected = conn.execute(
-                "UPDATE tickets SET state = ?1, updated_at = ?2, revision = revision + 1,
-                        closed_at = CASE WHEN ?1 = 'CLOSED' THEN ?2 ELSE closed_at END
-                 WHERE id = ?3",
-                params![new_state.as_str(), now, ticket_id],
+                "UPDATE tickets SET state = ?1, remote_access_enabled = ?2, access_epoch = ?3,
+                        updated_at = ?4, revision = revision + 1,
+                        closed_at = CASE WHEN ?1 = 'CLOSED' THEN ?4 ELSE closed_at END
+                 WHERE id = ?5",
+                params![
+                    new_state.as_str(),
+                    if remote_access_for_state { 1 } else { 0 },
+                    epoch_for_state,
+                    now,
+                    ticket_id,
+                ],
             )?;
             if affected == 0 {
                 return Ok(None);
@@ -693,6 +717,12 @@ impl TicketDb {
         let Some(current) = self.get_ticket(ticket_id)? else {
             return Ok(None);
         };
+        if !current.state.permits_work() {
+            anyhow::bail!(
+                "remote access cannot be changed while ticket is in terminal state: {}",
+                current.state.as_str()
+            );
+        }
         if current.remote_access_enabled == enabled {
             return Ok(Some(current));
         }
@@ -704,7 +734,11 @@ impl TicketDb {
                         revision = revision + 1 WHERE id = ?4",
                 params![
                     if enabled { 1 } else { 0 },
-                    random_access_epoch(),
+                    if enabled {
+                        random_access_epoch()
+                    } else {
+                        random_access_epoch()
+                    },
                     now,
                     ticket_id
                 ],
@@ -1312,6 +1346,7 @@ mod tests {
 
         let mut canonical = owner;
         canonical.state = TicketState::InProgress;
+        canonical.access_epoch = "22222222222222222222222222222222".to_string();
         canonical.revision = 2;
         db.import_canonical_ticket(&canonical).unwrap();
 
@@ -1319,9 +1354,49 @@ mod tests {
         assert_eq!(stored.state, TicketState::InProgress);
         assert_eq!(stored.revision, 2);
 
+        let mut stale_same_epoch = canonical.clone();
+        stale_same_epoch.revision = 1;
+        assert!(db.import_canonical_ticket(&stale_same_epoch).is_err());
+
         let mut forged = canonical;
         forged.client_peer_id = "attacker".to_string();
         assert!(db.import_canonical_ticket(&forged).is_err());
+    }
+
+    #[test]
+    fn resolved_ticket_cannot_resume_work_and_invalidates_access() {
+        let db = TicketDb::open_in_memory().unwrap();
+        let ticket = db
+            .create_ticket(
+                "State",
+                "transition test",
+                TicketPriority::Normal,
+                "c1",
+                "op1",
+            )
+            .unwrap();
+
+        let granted = db
+            .set_remote_access(&ticket.id, true, "c1")
+            .unwrap()
+            .unwrap();
+        assert!(granted.remote_access_enabled);
+
+        let resolved = db
+            .update_ticket_state(&ticket.id, TicketState::Resolved, "c1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.state, TicketState::Resolved);
+        assert!(!resolved.remote_access_enabled);
+        assert_ne!(resolved.access_epoch, granted.access_epoch);
+
+        assert!(db
+            .update_ticket_state(&ticket.id, TicketState::InProgress, "c1")
+            .is_err());
+
+        let stored = db.get_ticket(&ticket.id).unwrap().unwrap();
+        assert_eq!(stored.state, TicketState::Resolved);
+        assert!(!stored.remote_access_enabled);
     }
 
     #[test]
