@@ -80,7 +80,6 @@ dcutr = false
 relay_rate_limit = true
 
 [ticket]
-auto_open = false
 path = "$STATE/tickets.db"
 
 [ipc]

@@ -60,7 +60,6 @@ async fn e2e_managed_operator_quic_interaction() {
         capabilities: CapabilitiesConfig::default(),
         ticket: TicketConfig {
             path: Some(managed_ticket_path.clone()),
-            ..TicketConfig::default()
         },
         ipc: fortiq_core::IpcConfig::default(),
     };
@@ -253,7 +252,6 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
         capabilities: CapabilitiesConfig::default(),
         ticket: TicketConfig {
             path: Some(managed_ticket_path.clone()),
-            ..TicketConfig::default()
         },
         ipc: fortiq_core::IpcConfig::default(),
     };

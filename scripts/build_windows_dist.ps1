@@ -86,7 +86,6 @@ relay_rate_limit = true
 
 [ticket]
 path = "C:/ProgramData/FORTIQ/tickets.db"
-auto_open = false
 
 [ipc]
 pipe = "\\\\.\\pipe\\fortiq-ipc"

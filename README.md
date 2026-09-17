@@ -215,23 +215,8 @@ fortiq ticket set-status FTQ_TICKET_ID CLOSED
 
 After closure, chat, file transfer, and new shell streams are rejected.
 Tickets, messages, attachments, events, and durable outbox records are stored in
-a local SQLite database. In accordance with Canonical Architecture v3, local databases
-act as disposable materialized view caches that can be purged and completely reconstructed
-from verified, immutable encrypted event streams.
-
-
-A node whose own config sets `[ticket] auto_open = true` opens its ticket when
-the service starts, surviving restarts and reboots. It is intended for lab and
-infrastructure nodes, defaults to `false`, and is ignored on operator nodes,
-which hold no ticket. It creates a normal canonical ticket using the machine's
-real PeerId and configured operator PeerId. It still leaves remote shell access
-disabled. No remote peer can enable `auto_open`.
-
-```toml
-[ticket]
-path = "/var/lib/fortiq/tickets.db"
-auto_open = true
-```
+a local SQLite projection during the current migration. Canonical v4 treats this
+database as disposable state; ticket creation remains an explicit user action.
 
 FORTIQ utilizes native pseudoterminal allocation (`portable-pty` with ConPTY on Windows, openpty on Linux) with binary framing (`ShellFrame`) for interactive terminal sessions, supporting dynamic resizing and full-screen terminal applications.
 

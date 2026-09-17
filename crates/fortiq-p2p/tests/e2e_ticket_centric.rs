@@ -59,7 +59,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
         capabilities: CapabilitiesConfig::default(),
         ticket: TicketConfig {
             path: Some(managed_ticket_path.clone()),
-            ..TicketConfig::default()
         },
         ipc: fortiq_core::IpcConfig::default(),
     };
@@ -82,7 +81,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
         capabilities: CapabilitiesConfig::default(),
         ticket: TicketConfig {
             path: Some(operator_ticket_path.clone()),
-            ..TicketConfig::default()
         },
         ipc: fortiq_core::IpcConfig::default(),
     };

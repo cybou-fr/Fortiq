@@ -113,7 +113,6 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         },
         ticket: TicketConfig {
             path: Some(managed_ticket_path.clone()),
-            ..TicketConfig::default()
         },
         ipc: fortiq_core::IpcConfig::default(),
     };
@@ -399,7 +398,6 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         },
         ticket: TicketConfig {
             path: Some(managed_ticket_path.clone()),
-            ..TicketConfig::default()
         },
         ipc: fortiq_core::IpcConfig::default(),
     };

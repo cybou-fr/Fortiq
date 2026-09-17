@@ -74,7 +74,6 @@ relay_rate_limit = true
 
 [ticket]
 path = "/var/lib/fortiq/tickets.db"
-auto_open = false
 
 [ipc]
 sock = "/run/fortiq/fortiq.sock"

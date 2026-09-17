@@ -266,15 +266,6 @@ impl Default for CapabilitiesConfig {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct TicketConfig {
     pub path: Option<PathBuf>,
-    /// Opens a ticket automatically when the service starts.
-    ///
-    /// This is a decision the machine's own owner makes in its local config,
-    /// never something a remote operator can trigger. It exists for lab and
-    /// infrastructure nodes that must stay reachable across restarts; on a real
-    /// client machine the ticket is the user's consent gesture and must stay
-    /// off.
-    #[serde(default)]
-    pub auto_open: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -468,15 +459,6 @@ mod tests {
         libp2p::identity::Keypair::generate_ed25519()
             .public()
             .to_peer_id()
-    }
-
-    #[test]
-    fn ticket_auto_open_is_off_unless_the_machine_opts_in() {
-        let default_config: TicketConfig = toml::from_str("").unwrap();
-        assert!(!default_config.auto_open);
-
-        let lab_node: TicketConfig = toml::from_str("auto_open = true").unwrap();
-        assert!(lab_node.auto_open);
     }
 
     #[test]
