@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use rand_core::{OsRng, RngCore};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -10,6 +11,12 @@ fn current_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn random_access_epoch() -> String {
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,6 +115,9 @@ pub struct TicketRecord {
     pub client_peer_id: String,
     pub operator_peer_id: String,
     pub remote_access_enabled: bool,
+    /// Client-owned 128-bit capability epoch. Rotated on every consent change.
+    #[serde(default)]
+    pub access_epoch: String,
     #[serde(default)]
     pub revision: u64,
     pub created_at: u64,
@@ -231,6 +241,7 @@ impl TicketDb {
                 client_peer_id TEXT NOT NULL,
                 operator_peer_id TEXT NOT NULL,
                 remote_access_enabled INTEGER NOT NULL DEFAULT 1,
+                access_epoch TEXT NOT NULL DEFAULT '',
                 revision INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
@@ -312,6 +323,37 @@ impl TicketDb {
                 [],
             )?;
         }
+        let has_access_epoch = {
+            let mut stmt = conn.prepare("PRAGMA table_info(tickets)")?;
+            let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut found = false;
+            for column in columns {
+                if column? == "access_epoch" {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+        if !has_access_epoch {
+            conn.execute(
+                "ALTER TABLE tickets ADD COLUMN access_epoch TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
+        let missing_ids = {
+            let mut stmt = conn.prepare("SELECT id FROM tickets WHERE access_epoch = ''")?;
+            let ids = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            ids
+        };
+        for id in missing_ids {
+            conn.execute(
+                "UPDATE tickets SET access_epoch = ?1 WHERE id = ?2",
+                params![random_access_epoch(), id],
+            )?;
+        }
         Ok(())
     }
 
@@ -334,6 +376,7 @@ impl TicketDb {
             client_peer_id: client_peer_id.to_string(),
             operator_peer_id: operator_peer_id.to_string(),
             remote_access_enabled: false,
+            access_epoch: random_access_epoch(),
             revision: 1,
             created_at: now,
             updated_at: now,
@@ -345,9 +388,9 @@ impl TicketDb {
             conn.execute(
                 "INSERT INTO tickets (
                     id, title, description, state, priority,
-                    client_peer_id, operator_peer_id, remote_access_enabled, revision,
+                    client_peer_id, operator_peer_id, remote_access_enabled, access_epoch, revision,
                     created_at, updated_at, closed_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
                     record.id,
                     record.title,
@@ -357,6 +400,7 @@ impl TicketDb {
                     record.client_peer_id,
                     record.operator_peer_id,
                     if record.remote_access_enabled { 1 } else { 0 },
+                    record.access_epoch,
                     record.revision,
                     record.created_at,
                     record.updated_at,
@@ -402,15 +446,16 @@ impl TicketDb {
         conn.execute(
             "INSERT INTO tickets (
                 id, title, description, state, priority,
-                client_peer_id, operator_peer_id, remote_access_enabled, revision,
+                client_peer_id, operator_peer_id, remote_access_enabled, access_epoch, revision,
                 created_at, updated_at, closed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 description = excluded.description,
                 state = excluded.state,
                 priority = excluded.priority,
                 remote_access_enabled = excluded.remote_access_enabled,
+                access_epoch = excluded.access_epoch,
                 revision = excluded.revision,
                 updated_at = excluded.updated_at,
                 closed_at = excluded.closed_at",
@@ -423,6 +468,7 @@ impl TicketDb {
                 ticket.client_peer_id,
                 ticket.operator_peer_id,
                 if ticket.remote_access_enabled { 1 } else { 0 },
+                ticket.access_epoch,
                 ticket.revision,
                 ticket.created_at,
                 ticket.updated_at,
@@ -456,15 +502,16 @@ impl TicketDb {
         conn.execute(
             "INSERT INTO tickets (
                 id, title, description, state, priority,
-                client_peer_id, operator_peer_id, remote_access_enabled, revision,
+                client_peer_id, operator_peer_id, remote_access_enabled, access_epoch, revision,
                 created_at, updated_at, closed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 description = excluded.description,
                 state = excluded.state,
                 priority = excluded.priority,
                 remote_access_enabled = excluded.remote_access_enabled,
+                access_epoch = excluded.access_epoch,
                 revision = excluded.revision,
                 updated_at = excluded.updated_at,
                 closed_at = excluded.closed_at",
@@ -477,6 +524,7 @@ impl TicketDb {
                 ticket.client_peer_id,
                 ticket.operator_peer_id,
                 if ticket.remote_access_enabled { 1 } else { 0 },
+                ticket.access_epoch,
                 ticket.revision,
                 ticket.created_at,
                 ticket.updated_at,
@@ -491,7 +539,7 @@ impl TicketDb {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
-                    remote_access_enabled, revision, created_at, updated_at, closed_at
+                    remote_access_enabled, access_epoch, revision, created_at, updated_at, closed_at
              FROM tickets WHERE id = ?1",
         )?;
         let row = stmt
@@ -508,10 +556,11 @@ impl TicketDb {
                     client_peer_id: r.get(5)?,
                     operator_peer_id: r.get(6)?,
                     remote_access_enabled: remote_access_int != 0,
-                    revision: r.get(8)?,
-                    created_at: r.get(9)?,
-                    updated_at: r.get(10)?,
-                    closed_at: r.get(11)?,
+                    access_epoch: r.get(8)?,
+                    revision: r.get(9)?,
+                    created_at: r.get(10)?,
+                    updated_at: r.get(11)?,
+                    closed_at: r.get(12)?,
                 })
             })
             .optional()?;
@@ -522,7 +571,7 @@ impl TicketDb {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
-                    remote_access_enabled, revision, created_at, updated_at, closed_at
+                    remote_access_enabled, access_epoch, revision, created_at, updated_at, closed_at
              FROM tickets WHERE state IN ('OPEN', 'IN_PROGRESS')
              ORDER BY updated_at DESC LIMIT 1",
         )?;
@@ -540,10 +589,11 @@ impl TicketDb {
                     client_peer_id: r.get(5)?,
                     operator_peer_id: r.get(6)?,
                     remote_access_enabled: remote_access_int != 0,
-                    revision: r.get(8)?,
-                    created_at: r.get(9)?,
-                    updated_at: r.get(10)?,
-                    closed_at: r.get(11)?,
+                    access_epoch: r.get(8)?,
+                    revision: r.get(9)?,
+                    created_at: r.get(10)?,
+                    updated_at: r.get(11)?,
+                    closed_at: r.get(12)?,
                 })
             })
             .optional()?;
@@ -554,7 +604,7 @@ impl TicketDb {
         let conn = self.conn.lock().unwrap();
         let mut query =
             "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
-                                remote_access_enabled, revision, created_at, updated_at, closed_at
+                                remote_access_enabled, access_epoch, revision, created_at, updated_at, closed_at
                          FROM tickets"
                 .to_string();
         if let Some(state) = state_filter {
@@ -576,10 +626,11 @@ impl TicketDb {
                 client_peer_id: r.get(5)?,
                 operator_peer_id: r.get(6)?,
                 remote_access_enabled: remote_access_int != 0,
-                revision: r.get(8)?,
-                created_at: r.get(9)?,
-                updated_at: r.get(10)?,
-                closed_at: r.get(11)?,
+                access_epoch: r.get(8)?,
+                revision: r.get(9)?,
+                created_at: r.get(10)?,
+                updated_at: r.get(11)?,
+                closed_at: r.get(12)?,
             })
         })?;
 
@@ -649,9 +700,14 @@ impl TicketDb {
         {
             let conn = self.conn.lock().unwrap();
             let affected = conn.execute(
-                "UPDATE tickets SET remote_access_enabled = ?1, updated_at = ?2,
-                        revision = revision + 1 WHERE id = ?3",
-                params![if enabled { 1 } else { 0 }, now, ticket_id],
+                "UPDATE tickets SET remote_access_enabled = ?1, access_epoch = ?2, updated_at = ?3,
+                        revision = revision + 1 WHERE id = ?4",
+                params![
+                    if enabled { 1 } else { 0 },
+                    random_access_epoch(),
+                    now,
+                    ticket_id
+                ],
             )?;
             if affected == 0 {
                 return Ok(None);
@@ -989,6 +1045,7 @@ impl TicketDb {
                 client_peer_id: client_peer_id.to_string(),
                 operator_peer_id: operator_peer_id.to_string(),
                 remote_access_enabled: state.permits_work(),
+                access_epoch: random_access_epoch(),
                 revision: 1,
                 created_at: now,
                 updated_at: now,
@@ -1025,6 +1082,7 @@ mod tests {
         assert_eq!(ticket.state, TicketState::Open);
         assert_eq!(ticket.priority, TicketPriority::High);
         assert!(!ticket.remote_access_enabled);
+        assert_eq!(ticket.access_epoch.len(), 32);
 
         let retrieved = db.get_ticket(&ticket.id).unwrap().unwrap();
         assert_eq!(retrieved.id, ticket.id);
@@ -1041,10 +1099,18 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(toggled.remote_access_enabled);
+        assert_ne!(toggled.access_epoch, ticket.access_epoch);
+
+        let revoked = db
+            .set_remote_access(&ticket.id, false, "client_1")
+            .unwrap()
+            .unwrap();
+        assert!(!revoked.remote_access_enabled);
+        assert_ne!(revoked.access_epoch, toggled.access_epoch);
 
         // Events check
         let events = db.list_events(&ticket.id).unwrap();
-        assert_eq!(events.len(), 3); // CREATED, STATUS_CHANGED, REMOTE_ACCESS_TOGGLED
+        assert_eq!(events.len(), 4); // CREATED, STATUS_CHANGED, two consent transitions
     }
 
     #[test]

@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use fortiq_core::canonical::{from_canonical_cbor, ControlStore, DecoderLimits, Genesis};
 use fortiq_core::{Config, NodeInfo, NodeMode, TicketStore};
 use fortiq_p2p::{load_or_create_identity, IdentityStatus, RunOptions};
 use fs2::FileExt;
@@ -194,6 +195,7 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
         .context("Failed to open persistent ticket database")?;
     let (keypair, _) = load_or_create_identity(&config.identity.path).await?;
     let peer_id = keypair.public().to_peer_id();
+    let genesis = load_canonical_genesis(&config).await?;
 
     tracing::info!("FORTIQ Service starting: mode={mode}, peer_id={peer_id}");
 
@@ -214,6 +216,7 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
         ticket_store,
         p2p_sender: Some(p2p_cmd_tx),
         operator_session: Arc::new(tokio::sync::RwLock::new(None)),
+        genesis,
     });
     tokio::spawn(async move {
         if let Err(e) = ipc_server::run_ipc_server(ipc_state).await {
@@ -232,8 +235,25 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
     fortiq_p2p::run(keypair, local_info, options).await
 }
 
+async fn load_canonical_genesis(config: &Config) -> Result<Option<Genesis>> {
+    let path = config.genesis_path();
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("Failed to read Genesis {}", path.display()))
+        }
+    };
+    let genesis: Genesis = from_canonical_cbor(&bytes, DecoderLimits::CONTROL)
+        .with_context(|| format!("Failed to decode Genesis {}", path.display()))?;
+    ControlStore::new(genesis.clone())
+        .with_context(|| format!("Failed to verify Genesis {}", path.display()))?;
+    Ok(Some(genesis))
+}
+
 async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
     let config = Config::load(&config_path).await?;
+    let genesis = load_canonical_genesis(&config).await?;
     let mode = config.mode();
     let ticket_store = TicketStore::try_new(config.ticket_path())
         .context("Failed to open persistent ticket database")?;
@@ -305,6 +325,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
         ticket_store,
         p2p_sender: Some(p2p_cmd_tx),
         operator_session: Arc::new(tokio::sync::RwLock::new(None)),
+        genesis,
     });
     tokio::spawn(async move {
         if let Err(e) = ipc_server::run_ipc_server(ipc_state).await {

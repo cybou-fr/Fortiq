@@ -7,7 +7,7 @@
 use crate::canonical::events::graph::EventGraph;
 use crate::canonical::events::safety::{AuthorRole, TicketSafetyState};
 use crate::canonical::records::LogicalEvent;
-use crate::canonical::types::{AccessEpoch, BlobId, KeyId, ObjectId, TicketId};
+use crate::canonical::types::{BlobId, KeyId, ObjectId, TicketId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -153,12 +153,10 @@ pub fn reduce_ticket_with_resolver(
             match event {
                 LogicalEvent::TicketCreated {
                     title,
-                    initial_epoch,
+                    initial_access_epoch,
                     ..
                 } => {
-                    let mut epoch_bytes = [0u8; 16];
-                    epoch_bytes[..8].copy_from_slice(&initial_epoch.to_le_bytes());
-                    let access_epoch = AccessEpoch::from_bytes(epoch_bytes);
+                    let access_epoch = *initial_access_epoch;
 
                     let safety = TicketSafetyState::new_client_open(ticket_id, access_epoch);
                     view = Some(TicketView {

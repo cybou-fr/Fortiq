@@ -4,11 +4,19 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use fortiq_core::NodeInfo;
+use fortiq_core::{
+    canonical::{
+        portable::certificate::OperatorSessionCertificate,
+        signing::{Signer, SigningError},
+        types::{AccessEpoch, NetworkId, SegmentId},
+    },
+    NodeInfo,
+};
 use futures::{
     AsyncRead, AsyncReadExt as FuturesAsyncReadExt, AsyncWrite,
     AsyncWriteExt as FuturesAsyncWriteExt,
 };
+use sha3::{Digest, Sha3_256};
 use tokio::io::AsyncWriteExt;
 use tokio_util::compat::FuturesAsyncReadCompatExt;
 
@@ -22,6 +30,18 @@ pub const DENIED_BUSY: u8 = 3;
 pub const DENIED_TICKET_CLOSED: u8 = 4;
 /// Remote access for this ticket is currently disabled by the client.
 pub const DENIED_REMOTE_ACCESS_DISABLED: u8 = 5;
+pub const DENIED_INVALID_AUTHORITY: u8 = 6;
+pub const DENIED_EPOCH_MISMATCH: u8 = 7;
+pub const SHELL_NEXT_SIGNATURE_DOMAIN: &[u8] = b"FORTIQ-SHELL-NEXT-v1:";
+pub const TICKET_SEGMENT_ID_DOMAIN: &[u8] = b"FORTIQ-TICKET-SEGMENT-ID-v1:";
+
+pub fn derive_ticket_segment_id(network_id: &NetworkId, ticket_id: &str) -> SegmentId {
+    let mut hasher = Sha3_256::new();
+    hasher.update(TICKET_SEGMENT_ID_DOMAIN);
+    hasher.update(network_id.as_bytes());
+    hasher.update(ticket_id.as_bytes());
+    SegmentId::from_bytes(hasher.finalize().into())
+}
 
 /// How often the served session pings an idle operator.
 const KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
@@ -41,7 +61,102 @@ pub fn describe_denial(code: u8) -> &'static str {
         DENIED_REMOTE_ACCESS_DISABLED => {
             "remote access for this ticket is currently disabled by the client"
         }
+        DENIED_INVALID_AUTHORITY => {
+            "the operator session certificate or challenge signature is invalid"
+        }
+        DENIED_EPOCH_MISMATCH => "the ticket access epoch is stale or revoked",
         _ => "the remote host refused the terminal",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ShellNextHandshake {
+    pub network_id: NetworkId,
+    pub segment_id: SegmentId,
+    pub ticket_id: String,
+    pub access_epoch: AccessEpoch,
+    pub operator_transport_peer_id: String,
+    pub session_certificate: OperatorSessionCertificate,
+    pub challenge_signature: Vec<u8>,
+}
+
+impl ShellNextHandshake {
+    #[allow(clippy::too_many_arguments)]
+    pub fn signed(
+        network_id: NetworkId,
+        segment_id: SegmentId,
+        ticket_id: String,
+        access_epoch: AccessEpoch,
+        operator_transport_peer_id: String,
+        session_certificate: OperatorSessionCertificate,
+        challenge: &[u8; 32],
+        signer: &impl Signer,
+    ) -> Result<Self, SigningError> {
+        let payload = Self::signing_payload(
+            &network_id,
+            &segment_id,
+            &ticket_id,
+            &access_epoch,
+            &operator_transport_peer_id,
+            challenge,
+        );
+        let challenge_signature = signer.sign(&payload)?;
+        Ok(Self {
+            network_id,
+            segment_id,
+            ticket_id,
+            access_epoch,
+            operator_transport_peer_id,
+            session_certificate,
+            challenge_signature,
+        })
+    }
+
+    pub fn signing_payload(
+        network_id: &NetworkId,
+        segment_id: &SegmentId,
+        ticket_id: &str,
+        access_epoch: &AccessEpoch,
+        operator_transport_peer_id: &str,
+        challenge: &[u8; 32],
+    ) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(SHELL_NEXT_SIGNATURE_DOMAIN);
+        payload.extend_from_slice(network_id.as_bytes());
+        payload.extend_from_slice(segment_id.as_bytes());
+        payload.extend_from_slice(&(ticket_id.len() as u32).to_be_bytes());
+        payload.extend_from_slice(ticket_id.as_bytes());
+        payload.extend_from_slice(access_epoch.as_bytes());
+        payload.extend_from_slice(&(operator_transport_peer_id.len() as u32).to_be_bytes());
+        payload.extend_from_slice(operator_transport_peer_id.as_bytes());
+        payload.extend_from_slice(challenge);
+        payload
+    }
+
+    pub async fn write_to_async<W: futures::AsyncWrite + Unpin>(
+        &self,
+        writer: &mut W,
+    ) -> Result<()> {
+        use futures::AsyncWriteExt;
+        let json = serde_json::to_vec(self)?;
+        let len = u16::try_from(json.len()).map_err(|_| anyhow::anyhow!("handshake too large"))?;
+        writer.write_all(&len.to_be_bytes()).await?;
+        writer.write_all(&json).await?;
+        writer.flush().await?;
+        Ok(())
+    }
+
+    pub async fn read_from_async<R: futures::AsyncRead + Unpin>(reader: &mut R) -> Result<Self> {
+        use futures::AsyncReadExt;
+        let mut len_bytes = [0u8; 2];
+        reader.read_exact(&mut len_bytes).await?;
+        let len = u16::from_be_bytes(len_bytes) as usize;
+        if len > 16 * 1024 {
+            anyhow::bail!("shell next handshake exceeds limit");
+        }
+        let mut buf = vec![0u8; len];
+        reader.read_exact(&mut buf).await?;
+        Ok(serde_json::from_slice(&buf)?)
     }
 }
 
@@ -809,5 +924,37 @@ mod tests {
 
         let received = ShellHandshake::read_from_tokio(&mut server).await.unwrap();
         assert_eq!(received, handshake);
+    }
+
+    #[test]
+    fn shell_next_challenge_binds_authority_context() {
+        use fortiq_core::canonical::signing::{Ed25519Signer, Ed25519Verifier, Verifier};
+
+        let signer = Ed25519Signer::from_seed([0x42; 32]);
+        let network = NetworkId::from_bytes([0x11; 32]);
+        let segment = derive_ticket_segment_id(&network, "FTQ-test");
+        let epoch = AccessEpoch::from_bytes([0x22; 16]);
+        let challenge = [0x33; 32];
+        let payload = ShellNextHandshake::signing_payload(
+            &network,
+            &segment,
+            "FTQ-test",
+            &epoch,
+            "transport-peer",
+            &challenge,
+        );
+        let signature = signer.sign(&payload).unwrap();
+        let verifier = Ed25519Verifier::from_public_key(&signer.public_key()).unwrap();
+        verifier.verify(&payload, &signature).unwrap();
+
+        let tampered = ShellNextHandshake::signing_payload(
+            &network,
+            &segment,
+            "FTQ-other",
+            &epoch,
+            "transport-peer",
+            &challenge,
+        );
+        assert!(verifier.verify(&tampered, &signature).is_err());
     }
 }

@@ -1,6 +1,6 @@
 use crate::canonical::types::{
-    BlobId, CryptoProfileId, KeyId, NetworkId, ObjectId, RsProfile, SegmentId, StorageClass,
-    StreamId, TicketId,
+    AccessEpoch, BlobId, CryptoProfileId, KeyId, NetworkId, ObjectId, RsProfile, SegmentId,
+    StorageClass, StreamId, TicketId,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -120,7 +120,7 @@ pub enum LogicalEvent {
     TicketCreated {
         ticket_id: TicketId,
         title: String,
-        initial_epoch: u64,
+        initial_access_epoch: AccessEpoch,
     },
     TicketStateChanged {
         ticket_id: TicketId,

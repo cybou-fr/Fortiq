@@ -45,9 +45,9 @@ zeroize = { version = "1.8", features = ["derive"] }
 hkdf = "0.12"
 rand_core = { version = "0.6", features = ["std"] }
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
+ed25519-dalek = { version = "2.2", features = ["zeroize"] }
 slint = "1.18"
 slint-build = "1.18"
 vte = "0.15"
 rfd = "0.15"
-
 

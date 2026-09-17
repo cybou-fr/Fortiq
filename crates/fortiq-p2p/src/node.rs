@@ -7,7 +7,17 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use fortiq_core::{is_authorized_operator, Config, NodeInfo, TicketStore};
+use fortiq_core::{
+    canonical::{
+        codec::{from_canonical_cbor, DecoderLimits},
+        control::Genesis,
+        portable::certificate::OperatorSessionCertificate,
+        retirement::authority::CanonicalAuthorityResolver,
+        signing::{Ed25519Signer, Ed25519Verifier, Verifier},
+        types::{AccessEpoch, SegmentId},
+    },
+    is_authorized_operator, Config, NodeInfo, TicketStore,
+};
 use futures::StreamExt;
 use libp2p::{
     dcutr, identify, noise, ping, relay, rendezvous,
@@ -15,11 +25,13 @@ use libp2p::{
     swarm::{behaviour::toggle::Toggle, NetworkBehaviour},
     Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder,
 };
+use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 pub const HELLO_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/hello/1.0");
 pub const SHELL_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/shell/2.0");
+pub const SHELL_PROTOCOL_NEXT: StreamProtocol = StreamProtocol::new("/fortiq/shell/next");
 pub const TICKET_PROTOCOL_V3: StreamProtocol = StreamProtocol::new("/fortiq/ticket/3.0");
 pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/2.0");
 pub const FILE_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/file/2.0");
@@ -142,6 +154,16 @@ pub enum P2pCommand {
     OpenShellStream {
         peer: PeerId,
         ticket_id: Option<String>,
+        dial: Option<Multiaddr>,
+        reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
+    },
+    OpenShellNext {
+        peer: PeerId,
+        ticket_id: String,
+        access_epoch: AccessEpoch,
+        segment_id: SegmentId,
+        certificate: OperatorSessionCertificate,
+        session_signer: Arc<Ed25519Signer>,
         dial: Option<Multiaddr>,
         reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
     },
@@ -474,6 +496,65 @@ fn spawn_open_shell_stream(
             }
         };
         let _ = reply.send(res);
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_open_shell_next(
+    peer: PeerId,
+    local_peer: PeerId,
+    ticket_id: String,
+    access_epoch: AccessEpoch,
+    segment_id: SegmentId,
+    certificate: OperatorSessionCertificate,
+    session_signer: Arc<Ed25519Signer>,
+    mut control: libp2p_stream::Control,
+    reply: tokio::sync::oneshot::Sender<Result<libp2p::Stream, String>>,
+) {
+    tokio::spawn(async move {
+        use futures::{AsyncReadExt, AsyncWriteExt};
+        let result = async {
+            let mut stream = tokio::time::timeout(
+                Duration::from_secs(12),
+                control.open_stream(peer, SHELL_PROTOCOL_NEXT),
+            )
+            .await
+            .map_err(|_| "Délai d'attente dépassé pour /fortiq/shell/next".to_string())?
+            .map_err(|error| format!("Ouverture /fortiq/shell/next impossible: {error}"))?;
+
+            let mut challenge = [0u8; 32];
+            stream
+                .read_exact(&mut challenge)
+                .await
+                .map_err(|error| format!("Lecture du challenge shell impossible: {error}"))?;
+            let handshake = fortiq_shell::ShellNextHandshake::signed(
+                certificate.network_id,
+                segment_id,
+                ticket_id,
+                access_epoch,
+                local_peer.to_string(),
+                certificate,
+                &challenge,
+                session_signer.as_ref(),
+            )
+            .map_err(|error| format!("Signature du challenge shell impossible: {error}"))?;
+            handshake
+                .write_to_async(&mut stream)
+                .await
+                .map_err(|error| format!("Envoi du handshake shell impossible: {error}"))?;
+            stream.flush().await.map_err(|error| error.to_string())?;
+            let mut authorization = [0u8; 1];
+            stream
+                .read_exact(&mut authorization)
+                .await
+                .map_err(|error| format!("Lecture de l'autorisation shell impossible: {error}"))?;
+            if authorization[0] != fortiq_shell::AUTHORIZED {
+                return Err(fortiq_shell::describe_denial(authorization[0]).to_string());
+            }
+            Ok(stream)
+        }
+        .await;
+        let _ = reply.send(result);
     });
 }
 
@@ -818,6 +899,9 @@ pub async fn run(
     let incoming_shells_v2 = stream_control
         .accept(SHELL_PROTOCOL_V2)
         .context("shell v2 protocol already registered")?;
+    let incoming_shells_next = stream_control
+        .accept(SHELL_PROTOCOL_NEXT)
+        .context("shell next protocol already registered")?;
     let incoming_files = stream_control
         .accept(FILE_PROTOCOL)
         .context("file protocol already registered")?;
@@ -835,6 +919,7 @@ pub async fn run(
     event_loop(
         &mut swarm,
         incoming_shells_v2,
+        incoming_shells_next,
         incoming_files,
         stream_control,
         event_options,
@@ -845,6 +930,7 @@ pub async fn run(
 async fn event_loop(
     swarm: &mut Swarm<Behaviour>,
     mut incoming_shells_v2: libp2p_stream::IncomingStreams,
+    mut incoming_shells_next: libp2p_stream::IncomingStreams,
     mut incoming_files: libp2p_stream::IncomingStreams,
     stream_control: libp2p_stream::Control,
     options: EventOptions,
@@ -979,6 +1065,35 @@ async fn event_loop(
                             }
                         }
                     }
+                    P2pCommand::OpenShellNext {
+                        peer,
+                        ticket_id,
+                        access_epoch,
+                        segment_id,
+                        certificate,
+                        session_signer,
+                        dial: _,
+                        reply,
+                    } => {
+                        if swarm.is_connected(&peer) {
+                            spawn_open_shell_next(
+                                peer,
+                                local_info.peer_id.parse().expect("local PeerId"),
+                                ticket_id,
+                                access_epoch,
+                                segment_id,
+                                certificate,
+                                session_signer,
+                                stream_control.clone(),
+                                reply,
+                            );
+                        } else {
+                            let _ = reply.send(Err(
+                                "Le protocole shell/next exige une connexion authentifiée préalable"
+                                    .to_string(),
+                            ));
+                        }
+                    }
                     P2pCommand::SyncTickets { peer, dial, request, reply } => {
                         let outbox_id = if is_ticket_mutation(&request) {
                             match serde_json::to_string(&request)
@@ -1071,6 +1186,16 @@ async fn event_loop(
                     &local_info,
                 ).await;
             }
+            Some((remote_peer, stream)) = incoming_shells_next.next() => {
+                handle_incoming_shell_next(
+                    stream,
+                    remote_peer,
+                    &config,
+                    &ticket_store,
+                    &active_shells,
+                    &local_info,
+                ).await;
+            }
             Some((remote_peer, stream)) = incoming_files.next() => {
                 let files_dir = ticket_store.storage_dir().join("tickets");
                 let t_store = ticket_store.clone();
@@ -1103,8 +1228,8 @@ async fn event_loop(
                         None,
                         None,
                         *node,
-                    );
-                }
+                );
+            }
             }
             event = swarm.select_next_some() => match event {
                 libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
@@ -1764,6 +1889,204 @@ async fn handle_chat(
         }
         _ => {}
     }
+}
+
+async fn handle_incoming_shell_next(
+    mut stream: libp2p::Stream,
+    remote_peer: PeerId,
+    config: &Config,
+    ticket_store: &TicketStore,
+    active_shells: &Arc<AtomicBool>,
+    local_info: &NodeInfo,
+) {
+    use futures::AsyncWriteExt;
+
+    let mut challenge = [0u8; 32];
+    OsRng.fill_bytes(&mut challenge);
+    if stream.write_all(&challenge).await.is_err() || stream.flush().await.is_err() {
+        return;
+    }
+    let handshake = match tokio::time::timeout(
+        Duration::from_secs(5),
+        fortiq_shell::ShellNextHandshake::read_from_async(&mut stream),
+    )
+    .await
+    {
+        Ok(Ok(handshake)) => handshake,
+        _ => {
+            let _ = fortiq_shell::send_authorization_code(
+                &mut stream,
+                fortiq_shell::DENIED_INVALID_AUTHORITY,
+            )
+            .await;
+            return;
+        }
+    };
+
+    let genesis = match tokio::fs::read(config.genesis_path())
+        .await
+        .ok()
+        .and_then(|bytes| from_canonical_cbor::<Genesis>(&bytes, DecoderLimits::CONTROL).ok())
+        .filter(|genesis| genesis.verify().is_ok())
+    {
+        Some(genesis) => genesis,
+        None => {
+            let _ = fortiq_shell::send_authorization_code(
+                &mut stream,
+                fortiq_shell::DENIED_INVALID_AUTHORITY,
+            )
+            .await;
+            return;
+        }
+    };
+    let ticket = match ticket_store
+        .db()
+        .get_ticket(&handshake.ticket_id)
+        .ok()
+        .flatten()
+    {
+        Some(ticket) => ticket,
+        None => {
+            let _ =
+                fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_NO_TICKET)
+                    .await;
+            return;
+        }
+    };
+    let active_epoch = match AccessEpoch::from_hex(&ticket.access_epoch) {
+        Ok(epoch) => epoch,
+        Err(_) => {
+            let _ = fortiq_shell::send_authorization_code(
+                &mut stream,
+                fortiq_shell::DENIED_EPOCH_MISMATCH,
+            )
+            .await;
+            return;
+        }
+    };
+    let expected_segment =
+        fortiq_shell::derive_ticket_segment_id(&genesis.tbs.network_id, &ticket.id);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let owner_verifier =
+        match Ed25519Verifier::from_public_key(&genesis.tbs.owner_root_signing_public_key) {
+            Ok(verifier) => verifier,
+            Err(_) => return,
+        };
+    let expected_host = fortiq_core::canonical::types::EntityId::from_bytes(
+        *blake3::hash(&remote_peer.to_bytes()).as_bytes(),
+    );
+    let payload = fortiq_shell::ShellNextHandshake::signing_payload(
+        &handshake.network_id,
+        &handshake.segment_id,
+        &handshake.ticket_id,
+        &handshake.access_epoch,
+        &handshake.operator_transport_peer_id,
+        &challenge,
+    );
+    let session_verifier =
+        Ed25519Verifier::from_public_key(&handshake.session_certificate.session_pubkey);
+    let authority_valid = handshake.network_id == genesis.tbs.network_id
+        && handshake.segment_id == expected_segment
+        && handshake.operator_transport_peer_id == remote_peer.to_string()
+        && handshake.session_certificate.owner_id == genesis.tbs.owner_id
+        && handshake.session_certificate.host_entity == expected_host
+        && handshake
+            .session_certificate
+            .capabilities
+            .has(fortiq_core::canonical::portable::certificate::OperatorCapabilities::SHELL_EXEC)
+        && CanonicalAuthorityResolver::authorize_shell_execution(
+            &handshake.session_certificate,
+            &owner_verifier,
+            now,
+            &handshake.access_epoch,
+            &active_epoch,
+        )
+        .is_ok()
+        && session_verifier
+            .and_then(|verifier| verifier.verify(&payload, &handshake.challenge_signature))
+            .is_ok();
+    if !authority_valid {
+        let code = if handshake.access_epoch != active_epoch {
+            fortiq_shell::DENIED_EPOCH_MISMATCH
+        } else {
+            fortiq_shell::DENIED_INVALID_AUTHORITY
+        };
+        let _ = fortiq_shell::send_authorization_code(&mut stream, code).await;
+        return;
+    }
+    if ticket.client_peer_id != local_info.peer_id || !ticket.state.permits_work() {
+        let _ =
+            fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_TICKET_CLOSED)
+                .await;
+        return;
+    }
+    if !ticket.remote_access_enabled {
+        let _ = fortiq_shell::send_authorization_code(
+            &mut stream,
+            fortiq_shell::DENIED_REMOTE_ACCESS_DISABLED,
+        )
+        .await;
+        return;
+    }
+    if active_shells
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_BUSY).await;
+        return;
+    }
+    if fortiq_shell::send_authorization(&mut stream, true)
+        .await
+        .is_err()
+    {
+        active_shells.store(false, Ordering::SeqCst);
+        return;
+    }
+
+    info!(remote_peer_id = %remote_peer, ticket_id = %ticket.id, "accepted canonical shell next");
+    let info = local_info.clone();
+    let shells_flag = active_shells.clone();
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let db = ticket_store.db().clone();
+    let ticket_id = ticket.id.clone();
+    let operator_transport = remote_peer.to_string();
+    tokio::spawn(async move {
+        let _guard = ShellSessionGuard(shells_flag);
+        let _ = db.record_shell_session_start(
+            &session_id,
+            &ticket_id,
+            &operator_transport,
+            "QUIC/shell-next",
+        );
+        let watcher_db = db.clone();
+        let watched_ticket = ticket_id.clone();
+        let watched_epoch = active_epoch;
+        let result = tokio::select! {
+            result = fortiq_shell::serve(stream, info) => result,
+            () = async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    let valid = watcher_db.get_ticket(&watched_ticket).ok().flatten().is_some_and(|ticket| {
+                        ticket.state.permits_work()
+                            && ticket.remote_access_enabled
+                            && AccessEpoch::from_hex(&ticket.access_epoch).ok() == Some(watched_epoch)
+                    });
+                    if !valid { break; }
+                }
+            } => Err(anyhow::anyhow!("ticket access epoch was revoked")),
+        };
+        let _ = db.record_shell_session_end(
+            &session_id,
+            Some(if result.is_ok() {
+                "SUCCESS"
+            } else {
+                "REVOKED_OR_ERROR"
+            }),
+        );
+    });
 }
 
 async fn handle_incoming_shell_v2(

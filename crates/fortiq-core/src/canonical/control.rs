@@ -1,5 +1,6 @@
 use crate::canonical::codec::{to_canonical_cbor, CodecError};
 use crate::canonical::records::serde_bytes_32::Bytes32;
+use crate::canonical::signing::{Ed25519Verifier, SigningError, Verifier};
 use crate::canonical::types::{CryptoProfileId, EntityId, KeyId, NetworkId, OwnerId, SegmentId};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha3::{Digest, Sha3_256};
@@ -42,6 +43,10 @@ pub enum ControlError {
     KeyRevoked(KeyId),
     #[error("invalid signature")]
     InvalidSignature,
+    #[error("owner ID does not match the Genesis root public key")]
+    OwnerIdentityMismatch,
+    #[error("signature verification error: {0}")]
+    SignatureVerification(String),
 }
 
 /// Genesis To-Be-Signed body.
@@ -127,6 +132,26 @@ impl Genesis {
         let tbs_bytes = to_canonical_cbor(&self.tbs)?;
         Ok(derive_genesis_id(&tbs_bytes, &self.signature))
     }
+
+    /// Verifies the OwnerId binding and the Owner Root signature over Genesis TBS.
+    pub fn verify(&self) -> Result<(), ControlError> {
+        if derive_owner_id(&self.tbs.owner_root_signing_public_key) != self.tbs.owner_id {
+            return Err(ControlError::OwnerIdentityMismatch);
+        }
+        let tbs = to_canonical_cbor(&self.tbs)?;
+        let mut payload = Vec::with_capacity(GENESIS_SIG_DOMAIN.len() + tbs.len());
+        payload.extend_from_slice(GENESIS_SIG_DOMAIN);
+        payload.extend_from_slice(&tbs);
+        let verifier = Ed25519Verifier::from_public_key(&self.tbs.owner_root_signing_public_key)
+            .map_err(map_signing_error)?;
+        verifier
+            .verify(&payload, &self.signature)
+            .map_err(map_signing_error)
+    }
+}
+
+fn map_signing_error(error: SigningError) -> ControlError {
+    ControlError::SignatureVerification(error.to_string())
 }
 
 /// Derive OwnerId: SHA3-256("FORTIQ-OWNER-ID-v1:" || owner_root_signing_public_key)

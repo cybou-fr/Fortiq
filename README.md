@@ -379,6 +379,7 @@ FORTIQ guarantees tenant isolation, post-quantum confidentiality, and sovereign 
    - **Linux:** Install `fortiq-service_<version>_amd64.deb` and start via `systemctl start fortiq`.
 2. **Initial Service Startup:**
    - On first launch, the daemon inspects `[identity] path`. If absent, a new Ed25519 keypair is cryptographically generated and safely saved with restricted permissions.
+   - Canonical authority is loaded from the same path with the extension replaced by `genesis.cbor` (for example, `node.key` → `node.genesis.cbor`). The daemon verifies the Genesis OwnerId and signature before accepting it; operator unlock remains unavailable when Genesis is absent or invalid.
    - The daemon connects to the configured relay node, reserves a circuit slot, and registers its authenticated circuit address on the rendezvous point.
 3. **Session Lifecycle:**
    - The managed user creates a ticket via GUI or `fortiq ticket create`.

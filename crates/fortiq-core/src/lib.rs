@@ -80,6 +80,11 @@ impl Config {
             .unwrap_or_else(|| self.identity.path.with_extension("ticket.json"))
     }
 
+    /// Canonical signed Genesis stored beside the node transport identity.
+    pub fn genesis_path(&self) -> PathBuf {
+        self.identity.path.with_extension("genesis.cbor")
+    }
+
     pub fn ipc_endpoint(&self) -> String {
         #[cfg(windows)]
         {

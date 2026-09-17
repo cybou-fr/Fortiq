@@ -6,7 +6,7 @@ mod tests {
     use crate::canonical::records::{ObjectTbs, RecipientEnvelope, SignedObject};
     use crate::canonical::signing::{compute_shard_checksum, compute_tbs_bytes, derive_object_id};
     use crate::canonical::types::{
-        CryptoProfileId, KeyId, NetworkId, ObjectId, SegmentId, StorageClass, StreamId,
+        AccessEpoch, CryptoProfileId, KeyId, NetworkId, ObjectId, SegmentId, StorageClass, StreamId,
     };
 
     fn sample_tbs() -> ObjectTbs {
@@ -136,7 +136,7 @@ mod tests {
                 LogicalEvent::TicketCreated {
                     ticket_id,
                     title: "Network connectivity issue".to_string(),
-                    initial_epoch: 1,
+                    initial_access_epoch: AccessEpoch::from_bytes([0x01; 16]),
                 },
                 LogicalEvent::ChatMessage {
                     ticket_id,

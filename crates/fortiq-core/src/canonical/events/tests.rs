@@ -205,7 +205,7 @@ fn test_reducer_full_ticket_reconstruction_and_tombstone() {
         .with_operator(operator_key);
 
     // Pack 1: TicketCreated by Client
-    let initial_epoch = 12345u64;
+    let initial_epoch = AccessEpoch::from_bytes([0x39; 16]);
     let pack1_plain = EventPackPlaintext {
         schema_version: 1,
         ticket_id: Some(ticket_id),
@@ -214,7 +214,7 @@ fn test_reducer_full_ticket_reconstruction_and_tombstone() {
         events: vec![LogicalEvent::TicketCreated {
             ticket_id,
             title: "Crashing Wi-Fi adapter".into(),
-            initial_epoch,
+            initial_access_epoch: initial_epoch,
         }],
     };
     let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
@@ -253,6 +253,7 @@ fn test_reducer_full_ticket_reconstruction_and_tombstone() {
     assert_eq!(view.messages.len(), 1);
     assert_eq!(view.attachments.len(), 1);
     assert_eq!(view.attachments[0].filename, "crash.log");
+    assert_eq!(view.safety.access_epoch, initial_epoch);
     assert!(view.safety.permits_shell());
 
     // Logical Deletion via Tombstone: delete pack 2
@@ -293,15 +294,14 @@ fn test_canonical_head_set_cannot_override_client_safety_revocation() {
         events: vec![LogicalEvent::TicketCreated {
             ticket_id,
             title: "Security diagnosis".into(),
-            initial_epoch: 111,
+            initial_access_epoch: AccessEpoch::from_bytes([0x6f; 16]),
         }],
     };
     let pack1_signed = dummy_signed_object(client_key, stream_client, 1, None, 100);
     let pack1_id = append_pack_unchecked(&mut graph, pack1_signed, pack1_plain).expect("pack 1");
 
     // Pack 2: Client revokes access immediately
-    let mut epoch_bytes = [0u8; 16];
-    epoch_bytes[..8].copy_from_slice(&111u64.to_le_bytes());
+    let epoch_bytes = [0x6f; 16];
     let pack2_plain = EventPackPlaintext {
         schema_version: 1,
         ticket_id: Some(ticket_id),
@@ -366,7 +366,7 @@ fn test_chat_message_revision_audit_trail() {
             LogicalEvent::TicketCreated {
                 ticket_id,
                 title: "Network outage".into(),
-                initial_epoch: 100,
+                initial_access_epoch: AccessEpoch::from_bytes([0x64; 16]),
             },
             LogicalEvent::ChatMessage {
                 ticket_id,
@@ -427,7 +427,7 @@ fn test_ticket_snapshot_cold_start_acceleration() {
             LogicalEvent::TicketCreated {
                 ticket_id,
                 title: "Slow database query".into(),
-                initial_epoch: 200,
+                initial_access_epoch: AccessEpoch::from_bytes([0xc8; 16]),
             },
             LogicalEvent::ChatMessage {
                 ticket_id,
@@ -678,7 +678,7 @@ fn test_simple_role_resolver_fail_closed() {
         events: vec![LogicalEvent::TicketCreated {
             ticket_id,
             title: "Authorized Ticket".into(),
-            initial_epoch: 100,
+            initial_access_epoch: AccessEpoch::from_bytes([0x64; 16]),
         }],
     };
     let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
@@ -734,7 +734,7 @@ fn test_canonical_head_set_ancestry_retention() {
         events: vec![LogicalEvent::TicketCreated {
             ticket_id,
             title: "Ancestry Ticket".into(),
-            initial_epoch: 100,
+            initial_access_epoch: AccessEpoch::from_bytes([0x64; 16]),
         }],
     };
     let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);

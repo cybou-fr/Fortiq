@@ -21,6 +21,7 @@ pub struct ControlStore {
 impl ControlStore {
     /// Initialize a new ControlStore rooted in a verified Genesis.
     pub fn new(genesis: Genesis) -> Result<Self, ControlError> {
+        genesis.verify()?;
         let genesis_id = genesis.genesis_id()?;
         Ok(Self {
             genesis,

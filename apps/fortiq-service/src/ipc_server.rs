@@ -3,13 +3,14 @@ use std::sync::Arc;
 use anyhow::Result;
 use fortiq_core::{
     canonical::{
+        control::{derive_owner_id, Genesis},
         portable::{
             certificate::{OperatorCapabilities, OperatorSessionCertificate},
             mnemonic::{parse_mnemonic_phrase, MnemonicDeriver},
             workspace::MemoryWorkspace,
         },
-        signing::{Signer, SigningError},
-        types::{EntityId, KeyId, NetworkId, OwnerId},
+        signing::{Ed25519Signer, Signer},
+        types::{EntityId, OwnerId},
     },
     ipc::{DaemonStatus, IpcRequest, IpcResponse, OperatorSessionStatus},
     Config, NodeMode, TicketStore,
@@ -24,23 +25,7 @@ pub struct ActiveOperatorSession {
     pub cert: OperatorSessionCertificate,
     pub workspace: MemoryWorkspace,
     pub expires_at: u64,
-}
-
-pub struct LocalRootSigner {
-    pub seed: [u8; 32],
-    pub key_id: KeyId,
-}
-
-impl Signer for LocalRootSigner {
-    fn sign(&self, domain_separated_data: &[u8]) -> Result<Vec<u8>, SigningError> {
-        let mut hasher = blake3::Hasher::new_keyed(&self.seed);
-        hasher.update(domain_separated_data);
-        Ok(hasher.finalize().as_bytes().to_vec())
-    }
-
-    fn key_id(&self) -> KeyId {
-        self.key_id
-    }
+    pub session_signer: Arc<Ed25519Signer>,
 }
 
 pub struct IpcState {
@@ -50,12 +35,10 @@ pub struct IpcState {
     pub ticket_store: TicketStore,
     pub p2p_sender: Option<tokio::sync::mpsc::Sender<fortiq_p2p::P2pCommand>>,
     pub operator_session: Arc<tokio::sync::RwLock<Option<ActiveOperatorSession>>>,
+    pub genesis: Option<Genesis>,
 }
 
 pub async fn is_operator_authorized(state: &IpcState) -> bool {
-    if state.config.mode() == NodeMode::Operator {
-        return true;
-    }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1038,6 +1021,17 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             }
         }
         IpcRequest::UnlockOperator { mnemonic } => {
+            let genesis = match state.genesis.as_ref() {
+                Some(genesis) => genesis,
+                None => {
+                    return IpcResponse::Error(
+                        "Genesis canonique indisponible; déverrouillage refusé".to_string(),
+                    );
+                }
+            };
+            if let Err(error) = genesis.verify() {
+                return IpcResponse::Error(format!("Genesis canonique invalide: {error}"));
+            }
             let entropy = match parse_mnemonic_phrase(&mnemonic) {
                 Ok(e) => e,
                 Err(err) => {
@@ -1051,6 +1045,14 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     return IpcResponse::Error(format!("Échec dérivation clé racine: {err}"));
                 }
             };
+            let segment_master_seed = match deriver.derive_segment_master_seed() {
+                Ok(seed) => seed,
+                Err(err) => {
+                    return IpcResponse::Error(format!(
+                        "Échec dérivation clé maître de segment: {err}"
+                    ));
+                }
+            };
 
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1059,14 +1061,21 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             let ttl = 3600u64; // 1 hour session
             let expires_at = now + ttl;
 
-            let net_id = NetworkId::from_bytes([0x01; 32]);
-            let owner_id = OwnerId::from_bytes(*blake3::hash(root_seed.as_bytes()).as_bytes());
+            let root_signer = Ed25519Signer::from_seed(*root_seed.as_bytes());
+            let root_public_key = root_signer.public_key();
+            let owner_id = derive_owner_id(&root_public_key);
+            if owner_id != genesis.tbs.owner_id
+                || root_public_key.as_slice()
+                    != genesis.tbs.owner_root_signing_public_key.as_slice()
+            {
+                return IpcResponse::Error(
+                    "Cette phrase mnémonique ne correspond pas au Owner de Genesis".to_string(),
+                );
+            }
+            let net_id = genesis.tbs.network_id;
             let host_entity =
                 EntityId::from_bytes(*blake3::hash(&state.peer_id.to_bytes()).as_bytes());
             let op_entity = host_entity;
-            let op_key =
-                KeyId::from_bytes(*blake3::hash(b"fortiq:operator:session:key").as_bytes());
-            let root_key = KeyId::from_bytes(*blake3::hash(b"fortiq:owner:root:key").as_bytes());
             let nonce = *uuid::Uuid::new_v4().as_bytes();
 
             let session_seed = match deriver.derive_operator_session_seed(&nonce) {
@@ -1075,12 +1084,9 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     return IpcResponse::Error(format!("Échec dérivation session: {err}"));
                 }
             };
-            let session_pubkey = *blake3::hash(session_seed.as_bytes()).as_bytes();
-
-            let root_signer = LocalRootSigner {
-                seed: *root_seed.as_bytes(),
-                key_id: root_key,
-            };
+            let session_signer = Arc::new(Ed25519Signer::from_seed(*session_seed.as_bytes()));
+            let session_pubkey = session_signer.public_key();
+            let op_key = session_signer.key_id();
             let capabilities = OperatorCapabilities::from_names([
                 "admin",
                 "read",
@@ -1110,7 +1116,8 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 }
             };
 
-            let workspace = MemoryWorkspace::new();
+            let mut workspace = MemoryWorkspace::new();
+            workspace.unlock(net_id, owner_id, segment_master_seed);
 
             {
                 let mut guard = state.operator_session.write().await;
@@ -1119,6 +1126,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     cert,
                     workspace,
                     expires_at,
+                    session_signer,
                 });
             }
 
@@ -1286,11 +1294,56 @@ where
         }
     };
 
+    let ticket_id = match init.ticket_id {
+        Some(ticket_id) if !ticket_id.trim().is_empty() => ticket_id,
+        _ => {
+            ipc_write
+                .write_all(
+                    b"{\"status\":\"error\",\"message\":\"Ticket requis pour shell/next\"}\n",
+                )
+                .await?;
+            return Ok(());
+        }
+    };
+    let ticket = match state.ticket_store.db().get_ticket(&ticket_id)? {
+        Some(ticket) => ticket,
+        None => {
+            ipc_write
+                .write_all(b"{\"status\":\"error\",\"message\":\"Ticket introuvable\"}\n")
+                .await?;
+            return Ok(());
+        }
+    };
+    let access_epoch =
+        match fortiq_core::canonical::types::AccessEpoch::from_hex(&ticket.access_epoch) {
+            Ok(epoch) => epoch,
+            Err(_) => {
+                ipc_write
+                    .write_all(
+                        b"{\"status\":\"error\",\"message\":\"AccessEpoch ticket invalide\"}\n",
+                    )
+                    .await?;
+                return Ok(());
+            }
+        };
+    let (certificate, session_signer) = {
+        let session = state.operator_session.read().await;
+        let session = session
+            .as_ref()
+            .expect("authorization checked before terminal init");
+        (session.cert.clone(), session.session_signer.clone())
+    };
+    let segment_id = fortiq_shell::derive_ticket_segment_id(&certificate.network_id, &ticket_id);
+
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     if p2p_sender
-        .send(fortiq_p2p::P2pCommand::OpenShellStream {
+        .send(fortiq_p2p::P2pCommand::OpenShellNext {
             peer: target_peer,
-            ticket_id: init.ticket_id,
+            ticket_id,
+            access_epoch,
+            segment_id,
+            certificate,
+            session_signer,
             dial: dial_addr,
             reply: reply_tx,
         })
@@ -1368,6 +1421,40 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fortiq_core::canonical::{
+        codec::to_canonical_cbor,
+        control::{GenesisTbs, GENESIS_SIG_DOMAIN},
+        crypto::keys::MnemonicEntropy,
+        portable::mnemonic::entropy_to_mnemonic,
+        types::{CryptoProfileId, NetworkId},
+    };
+
+    fn valid_test_mnemonic() -> &'static str {
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
+    }
+
+    fn test_genesis_for_mnemonic(mnemonic: &str) -> Genesis {
+        let entropy = parse_mnemonic_phrase(mnemonic).unwrap();
+        let root_seed = MnemonicDeriver::new(&entropy)
+            .derive_root_signing_seed()
+            .unwrap();
+        let signer = Ed25519Signer::from_seed(*root_seed.as_bytes());
+        let public_key = signer.public_key();
+        let tbs = GenesisTbs {
+            version: 1,
+            network_id: NetworkId::from_bytes([0x77; 32]),
+            owner_id: derive_owner_id(&public_key),
+            owner_root_signing_public_key: public_key.to_vec(),
+            recovery_public_key: None,
+            initial_crypto_profile: CryptoProfileId::FortiqPq1,
+            initial_policy_hash: [0x88; 32],
+            created_at: 1,
+        };
+        let mut payload = GENESIS_SIG_DOMAIN.to_vec();
+        payload.extend_from_slice(&to_canonical_cbor(&tbs).unwrap());
+        let signature = signer.sign(&payload).unwrap();
+        Genesis { tbs, signature }
+    }
 
     #[tokio::test]
     async fn staged_upload_rejects_files_outside_the_public_spool() {
@@ -1457,6 +1544,7 @@ mod tests {
             ticket_store: TicketStore::new(ticket_path),
             p2p_sender: None,
             operator_session: Arc::new(tokio::sync::RwLock::new(None)),
+            genesis: None,
         });
 
         let (client_io, server_io) = tokio::io::duplex(1024);
@@ -1499,6 +1587,7 @@ mod tests {
             ticket_store: TicketStore::new(ticket_path),
             p2p_sender: None,
             operator_session: Arc::new(tokio::sync::RwLock::new(None)),
+            genesis: Some(test_genesis_for_mnemonic(valid_test_mnemonic())),
         });
 
         // 1. Initial status: is_operator_authorized must be false
@@ -1520,7 +1609,7 @@ mod tests {
         }
 
         // 3. Unlock with valid 24-word BIP-39 mnemonic
-        let valid_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
+        let valid_mnemonic = valid_test_mnemonic();
         let res = process_request(
             IpcRequest::UnlockOperator {
                 mnemonic: valid_mnemonic.to_string(),
@@ -1540,8 +1629,30 @@ mod tests {
             other => panic!("Expected OperatorStatus response, got {other:?}"),
         }
 
+        // A valid mnemonic for a different Owner must fail closed.
+        let wrong_mnemonic = entropy_to_mnemonic(&MnemonicEntropy::new([0x42; 32]));
+        let res = process_request(
+            IpcRequest::UnlockOperator {
+                mnemonic: wrong_mnemonic,
+            },
+            &state,
+        )
+        .await;
+        assert!(matches!(
+            res,
+            IpcResponse::Error(message) if message.contains("ne correspond pas au Owner")
+        ));
+
         // 4. Now is_operator_authorized must be true!
         assert!(is_operator_authorized(&state).await);
+        assert!(state
+            .operator_session
+            .read()
+            .await
+            .as_ref()
+            .expect("active operator session")
+            .workspace
+            .is_unlocked());
 
         // 5. GetStatus reports is_operator_unlocked = true
         let status_res = process_request(IpcRequest::GetStatus, &state).await;

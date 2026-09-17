@@ -26,6 +26,7 @@ zeroize.workspace = true
 hkdf.workspace = true
 rand_core.workspace = true
 x25519-dalek.workspace = true
+ed25519-dalek.workspace = true
 
 [features]
 default = []
@@ -34,4 +35,3 @@ test-utils = []
 [dev-dependencies]
 
 tempfile.workspace = true
-

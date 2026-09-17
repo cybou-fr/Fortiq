@@ -13,7 +13,7 @@ use crate::canonical::events::reducer::{reduce_ticket, SimpleRoleResolver};
 use crate::canonical::events::snapshot::TicketSnapshot;
 use crate::canonical::records::{EventPackPlaintext, LogicalEvent, ObjectTbs, SignedObject};
 use crate::canonical::types::{
-    CryptoProfileId, KeyId, NetworkId, StorageClass, StreamId, TicketId,
+    AccessEpoch, CryptoProfileId, KeyId, NetworkId, StorageClass, StreamId, TicketId,
 };
 
 #[derive(Debug, Error)]
@@ -74,10 +74,19 @@ impl LegacyTicketMigrator {
         let mut events = Vec::new();
 
         // 1. TicketCreated event
+        // Legacy rows did not contain an access epoch. Derive a stable, full-width
+        // migration epoch so repeated imports produce the same event graph without
+        // truncating the authority token to the old 64-bit timestamp.
+        let mut epoch_hasher = blake3::Hasher::new();
+        epoch_hasher.update(b"FORTIQ-LEGACY-ACCESS-EPOCH-v1:");
+        epoch_hasher.update(ticket.id.as_bytes());
+        epoch_hasher.update(&ticket.created_at.to_le_bytes());
+        let mut initial_epoch = [0u8; AccessEpoch::LEN];
+        initial_epoch.copy_from_slice(&epoch_hasher.finalize().as_bytes()[..AccessEpoch::LEN]);
         events.push(LogicalEvent::TicketCreated {
             ticket_id,
             title: ticket.title.clone(),
-            initial_epoch: ticket.created_at,
+            initial_access_epoch: AccessEpoch::from_bytes(initial_epoch),
         });
 
         // 2. Chat messages in chronological order

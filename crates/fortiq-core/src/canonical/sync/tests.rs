@@ -11,7 +11,9 @@ use crate::canonical::sync::snapshot::EncryptedSnapshot;
 use crate::canonical::sync::tail::{
     PackHeaderInfo, TailSyncError, TailSyncPlanner, TailSyncStatus,
 };
-use crate::canonical::types::{KeyId, NetworkId, ObjectId, SegmentId, StreamId, TicketId};
+use crate::canonical::types::{
+    AccessEpoch, KeyId, NetworkId, ObjectId, SegmentId, StreamId, TicketId,
+};
 
 #[derive(Clone)]
 struct MockSigner {
@@ -301,7 +303,7 @@ fn test_encrypted_snapshot_seal_open_and_fast_tail_catchup() {
         events: vec![LogicalEvent::TicketCreated {
             ticket_id,
             title: "Cold Start Base Ticket".into(),
-            initial_epoch: 1000,
+            initial_access_epoch: AccessEpoch::from_bytes([0xe8; 16]),
         }],
     };
 

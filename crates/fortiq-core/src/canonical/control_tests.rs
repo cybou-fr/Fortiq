@@ -3,13 +3,15 @@ mod tests {
     use crate::canonical::codec::{from_canonical_cbor, to_canonical_cbor, DecoderLimits};
     use crate::canonical::control::{
         capabilities, derive_owner_id, ControlError, DeviceBinding, EnrollmentCertificate, Genesis,
-        GenesisTbs, JoinInvitation, RevocationList, SegmentDescriptor,
+        GenesisTbs, JoinInvitation, RevocationList, SegmentDescriptor, GENESIS_SIG_DOMAIN,
     };
     use crate::canonical::control_store::ControlStore;
+    use crate::canonical::signing::{Ed25519Signer, Signer};
     use crate::canonical::types::{CryptoProfileId, EntityId, KeyId, NetworkId, SegmentId};
 
     fn sample_genesis() -> Genesis {
-        let owner_pk = vec![0x42; 32];
+        let signer = Ed25519Signer::from_seed([0x42; 32]);
+        let owner_pk = signer.public_key().to_vec();
         let owner_id = derive_owner_id(&owner_pk);
         let tbs = GenesisTbs {
             version: 1,
@@ -22,15 +24,16 @@ mod tests {
             created_at: 1726570000,
         };
 
-        Genesis {
-            tbs,
-            signature: vec![0x99; 64],
-        }
+        let mut payload = GENESIS_SIG_DOMAIN.to_vec();
+        payload.extend_from_slice(&to_canonical_cbor(&tbs).unwrap());
+        let signature = signer.sign(&payload).unwrap();
+        Genesis { tbs, signature }
     }
 
     #[test]
     fn test_genesis_owner_and_genesis_id_derivation() {
         let genesis = sample_genesis();
+        genesis.verify().expect("valid Genesis signature");
         let genesis_id = genesis.genesis_id().expect("genesis id failed");
         assert_ne!(genesis_id, [0u8; 32]);
 
@@ -42,6 +45,20 @@ mod tests {
         let owner_pk = &genesis.tbs.owner_root_signing_public_key;
         let owner_id = derive_owner_id(owner_pk);
         assert_eq!(genesis.tbs.owner_id, owner_id);
+    }
+
+    #[test]
+    fn test_genesis_verification_rejects_tampering_and_owner_mismatch() {
+        let mut tampered = sample_genesis();
+        tampered.tbs.created_at += 1;
+        assert!(tampered.verify().is_err());
+
+        let mut mismatched = sample_genesis();
+        mismatched.tbs.owner_id = crate::canonical::types::OwnerId::from_bytes([0xff; 32]);
+        assert!(matches!(
+            mismatched.verify(),
+            Err(ControlError::OwnerIdentityMismatch)
+        ));
     }
 
     #[test]
