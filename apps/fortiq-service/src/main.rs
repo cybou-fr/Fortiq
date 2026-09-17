@@ -120,13 +120,6 @@ enum TicketAction {
     Open,
     /// Show the local ticket state.
     Status,
-    /// Close a managed peer's ticket as the operator.
-    Close {
-        #[arg(long)]
-        peer: libp2p::PeerId,
-        #[arg(long)]
-        dial: Multiaddr,
-    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -233,7 +226,6 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
         dial_address: None,
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: Some(p2p_cmd_rx),
     };
     fortiq_p2p::run(keypair, local_info, options).await
@@ -244,8 +236,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
     let mode = config.mode();
     let ticket_store = TicketStore::try_new(config.ticket_path())
         .context("Failed to open persistent ticket database")?;
-    let mut dial = args.dial;
-    let mut close_ticket_peer = None;
+    let dial = args.dial;
 
     if let Some(Action::Ticket { action }) = args.action {
         match action {
@@ -263,16 +254,6 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
                     None => println!("No ticket"),
                 }
                 return Ok(());
-            }
-            TicketAction::Close {
-                peer,
-                dial: close_dial,
-            } => {
-                if mode != NodeMode::Operator {
-                    anyhow::bail!("Only the operator peer may close tickets.");
-                }
-                close_ticket_peer = Some(peer);
-                dial = Some(close_dial);
             }
         }
     }
@@ -345,7 +326,6 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
         dial_address: dial,
         shell_peer: args.shell,
         shell_command: args.shell_command,
-        close_ticket_peer,
         command_receiver: Some(p2p_cmd_rx),
     };
     fortiq_p2p::run(keypair, local_info, options).await

@@ -105,7 +105,6 @@ async fn e2e_managed_operator_quic_interaction() {
         dial_address: None,
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: None,
     };
 
@@ -120,7 +119,6 @@ async fn e2e_managed_operator_quic_interaction() {
         dial_address: Some(managed_dial_addr.clone()),
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: Some(op_cmd_rx),
     };
 
@@ -198,7 +196,7 @@ async fn e2e_managed_operator_quic_interaction() {
 }
 
 #[tokio::test]
-async fn e2e_unauthorized_operator_rejected_on_ticket_close() {
+async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
     let managed_port = {
         let s = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         s.local_addr().unwrap().port()
@@ -222,7 +220,16 @@ async fn e2e_unauthorized_operator_rejected_on_ticket_close() {
 
     let managed_ticket_path = dir_managed.path().join("ticket.json");
     let ticket_store = TicketStore::new(managed_ticket_path.clone());
-    let opened_ticket = ticket_store.open().await.unwrap();
+    let opened_ticket = ticket_store
+        .db()
+        .create_ticket(
+            "Unauthorized mutation",
+            "must remain open",
+            TicketPriority::Normal,
+            &managed_peer_id.to_string(),
+            &legit_operator_peer_id.to_string(),
+        )
+        .unwrap();
     assert_eq!(opened_ticket.state, TicketState::Open);
 
     // Managed node ONLY trusts legit_operator_peer_id
@@ -291,7 +298,6 @@ async fn e2e_unauthorized_operator_rejected_on_ticket_close() {
         dial_address: None,
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: None,
     };
 
@@ -306,7 +312,6 @@ async fn e2e_unauthorized_operator_rejected_on_ticket_close() {
         dial_address: Some(managed_dial_addr.clone()),
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: Some(intruder_cmd_rx),
     };
 
@@ -326,22 +331,26 @@ async fn e2e_unauthorized_operator_rejected_on_ticket_close() {
     // Give time to connect
     tokio::time::sleep(Duration::from_millis(600)).await;
 
-    // Intruder attempts to close ticket
+    // Intruder attempts to close a specific ticket through v2.
     let (tx, rx) = tokio::sync::oneshot::channel();
     intruder_cmd_tx
-        .send(P2pCommand::CloseTicket {
+        .send(P2pCommand::SyncTickets {
             peer: managed_peer_id,
             dial: Some(managed_dial_addr),
+            request: TicketSyncRequest::UpdateStatus {
+                ticket_id: opened_ticket.id.clone(),
+                state: TicketState::Closed,
+            },
             reply: tx,
         })
         .await
         .unwrap();
 
-    let close_result = rx.await.unwrap();
-    assert!(
-        close_result.is_err(),
-        "Intruder should have been rejected from closing the ticket!"
-    );
+    let close_result = rx.await.unwrap().expect("v2 response expected");
+    assert!(matches!(
+        close_result,
+        TicketSyncResponse::Ack { success: false, .. }
+    ));
 
     // Ticket must remain OPEN
     let current_ticket = ticket_store

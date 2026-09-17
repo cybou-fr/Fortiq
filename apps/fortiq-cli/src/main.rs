@@ -145,16 +145,6 @@ enum TicketCommand {
 
     /// Open a new support ticket on a managed node (legacy compatibility).
     Open,
-
-    /// Close an open ticket on a remote managed node (legacy operator compatibility).
-    Close {
-        /// Remote managed peer ID.
-        peer: String,
-
-        /// Optional direct QUIC multiaddress to dial.
-        #[arg(long)]
-        dial: Option<String>,
-    },
 }
 
 #[tokio::main]
@@ -190,7 +180,6 @@ async fn main() -> Result<()> {
             }
             TicketCommand::Status => cmd_ticket_status(pipe).await,
             TicketCommand::Open => cmd_ticket_open(pipe).await,
-            TicketCommand::Close { peer, dial } => cmd_ticket_close(pipe, peer, dial).await,
         },
         Commands::Shell {
             peer,
@@ -560,17 +549,6 @@ async fn cmd_ticket_open(pipe: Option<&str>) -> Result<()> {
             Ok(())
         }
         IpcResponse::Error(err) => bail!("Failed to open ticket: {err}"),
-        _ => bail!("Unexpected response from daemon"),
-    }
-}
-
-async fn cmd_ticket_close(pipe: Option<&str>, peer: String, dial: Option<String>) -> Result<()> {
-    match ipc::send_command(&IpcRequest::CloseTicket { peer, dial }, pipe).await? {
-        IpcResponse::TicketClosed => {
-            println!("Ticket CLOSED successfully.");
-            Ok(())
-        }
-        IpcResponse::Error(err) => bail!("Failed to close ticket: {err}"),
         _ => bail!("Unexpected response from daemon"),
     }
 }

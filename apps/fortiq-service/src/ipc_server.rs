@@ -430,54 +430,6 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 Err(e) => IpcResponse::Error(format!("Failed to open ticket: {e}")),
             }
         }
-        IpcRequest::CloseTicket { peer, dial } => {
-            if state.config.mode() != NodeMode::Operator {
-                return IpcResponse::Error("Only operator can close tickets".to_string());
-            }
-            let target_peer: PeerId = match peer.parse() {
-                Ok(p) => p,
-                Err(e) => return IpcResponse::Error(format!("Invalid target PeerId: {e}")),
-            };
-            let target_dial: Option<libp2p::Multiaddr> = match dial {
-                Some(d) => match d.parse() {
-                    Ok(addr) => Some(addr),
-                    Err(e) => {
-                        return IpcResponse::Error(format!("Invalid target dial multiaddr: {e}"))
-                    }
-                },
-                None => None,
-            };
-
-            if let Some(sender) = &state.p2p_sender {
-                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-                if sender
-                    .send(fortiq_p2p::P2pCommand::CloseTicket {
-                        peer: target_peer,
-                        dial: target_dial,
-                        reply: reply_tx,
-                    })
-                    .await
-                    .is_ok()
-                {
-                    match tokio::time::timeout(std::time::Duration::from_secs(10), reply_rx).await {
-                        Ok(Ok(Ok(()))) => IpcResponse::TicketClosed,
-                        Ok(Ok(Err(err))) => {
-                            IpcResponse::Error(format!("Failed to close remote ticket: {err}"))
-                        }
-                        Ok(Err(_)) => IpcResponse::Error(
-                            "P2P event loop dropped ticket reply channel".to_string(),
-                        ),
-                        Err(_) => IpcResponse::Error(
-                            "Timeout waiting for remote ticket closure".to_string(),
-                        ),
-                    }
-                } else {
-                    IpcResponse::Error("P2P subsystem channel closed".to_string())
-                }
-            } else {
-                IpcResponse::Error("P2P subsystem not running".to_string())
-            }
-        }
         IpcRequest::ListPeers => {
             if let Some(sender) = &state.p2p_sender {
                 let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();

@@ -52,11 +52,6 @@ fn default_terminal_rows() -> u16 {
 pub enum IpcRequest {
     GetStatus,
     OpenTicket,
-    CloseTicket {
-        peer: String,
-        #[serde(default)]
-        dial: Option<String>,
-    },
     ListPeers,
 
     // Ticket Core v2 additions:
@@ -104,7 +99,6 @@ pub enum IpcRequest {
 pub enum IpcResponse {
     Status(DaemonStatus),
     TicketOpened(Ticket),
-    TicketClosed,
     Peers(Vec<PeerSummary>),
     Tickets(Vec<crate::TicketRecord>),
     TicketDetail(Option<crate::TicketDetail>),

@@ -20,7 +20,6 @@ use tracing::{info, warn};
 
 pub const HELLO_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/hello/1.0");
 pub const SHELL_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/shell/2.0");
-pub const TICKET_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/ticket/1.0");
 pub const TICKET_PROTOCOL_V2: StreamProtocol = StreamProtocol::new("/fortiq/ticket/2.0");
 pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/2.0");
 pub const FILE_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/file/2.0");
@@ -128,11 +127,6 @@ impl Drop for ShellSessionGuard {
 pub enum P2pCommand {
     ListPeers {
         reply: tokio::sync::oneshot::Sender<Vec<fortiq_core::ipc::PeerSummary>>,
-    },
-    CloseTicket {
-        peer: PeerId,
-        dial: Option<Multiaddr>,
-        reply: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     OpenShellStream {
         peer: PeerId,
@@ -645,14 +639,12 @@ pub struct RunOptions {
     pub dial_address: Option<Multiaddr>,
     pub shell_peer: Option<PeerId>,
     pub shell_command: Option<String>,
-    pub close_ticket_peer: Option<PeerId>,
     pub command_receiver: Option<tokio::sync::mpsc::Receiver<P2pCommand>>,
 }
 
 struct EventOptions {
     local_info: NodeInfo,
     config: Config,
-    close_ticket_peer: Option<PeerId>,
     ticket_store: TicketStore,
     active_shells: Arc<AtomicBool>,
     command_receiver: Option<tokio::sync::mpsc::Receiver<P2pCommand>>,
@@ -664,23 +656,11 @@ struct HelloRequest(NodeInfo);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct HelloResponse(NodeInfo);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum TicketRequest {
-    Close,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TicketResponse {
-    success: bool,
-    message: String,
-}
-
 #[derive(NetworkBehaviour)]
 struct Behaviour {
     identify: identify::Behaviour,
     ping: ping::Behaviour,
     hello: request_response::json::Behaviour<HelloRequest, HelloResponse>,
-    ticket: request_response::json::Behaviour<TicketRequest, TicketResponse>,
     ticket_v2: request_response::json::Behaviour<TicketSyncRequest, TicketSyncResponse>,
     chat: request_response::json::Behaviour<ChatMessageWire, ChatAckWire>,
     stream: libp2p_stream::Behaviour,
@@ -702,7 +682,6 @@ pub async fn run(
         dial_address,
         shell_peer,
         shell_command: _shell_command,
-        close_ticket_peer,
         command_receiver,
     } = options;
     if shell_peer.is_some() {
@@ -751,14 +730,6 @@ pub async fn run(
                 identify: identify::Behaviour::new(identify_config),
                 ping: ping::Behaviour::default(),
                 hello,
-                ticket: request_response::Behaviour::with_codec(
-                    request_response::json::codec::Codec::default()
-                        .set_request_size_maximum(1024)
-                        .set_response_size_maximum(4096),
-                    [(TICKET_PROTOCOL, ProtocolSupport::Full)],
-                    request_response::Config::default()
-                        .with_request_timeout(Duration::from_secs(10)),
-                ),
                 ticket_v2,
                 chat,
                 stream: libp2p_stream::Behaviour::new(),
@@ -843,7 +814,6 @@ pub async fn run(
     let event_options = EventOptions {
         local_info,
         config,
-        close_ticket_peer,
         ticket_store,
         active_shells,
         command_receiver,
@@ -868,13 +838,11 @@ async fn event_loop(
     let EventOptions {
         local_info,
         config,
-        close_ticket_peer,
         ticket_store,
         active_shells,
         command_receiver,
     } = options;
-    let (shell_result_sender, mut shell_result_receiver) = tokio::sync::mpsc::channel(1);
-    let target_peer = close_ticket_peer;
+    let target_peer = None;
 
     let (dummy_tx, dummy_rx) = tokio::sync::mpsc::channel(1);
     let mut command_receiver = command_receiver.unwrap_or(dummy_rx);
@@ -887,10 +855,6 @@ async fn event_loop(
     let mut rendezvous_nodes: std::collections::HashSet<PeerId> = std::collections::HashSet::new();
     let mut discovery_ticker = tokio::time::interval(REDISCOVERY_INTERVAL);
     discovery_ticker.tick().await;
-    let mut pending_close_tickets: std::collections::HashMap<
-        libp2p::request_response::OutboundRequestId,
-        tokio::sync::oneshot::Sender<Result<(), String>>,
-    > = std::collections::HashMap::new();
     let mut pending_sync_tickets: std::collections::HashMap<
         libp2p::request_response::OutboundRequestId,
         PendingTicketSync,
@@ -950,25 +914,6 @@ async fn event_loop(
                             }
                         }
                         let _ = reply.send(peer_registry.to_summaries());
-                    }
-                    P2pCommand::CloseTicket { peer, dial, reply } => {
-                        if let Some(addr) = dial {
-                            if let Err(error) = swarm.dial(addr.clone()) {
-                                warn!(%addr, %error, "failed to dial target for ticket close");
-                            }
-                        } else if !swarm.is_connected(&peer) {
-                            dial_peer_candidates(
-                                swarm,
-                                peer,
-                                &peer_registry,
-                                config.network.relay_peer.as_deref(),
-                            );
-                        }
-                        let request_id = swarm.behaviour_mut().ticket.send_request(
-                            &peer,
-                            TicketRequest::Close,
-                        );
-                        pending_close_tickets.insert(request_id, reply);
                     }
                     P2pCommand::OpenShellStream { peer, ticket_id, dial, reply } => {
                         if swarm.is_connected(&peer) {
@@ -1127,9 +1072,6 @@ async fn event_loop(
                         file_slot,
                     ).await;
                 });
-            }
-            Some(result) = shell_result_receiver.recv() => {
-                return result;
             }
             _ = discovery_ticker.tick() => {
                 let namespace = rendezvous::Namespace::from_static("fortiq");
@@ -1293,12 +1235,6 @@ async fn event_loop(
                             &peer_id,
                             HelloRequest(local_info.clone()),
                         );
-                        if close_ticket_peer == Some(peer_id) {
-                            swarm.behaviour_mut().ticket.send_request(
-                                &peer_id,
-                                TicketRequest::Close,
-                            );
-                        }
                     }
                 }
                 libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, num_established, .. } => {
@@ -1306,17 +1242,6 @@ async fn event_loop(
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::Hello(event)) => {
                     handle_hello(event, swarm, &local_info, &mut peer_registry);
-                }
-                libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::Ticket(event)) => {
-                    handle_ticket(
-                        event,
-                        swarm,
-                        &config,
-                        &ticket_store,
-                        &active_shells,
-                        &shell_result_sender,
-                        &mut pending_close_tickets,
-                    ).await;
                 }
                 libp2p::swarm::SwarmEvent::Behaviour(BehaviourEvent::TicketV2(event)) => {
                     handle_ticket_v2(
@@ -1569,85 +1494,6 @@ fn handle_rendezvous_server(event: rendezvous::server::Event) {
         }
         rendezvous::server::Event::RegistrationExpired(registration) => {
             info!(peer = %registration.record.peer_id(), namespace = %registration.namespace, "rendezvous registration expired");
-        }
-    }
-}
-
-async fn handle_ticket(
-    event: request_response::Event<TicketRequest, TicketResponse>,
-    swarm: &mut Swarm<Behaviour>,
-    _config: &Config,
-    _ticket_store: &TicketStore,
-    _active_shells: &Arc<AtomicBool>,
-    completion: &tokio::sync::mpsc::Sender<Result<()>>,
-    pending_close_tickets: &mut std::collections::HashMap<
-        request_response::OutboundRequestId,
-        tokio::sync::oneshot::Sender<Result<(), String>>,
-    >,
-) {
-    match event {
-        request_response::Event::Message { peer, message, .. } => match message {
-            request_response::Message::Request {
-                request: TicketRequest::Close,
-                channel,
-                ..
-            } => {
-                warn!(remote_peer_id = %peer, "rejected unsafe legacy ticket close without ticket id");
-                let response = TicketResponse {
-                    success: false,
-                    message: "legacy peer-level close is disabled; use ticket v2 with a ticket id"
-                        .to_owned(),
-                };
-                if swarm
-                    .behaviour_mut()
-                    .ticket
-                    .send_response(channel, response)
-                    .is_err()
-                {
-                    warn!(remote_peer_id = %peer, "ticket response connection closed before sending");
-                }
-            }
-            request_response::Message::Response {
-                request_id,
-                response,
-            } => {
-                if let Some(reply) = pending_close_tickets.remove(&request_id) {
-                    if response.success {
-                        let _ = reply.send(Ok(()));
-                    } else {
-                        let _ = reply.send(Err(response.message.clone()));
-                    }
-                } else if response.success {
-                    println!("{}", response.message);
-                    let _ = completion.send(Ok(())).await;
-                } else {
-                    let _ = completion
-                        .send(Err(anyhow::anyhow!(response.message)))
-                        .await;
-                }
-            }
-        },
-        request_response::Event::OutboundFailure {
-            request_id,
-            peer,
-            error,
-            ..
-        } => {
-            if let Some(reply) = pending_close_tickets.remove(&request_id) {
-                let _ = reply.send(Err(format!("ticket request to {peer} failed: {error}")));
-            } else {
-                let _ = completion
-                    .send(Err(anyhow::anyhow!(
-                        "ticket request to {peer} failed: {error}"
-                    )))
-                    .await;
-            }
-        }
-        request_response::Event::InboundFailure { peer, error, .. } => {
-            warn!(remote_peer_id = %peer, %error, "ticket request failed");
-        }
-        request_response::Event::ResponseSent { peer, .. } => {
-            info!(remote_peer_id = %peer, "ticket response sent");
         }
     }
 }

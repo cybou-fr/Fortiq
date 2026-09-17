@@ -74,7 +74,6 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         dial_address: None,
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: None,
     };
 
@@ -133,7 +132,6 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         dial_address: None,
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: None,
     };
 
@@ -175,7 +173,6 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         dial_address: Some(relay_multiaddr.clone()),
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: Some(op_cmd_rx),
     };
 
@@ -360,7 +357,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         }
     }
 
-    // Send exit\r\n and wait for EOF/clean exit before CloseTicket to respect server contract
+    // Send exit\r\n and wait for EOF/clean exit before the ticket-aware status update.
     ShellFrame::Data(b"exit\r\n".to_vec())
         .write_to(&mut write_half2)
         .await
@@ -495,7 +492,6 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         dial_address: None,
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: None,
     };
 
@@ -554,7 +550,6 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         dial_address: None,
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: None,
     };
 
@@ -596,7 +591,6 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         dial_address: Some(relay_multiaddr.clone()),
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: Some(op_cmd_rx),
     };
 

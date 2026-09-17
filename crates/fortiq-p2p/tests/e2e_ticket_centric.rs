@@ -110,7 +110,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
         dial_address: None,
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: Some(managed_cmd_rx),
     };
 
@@ -120,7 +119,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
         dial_address: Some(managed_dial_addr.clone()),
         shell_peer: None,
         shell_command: None,
-        close_ticket_peer: None,
         command_receiver: Some(operator_cmd_rx),
     };
 
