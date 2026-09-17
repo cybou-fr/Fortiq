@@ -168,6 +168,15 @@ pub struct TicketDetail {
     pub events: Vec<TicketEventRecord>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboxRecord {
+    pub id: String,
+    pub peer_id: String,
+    pub kind: String,
+    pub payload: String,
+    pub created_at: u64,
+}
+
 #[derive(Clone)]
 pub struct TicketDb {
     conn: Arc<Mutex<Connection>>,
@@ -268,11 +277,20 @@ impl TicketDb {
                 metadata TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS outbox (
+                id TEXT PRIMARY KEY,
+                peer_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_tickets_state ON tickets(state);
             CREATE INDEX IF NOT EXISTS idx_messages_ticket ON messages(ticket_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_attachments_ticket ON attachments(ticket_id);
             CREATE INDEX IF NOT EXISTS idx_shell_sessions_ticket ON shell_sessions(ticket_id);
             CREATE INDEX IF NOT EXISTS idx_events_ticket ON ticket_events(ticket_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_outbox_peer ON outbox(peer_id, created_at);
             ",
         )
         .context("failed to execute sqlite schema migration")?;
@@ -679,6 +697,45 @@ impl TicketDb {
         Ok(list)
     }
 
+    pub fn enqueue_outbox(&self, peer_id: &str, kind: &str, payload: &str) -> Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO outbox (id, peer_id, kind, payload, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, peer_id, kind, payload, current_timestamp()],
+        )?;
+        Ok(id)
+    }
+
+    pub fn list_outbox_for_peer(&self, peer_id: &str) -> Result<Vec<OutboxRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, peer_id, kind, payload, created_at
+             FROM outbox WHERE peer_id = ?1 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![peer_id], |r| {
+            Ok(OutboxRecord {
+                id: r.get(0)?,
+                peer_id: r.get(1)?,
+                kind: r.get(2)?,
+                payload: r.get(3)?,
+                created_at: r.get(4)?,
+            })
+        })?;
+        let mut list = Vec::new();
+        for row in rows {
+            list.push(row?);
+        }
+        Ok(list)
+    }
+
+    pub fn remove_outbox(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM outbox WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     pub fn add_attachment(&self, attachment: &AttachmentRecord) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -1011,6 +1068,26 @@ mod tests {
             .list_pending_messages_for_peer("op1", "c1")
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn ticket_sync_outbox_is_persistent_and_peer_scoped() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("outbox.db");
+        let id = {
+            let db = TicketDb::open(&db_path).unwrap();
+            db.enqueue_outbox("peer-a", "TICKET_SYNC", r#"{"operation":"close"}"#)
+                .unwrap()
+        };
+
+        let reopened = TicketDb::open(&db_path).unwrap();
+        let records = reopened.list_outbox_for_peer("peer-a").unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, id);
+        assert!(reopened.list_outbox_for_peer("peer-b").unwrap().is_empty());
+
+        reopened.remove_outbox(&id).unwrap();
+        assert!(reopened.list_outbox_for_peer("peer-a").unwrap().is_empty());
     }
 
     #[test]

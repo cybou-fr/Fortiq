@@ -99,6 +99,20 @@ fn is_ticket_counterparty(
 
 struct ShellSessionGuard(Arc<AtomicBool>);
 
+struct PendingTicketSync {
+    reply: tokio::sync::oneshot::Sender<Result<TicketSyncResponse, String>>,
+    outbox_id: Option<String>,
+}
+
+fn is_ticket_mutation(request: &TicketSyncRequest) -> bool {
+    matches!(
+        request,
+        TicketSyncRequest::PushTicket(_)
+            | TicketSyncRequest::UpdateStatus { .. }
+            | TicketSyncRequest::SetRemoteAccess { .. }
+    )
+}
+
 impl Drop for ShellSessionGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
@@ -872,7 +886,7 @@ async fn event_loop(
     > = std::collections::HashMap::new();
     let mut pending_sync_tickets: std::collections::HashMap<
         libp2p::request_response::OutboundRequestId,
-        tokio::sync::oneshot::Sender<Result<TicketSyncResponse, String>>,
+        PendingTicketSync,
     > = std::collections::HashMap::new();
     let mut pending_chat_messages: std::collections::HashMap<
         libp2p::request_response::OutboundRequestId,
@@ -885,6 +899,7 @@ async fn event_loop(
     type PendingSyncDial = (
         TicketSyncRequest,
         tokio::sync::oneshot::Sender<Result<TicketSyncResponse, String>>,
+        Option<String>,
     );
     type PendingChatDial = (
         ChatMessageWire,
@@ -998,11 +1013,28 @@ async fn event_loop(
                         }
                     }
                     P2pCommand::SyncTickets { peer, dial, request, reply } => {
+                        let outbox_id = if is_ticket_mutation(&request) {
+                            match serde_json::to_string(&request)
+                                .map_err(anyhow::Error::from)
+                                .and_then(|payload| ticket_store.db().enqueue_outbox(
+                                    &peer.to_string(),
+                                    "TICKET_SYNC",
+                                    &payload,
+                                )) {
+                                Ok(id) => Some(id),
+                                Err(error) => {
+                                    let _ = reply.send(Err(format!("Échec de persistance de la synchronisation: {error}")));
+                                    continue;
+                                }
+                            }
+                        } else {
+                            None
+                        };
                         if swarm.is_connected(&peer) {
                             let req_id = swarm.behaviour_mut().ticket_v2.send_request(&peer, request);
-                            pending_sync_tickets.insert(req_id, reply);
+                            pending_sync_tickets.insert(req_id, PendingTicketSync { reply, outbox_id });
                         } else {
-                            pending_sync_dials.entry(peer).or_default().push((request, reply));
+                            pending_sync_dials.entry(peer).or_default().push((request, reply, outbox_id));
                             if let Some(addr) = dial {
                                 let _ = swarm.dial(addr);
                             } else {
@@ -1138,10 +1170,28 @@ async fn event_loop(
                         }
                     }
                     if let Some(pending) = pending_sync_dials.remove(&peer_id) {
-                        for (req, reply) in pending {
+                        for (req, reply, outbox_id) in pending {
                             let req_id = swarm.behaviour_mut().ticket_v2.send_request(&peer_id, req);
-                            pending_sync_tickets.insert(req_id, reply);
+                            pending_sync_tickets.insert(req_id, PendingTicketSync { reply, outbox_id });
                         }
+                    }
+                    match ticket_store.db().list_outbox_for_peer(&peer_id.to_string()) {
+                        Ok(records) => {
+                            for record in records.into_iter().filter(|record| record.kind == "TICKET_SYNC") {
+                                match serde_json::from_str::<TicketSyncRequest>(&record.payload) {
+                                    Ok(request) => {
+                                        let request_id = swarm.behaviour_mut().ticket_v2.send_request(&peer_id, request);
+                                        let (reply, _response) = tokio::sync::oneshot::channel();
+                                        pending_sync_tickets.insert(request_id, PendingTicketSync {
+                                            reply,
+                                            outbox_id: Some(record.id),
+                                        });
+                                    }
+                                    Err(error) => warn!(outbox_id = %record.id, %error, "invalid ticket sync outbox payload"),
+                                }
+                            }
+                        }
+                        Err(error) => warn!(remote_peer_id = %peer_id, %error, "failed to load ticket sync outbox"),
                     }
                     if let Some(pending) = pending_chat_dials.remove(&peer_id) {
                         for (msg, reply) in pending {
@@ -1361,7 +1411,7 @@ async fn event_loop(
                                 }
                             }
                             if let Some(pending) = pending_sync_dials.remove(&peer) {
-                                for (_, reply) in pending {
+                                for (_, reply, _) in pending {
                                     let _ = reply.send(Err(format!(
                                         "Impossible d'établir la connexion avec le poste distant: {error}"
                                     )));
@@ -1582,7 +1632,7 @@ async fn handle_ticket_v2(
     ticket_store: &TicketStore,
     pending_sync_tickets: &mut std::collections::HashMap<
         request_response::OutboundRequestId,
-        tokio::sync::oneshot::Sender<Result<TicketSyncResponse, String>>,
+        PendingTicketSync,
     >,
 ) {
     match event {
@@ -1712,16 +1762,25 @@ async fn handle_ticket_v2(
                 request_id,
                 response,
             } => {
-                if let Some(reply) = pending_sync_tickets.remove(&request_id) {
-                    let _ = reply.send(Ok(response));
+                if let Some(pending) = pending_sync_tickets.remove(&request_id) {
+                    let acknowledged =
+                        matches!(response, TicketSyncResponse::Ack { success: true, .. });
+                    if acknowledged {
+                        if let Some(outbox_id) = pending.outbox_id.as_deref() {
+                            let _ = ticket_store.db().remove_outbox(outbox_id);
+                        }
+                    }
+                    let _ = pending.reply.send(Ok(response));
                 }
             }
         },
         request_response::Event::OutboundFailure {
             request_id, error, ..
         } => {
-            if let Some(reply) = pending_sync_tickets.remove(&request_id) {
-                let _ = reply.send(Err(format!("Échec de la requête ticket sync: {error}")));
+            if let Some(pending) = pending_sync_tickets.remove(&request_id) {
+                let _ = pending
+                    .reply
+                    .send(Err(format!("Échec de la requête ticket sync: {error}")));
             }
         }
         _ => {}
