@@ -142,9 +142,6 @@ enum TicketCommand {
 
     /// Show current local active ticket (legacy compatibility).
     Status,
-
-    /// Open a new support ticket on a managed node (legacy compatibility).
-    Open,
 }
 
 #[tokio::main]
@@ -179,7 +176,6 @@ async fn main() -> Result<()> {
                 cmd_ticket_set_status(pipe, &ticket_id, &state).await
             }
             TicketCommand::Status => cmd_ticket_status(pipe).await,
-            TicketCommand::Open => cmd_ticket_open(pipe).await,
         },
         Commands::Shell {
             peer,
@@ -556,18 +552,6 @@ async fn cmd_ticket_status(pipe: Option<&str>) -> Result<()> {
         }
     }
     Ok(())
-}
-
-async fn cmd_ticket_open(pipe: Option<&str>) -> Result<()> {
-    match ipc::send_command(&IpcRequest::OpenTicket, pipe).await? {
-        IpcResponse::TicketOpened(ticket) => {
-            println!("Ticket OPENED successfully.");
-            println!("Ticket ID: {}", ticket.id);
-            Ok(())
-        }
-        IpcResponse::Error(err) => bail!("Failed to open ticket: {err}"),
-        _ => bail!("Unexpected response from daemon"),
-    }
 }
 
 async fn cmd_shell(

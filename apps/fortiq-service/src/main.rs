@@ -116,8 +116,6 @@ enum Action {
 
 #[derive(Debug, Subcommand)]
 enum TicketAction {
-    /// Open a local support ticket on a managed peer.
-    Open,
     /// Show the local ticket state.
     Status,
 }
@@ -197,7 +195,7 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
 
     tracing::info!("FORTIQ Service starting: mode={mode}, peer_id={peer_id}");
 
-    maybe_auto_open_ticket(&config, &ticket_store, mode).await;
+    maybe_auto_open_ticket(&config, &ticket_store, mode, &peer_id.to_string()).await;
 
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
     let mut local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
@@ -240,14 +238,6 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
 
     if let Some(Action::Ticket { action }) = args.action {
         match action {
-            TicketAction::Open => {
-                if mode != NodeMode::Managed {
-                    anyhow::bail!("Support tickets can be opened only on a managed peer.");
-                }
-                let ticket = ticket_store.open().await?;
-                println!("Ticket {}: OPEN", ticket.id);
-                return Ok(());
-            }
             TicketAction::Status => {
                 match ticket_store.get().await? {
                     Some(ticket) => println!("Ticket {}: {}", ticket.id, ticket.state.as_str()),
@@ -318,7 +308,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
         }
     });
 
-    maybe_auto_open_ticket(&config, &auto_open_store, mode).await;
+    maybe_auto_open_ticket(&config, &auto_open_store, mode, &peer_id.to_string()).await;
 
     let options = RunOptions {
         config,
@@ -340,7 +330,12 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
 ///
 /// Both daemon entry points call this: `async_main` serves systemd, while
 /// `run_daemon` serves the Windows service.
-async fn maybe_auto_open_ticket(config: &Config, ticket_store: &TicketStore, mode: NodeMode) {
+async fn maybe_auto_open_ticket(
+    config: &Config,
+    ticket_store: &TicketStore,
+    mode: NodeMode,
+    local_peer_id: &str,
+) {
     if !config.ticket.auto_open {
         return;
     }
@@ -348,7 +343,24 @@ async fn maybe_auto_open_ticket(config: &Config, ticket_store: &TicketStore, mod
         tracing::warn!("ticket.auto_open ignored: tickets exist only on managed nodes");
         return;
     }
-    match ticket_store.open().await {
+    if ticket_store
+        .db()
+        .list_tickets(None)
+        .is_ok_and(|tickets| tickets.iter().any(|ticket| ticket.state.permits_work()))
+    {
+        return;
+    }
+    let Some(operator_peer_id) = config.authorization.operator_peer_id.as_deref() else {
+        tracing::warn!("ticket.auto_open ignored: no authorized operator is configured");
+        return;
+    };
+    match ticket_store.db().create_ticket(
+        "Automatic support ticket",
+        "Created by ticket.auto_open",
+        fortiq_core::TicketPriority::Normal,
+        local_peer_id,
+        operator_peer_id,
+    ) {
         Ok(ticket) => tracing::info!(ticket_id = %ticket.id, "ticket auto-opened at service start"),
         Err(error) => tracing::warn!(%error, "failed to auto-open ticket at start"),
     }
@@ -397,5 +409,40 @@ mod tests {
     fn instance_lock_path_is_accessible() {
         let p = instance_lock_path();
         assert!(p.to_string_lossy().contains("fortiq-service.lock"));
+    }
+
+    #[tokio::test]
+    async fn auto_open_uses_real_ticket_counterparties() {
+        let directory = tempfile::tempdir().unwrap();
+        let client = libp2p::PeerId::random().to_string();
+        let operator = libp2p::PeerId::random().to_string();
+        let config = Config {
+            node: fortiq_core::NodeConfig {
+                name: "managed-test".to_string(),
+            },
+            identity: fortiq_core::IdentityConfig {
+                path: directory.path().join("identity.key"),
+            },
+            authorization: fortiq_core::AuthorizationConfig {
+                operator_peer_id: Some(operator.clone()),
+            },
+            network: fortiq_core::NetworkConfig::default(),
+            capabilities: fortiq_core::CapabilitiesConfig::default(),
+            ticket: fortiq_core::TicketConfig {
+                auto_open: true,
+                ..fortiq_core::TicketConfig::default()
+            },
+            ipc: fortiq_core::IpcConfig::default(),
+        };
+        let store = TicketStore::new(directory.path().join("tickets.db"));
+
+        maybe_auto_open_ticket(&config, &store, NodeMode::Managed, &client).await;
+        maybe_auto_open_ticket(&config, &store, NodeMode::Managed, &client).await;
+
+        let tickets = store.db().list_tickets(None).unwrap();
+        assert_eq!(tickets.len(), 1);
+        assert_eq!(tickets[0].client_peer_id, client);
+        assert_eq!(tickets[0].operator_peer_id, operator);
+        assert!(!tickets[0].remote_access_enabled);
     }
 }

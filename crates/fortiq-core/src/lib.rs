@@ -331,53 +331,6 @@ impl TicketStore {
         }
         Ok(None)
     }
-
-    pub async fn is_open(&self) -> Result<bool> {
-        let tickets = self.db.list_tickets(None)?;
-        Ok(tickets
-            .iter()
-            .any(|t| t.state.permits_work() && t.remote_access_enabled))
-    }
-
-    pub async fn open(&self) -> Result<Ticket> {
-        let tickets = self.db.list_tickets(None)?;
-        if let Some(active) = tickets.iter().find(|t| t.state.permits_work()) {
-            return Ok(Ticket {
-                id: active.id.clone(),
-                state: active.state,
-            });
-        }
-        let created = self.db.create_ticket(
-            "Assistance générale",
-            "Demande d'assistance initiée par l'utilisateur",
-            TicketPriority::Normal,
-            "local",
-            "operator",
-        )?;
-        Ok(Ticket {
-            id: created.id,
-            state: created.state,
-        })
-    }
-
-    pub async fn close(&self) -> Result<Option<Ticket>> {
-        let tickets = self.db.list_tickets(None)?;
-        let mut closed_ticket = None;
-        for t in tickets {
-            if t.state.permits_work() {
-                if let Ok(Some(updated)) =
-                    self.db
-                        .update_ticket_state(&t.id, TicketState::Closed, "local")
-                {
-                    closed_ticket = Some(Ticket {
-                        id: updated.id,
-                        state: updated.state,
-                    });
-                }
-            }
-        }
-        Ok(closed_ticket)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -483,31 +436,6 @@ mod tests {
         libp2p::identity::Keypair::generate_ed25519()
             .public()
             .to_peer_id()
-    }
-
-    #[tokio::test]
-    async fn ticket_lifecycle_is_persistent() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = TicketStore::new(directory.path().join("ticket.json"));
-
-        assert!(!store.is_open().await.unwrap());
-        let opened = store.open().await.unwrap();
-        assert_eq!(opened.state, TicketState::Open);
-        assert!(!store.is_open().await.unwrap());
-        store
-            .db()
-            .set_remote_access(&opened.id, true, "local")
-            .unwrap()
-            .unwrap();
-        assert!(store.is_open().await.unwrap());
-
-        let reloaded = TicketStore::new(directory.path().join("ticket.json"));
-        assert_eq!(reloaded.get().await.unwrap(), Some(opened.clone()));
-
-        let closed = reloaded.close().await.unwrap().unwrap();
-        assert_eq!(closed.id, opened.id);
-        assert_eq!(closed.state, TicketState::Closed);
-        assert!(!reloaded.is_open().await.unwrap());
     }
 
     #[test]

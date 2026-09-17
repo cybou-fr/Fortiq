@@ -43,12 +43,24 @@ pub fn upload_spool_dir() -> PathBuf {
 pub fn new_upload_staging_path(source: &Path) -> std::io::Result<PathBuf> {
     let root = upload_spool_dir();
     std::fs::create_dir_all(&root)?;
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "unknown-user".to_string());
+    use sha2::{Digest, Sha256};
+    let user_key = format!("{:x}", Sha256::digest(user.as_bytes()));
+    let user_root = root.join(user_key);
+    std::fs::create_dir_all(&user_root)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&user_root, std::fs::Permissions::from_mode(0o700))?;
+    }
     let name = source
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("attachment.bin")
         .replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
-    Ok(root.join(format!("{}_{}", uuid::Uuid::new_v4().simple(), name)))
+    Ok(user_root.join(format!("{}_{}", uuid::Uuid::new_v4().simple(), name)))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -76,7 +88,6 @@ fn default_terminal_rows() -> u16 {
 #[serde(tag = "type", content = "payload")]
 pub enum IpcRequest {
     GetStatus,
-    OpenTicket,
     ListPeers,
 
     // Ticket Core v2 additions:
@@ -123,7 +134,6 @@ pub enum IpcRequest {
 #[serde(tag = "type", content = "payload")]
 pub enum IpcResponse {
     Status(DaemonStatus),
-    TicketOpened(Ticket),
     Peers(Vec<PeerSummary>),
     Tickets(Vec<crate::TicketRecord>),
     TicketDetail(Option<crate::TicketDetail>),

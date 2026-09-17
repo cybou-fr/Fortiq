@@ -18,6 +18,105 @@ pub struct IpcState {
     pub p2p_sender: Option<tokio::sync::mpsc::Sender<fortiq_p2p::P2pCommand>>,
 }
 
+fn staged_components<'a>(
+    canonical_spool: &std::path::Path,
+    canonical_source: &'a std::path::Path,
+) -> std::result::Result<(&'a std::ffi::OsStr, &'a std::ffi::OsStr), String> {
+    let parent = canonical_source
+        .parent()
+        .ok_or_else(|| "Chemin staged invalide".to_string())?;
+    if parent.parent() != Some(canonical_spool) {
+        return Err("Le service refuse tout fichier situé hors du spool utilisateur".to_string());
+    }
+    let user = parent
+        .file_name()
+        .ok_or_else(|| "Répertoire utilisateur staged invalide".to_string())?;
+    let name = canonical_source
+        .file_name()
+        .ok_or_else(|| "Nom de fichier staged invalide".to_string())?;
+    Ok((user, name))
+}
+
+#[cfg(unix)]
+fn open_staged_file(
+    canonical_spool: &std::path::Path,
+    canonical_source: &std::path::Path,
+) -> std::result::Result<std::fs::File, String> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    let (user, name) = staged_components(canonical_spool, canonical_source)?;
+    let user = std::ffi::CString::new(user.as_bytes())
+        .map_err(|_| "Répertoire utilisateur staged invalide".to_string())?;
+    let name = std::ffi::CString::new(name.as_bytes())
+        .map_err(|_| "Nom de fichier staged invalide".to_string())?;
+    let root = std::fs::File::open(canonical_spool)
+        .map_err(|error| format!("Spool inaccessible: {error}"))?;
+    let user_fd = unsafe {
+        libc::openat(
+            root.as_raw_fd(),
+            user.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if user_fd < 0 {
+        return Err(format!(
+            "Répertoire staged non sécurisé: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let user_dir = unsafe { std::fs::File::from_raw_fd(user_fd) };
+    let file_fd = unsafe {
+        libc::openat(
+            user_dir.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if file_fd < 0 {
+        return Err(format!(
+            "Fichier staged non sécurisé: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(unsafe { std::fs::File::from_raw_fd(file_fd) })
+}
+
+#[cfg(windows)]
+fn open_staged_file(
+    canonical_spool: &std::path::Path,
+    canonical_source: &std::path::Path,
+) -> std::result::Result<std::fs::File, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFinalPathNameByHandleW, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED,
+        VOLUME_NAME_DOS,
+    };
+
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(canonical_source)
+        .map_err(|error| format!("Fichier staged inaccessible: {error}"))?;
+    let mut buffer = vec![0u16; 32_768];
+    let length = unsafe {
+        GetFinalPathNameByHandleW(
+            file.as_raw_handle() as _,
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+            FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
+        )
+    };
+    if length == 0 || length as usize >= buffer.len() {
+        return Err("Impossible de vérifier le handle du fichier staged".to_string());
+    }
+    buffer.truncate(length as usize);
+    let final_path = std::path::PathBuf::from(String::from_utf16_lossy(&buffer));
+    staged_components(canonical_spool, &final_path)?;
+    Ok(file)
+}
+
 async fn import_staged_upload(
     ticket_store: &TicketStore,
     staged_path: &str,
@@ -40,9 +139,7 @@ async fn import_staged_upload_from(
     let canonical_source = tokio::fs::canonicalize(staged_path)
         .await
         .map_err(|error| format!("Fichier staged inaccessible: {error}"))?;
-    if canonical_source.parent() != Some(canonical_spool.as_path()) {
-        return Err("Le service refuse tout fichier situé hors du spool d'upload".to_string());
-    }
+    staged_components(&canonical_spool, &canonical_source)?;
     let staged_name = canonical_source
         .file_name()
         .and_then(|name| name.to_str())
@@ -51,10 +148,14 @@ async fn import_staged_upload_from(
         .split_once('_')
         .ok_or_else(|| "Nom de fichier staged invalide".to_string())?;
     uuid::Uuid::parse_str(id).map_err(|_| "Identifiant de staging invalide".to_string())?;
-    let metadata = tokio::fs::metadata(&canonical_source)
-        .await
+    let source = open_staged_file(&canonical_spool, &canonical_source)?;
+    let metadata = source
+        .metadata()
         .map_err(|error| format!("Metadata staged inaccessible: {error}"))?;
-    if !metadata.is_file() || metadata.len() > fortiq_p2p::MAX_FILE_SIZE {
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > fortiq_p2p::MAX_FILE_SIZE
+    {
         return Err("Le fichier staged est invalide ou trop volumineux".to_string());
     }
 
@@ -67,9 +168,28 @@ async fn import_staged_upload_from(
         uuid::Uuid::new_v4().simple(),
         original_name
     ));
-    tokio::fs::copy(&canonical_source, &destination)
+    let partial_destination = destination.with_extension("part");
+    let source = tokio::fs::File::from_std(source);
+    let mut limited_source = tokio::io::AsyncReadExt::take(source, fortiq_p2p::MAX_FILE_SIZE + 1);
+    let mut destination_file = tokio::fs::File::create(&partial_destination)
+        .await
+        .map_err(|error| format!("Impossible de créer le fichier privé: {error}"))?;
+    let copied = tokio::io::copy(&mut limited_source, &mut destination_file)
         .await
         .map_err(|error| format!("Impossible d'importer le fichier staged: {error}"))?;
+    if copied > fortiq_p2p::MAX_FILE_SIZE {
+        drop(destination_file);
+        let _ = tokio::fs::remove_file(&partial_destination).await;
+        return Err("Le fichier staged a dépassé la taille maximale pendant la copie".to_string());
+    }
+    destination_file
+        .sync_all()
+        .await
+        .map_err(|error| format!("Impossible de synchroniser le fichier privé: {error}"))?;
+    drop(destination_file);
+    tokio::fs::rename(&partial_destination, &destination)
+        .await
+        .map_err(|error| format!("Impossible de finaliser le fichier privé: {error}"))?;
     let _ = tokio::fs::remove_file(&canonical_source).await;
     Ok(destination)
 }
@@ -474,17 +594,6 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 listen_addresses: state.listen_addresses.clone(),
             };
             IpcResponse::Status(status)
-        }
-        IpcRequest::OpenTicket => {
-            if state.config.mode() != NodeMode::Managed {
-                return IpcResponse::Error(
-                    "Tickets can only be opened on managed nodes".to_string(),
-                );
-            }
-            match state.ticket_store.open().await {
-                Ok(ticket) => IpcResponse::TicketOpened(ticket),
-                Err(e) => IpcResponse::Error(format!("Failed to open ticket: {e}")),
-            }
         }
         IpcRequest::ListPeers => {
             if let Some(sender) = &state.p2p_sender {
@@ -1031,6 +1140,46 @@ mod tests {
 
         assert!(error.contains("hors du spool"));
         assert!(outside.exists());
+    }
+
+    #[tokio::test]
+    async fn staged_upload_is_copied_from_the_validated_open_handle() {
+        let dir = tempfile::tempdir().unwrap();
+        let spool = dir.path().join("public-spool");
+        let user_spool = spool.join("user-key");
+        tokio::fs::create_dir_all(&user_spool).await.unwrap();
+        let staged = user_spool.join(format!("{}_evidence.txt", uuid::Uuid::new_v4().simple()));
+        tokio::fs::write(&staged, b"stable bytes").await.unwrap();
+        let store = TicketStore::new(dir.path().join("tickets.json"));
+
+        let imported = import_staged_upload_from(&store, staged.to_str().unwrap(), &spool)
+            .await
+            .unwrap();
+
+        assert_eq!(tokio::fs::read(imported).await.unwrap(), b"stable bytes");
+        assert!(!staged.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn staged_upload_rejects_a_symlink_to_an_outside_file() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let spool = dir.path().join("public-spool");
+        let user_spool = spool.join("user-key");
+        tokio::fs::create_dir_all(&user_spool).await.unwrap();
+        let outside = dir.path().join("root-secret.txt");
+        tokio::fs::write(&outside, b"secret").await.unwrap();
+        let staged = user_spool.join(format!("{}_link", uuid::Uuid::new_v4().simple()));
+        symlink(&outside, &staged).unwrap();
+        let store = TicketStore::new(dir.path().join("tickets.json"));
+
+        assert!(
+            import_staged_upload_from(&store, staged.to_str().unwrap(), &spool)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
