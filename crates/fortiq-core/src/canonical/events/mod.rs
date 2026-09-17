@@ -11,6 +11,8 @@ pub mod batcher;
 pub mod graph;
 pub mod reducer;
 pub mod safety;
+pub mod search;
+pub mod snapshot;
 pub mod stream;
 pub mod tombstone;
 
@@ -24,5 +26,7 @@ pub use reducer::{
     DefaultRoleResolver, RoleResolver, SimpleRoleResolver, TicketView,
 };
 pub use safety::{AuthorRole, TicketLifecycle, TicketSafetyState};
+pub use search::{LocalSearchIndex, MatchType, SearchResult};
+pub use snapshot::{reduce_ticket_from_snapshot, TicketSnapshot, TICKET_REDUCER_VERSION};
 pub use stream::{StreamAppendEntry, StreamCursor, StreamError};
 pub use tombstone::{CanonicalHeadSet, Tombstone};

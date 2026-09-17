@@ -347,3 +347,271 @@ fn test_canonical_head_set_cannot_override_client_safety_revocation() {
         "Client safety revocation must remain authoritative"
     );
 }
+
+#[test]
+fn test_chat_message_revision_audit_trail() {
+    let mut graph = EventGraph::new();
+    let ticket_id = TicketId::from_bytes([0x88; 16]);
+    let stream_id = StreamId::from_bytes([0x01; 16]);
+    let client_key = KeyId::from_bytes([0x01; 32]);
+    let resolver = SimpleRoleResolver::new().with_client(client_key);
+
+    // Pack 1: TicketCreated
+    let pack1_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x01; 16],
+        events: vec![
+            LogicalEvent::TicketCreated {
+                ticket_id,
+                title: "Network outage".into(),
+                initial_epoch: 100,
+            },
+            LogicalEvent::ChatMessage {
+                ticket_id,
+                seq: 1,
+                body: "Original statement with typo: server is down at 10.0.0.1".into(),
+            },
+        ],
+    };
+    let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
+    let pack1_id = graph
+        .append_pack(pack1_signed, pack1_plain, stream_id, 1, None)
+        .expect("pack 1");
+
+    // Pack 2: ChatMessageRevised
+    let pack2_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x02; 16],
+        events: vec![LogicalEvent::ChatMessageRevised {
+            ticket_id,
+            original_seq: 1,
+            replacement_body: "Corrected statement: server is down at 10.0.0.2".into(),
+        }],
+    };
+    let pack2_signed = dummy_signed_object(client_key, stream_id, 2, Some(pack1_id), 100);
+    graph
+        .append_pack(pack2_signed, pack2_plain, stream_id, 2, Some(pack1_id))
+        .expect("pack 2");
+
+    let view = reduce_ticket_with_resolver(ticket_id, &graph, &resolver).expect("ticket view");
+    assert_eq!(view.messages.len(), 1);
+    assert_eq!(
+        view.messages[0].body,
+        "Corrected statement: server is down at 10.0.0.2"
+    );
+    // Audit history preserved!
+    assert_eq!(view.messages[0].edit_history.len(), 1);
+    assert_eq!(
+        view.messages[0].edit_history[0],
+        "Original statement with typo: server is down at 10.0.0.1"
+    );
+}
+
+#[test]
+fn test_ticket_snapshot_cold_start_acceleration() {
+    use crate::canonical::events::snapshot::{reduce_ticket_from_snapshot, TicketSnapshot};
+
+    let mut graph = EventGraph::new();
+    let ticket_id = TicketId::from_bytes([0xaa; 16]);
+    let stream_id = StreamId::from_bytes([0x01; 16]);
+    let client_key = KeyId::from_bytes([0x01; 32]);
+    let resolver = SimpleRoleResolver::new().with_client(client_key);
+
+    // Pack 1: Created + message 1
+    let pack1_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x01; 16],
+        events: vec![
+            LogicalEvent::TicketCreated {
+                ticket_id,
+                title: "Slow database query".into(),
+                initial_epoch: 200,
+            },
+            LogicalEvent::ChatMessage {
+                ticket_id,
+                seq: 1,
+                body: "Message 1".into(),
+            },
+        ],
+    };
+    let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
+    let pack1_id = graph
+        .append_pack(pack1_signed, pack1_plain, stream_id, 1, None)
+        .expect("pack 1");
+
+    // Pack 2: message 2
+    let pack2_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x02; 16],
+        events: vec![LogicalEvent::ChatMessage {
+            ticket_id,
+            seq: 2,
+            body: "Message 2".into(),
+        }],
+    };
+    let pack2_signed = dummy_signed_object(client_key, stream_id, 2, Some(pack1_id), 100);
+    let pack2_id = graph
+        .append_pack(pack2_signed, pack2_plain, stream_id, 2, Some(pack1_id))
+        .expect("pack 2");
+
+    // Materialize state and create Snapshot
+    let view_before = reduce_ticket_with_resolver(ticket_id, &graph, &resolver).expect("view");
+    assert_eq!(view_before.messages.len(), 2);
+    assert_eq!(view_before.incorporated_packs, vec![pack1_id, pack2_id]);
+
+    let snapshot = TicketSnapshot::create(&view_before, 5000);
+    assert_eq!(snapshot.frontier_head_packs, vec![pack1_id, pack2_id]);
+
+    // Now append tail Pack 3 to the graph
+    let pack3_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x03; 16],
+        events: vec![LogicalEvent::ChatMessage {
+            ticket_id,
+            seq: 3,
+            body: "Tail Message 3 arrived after snapshot".into(),
+        }],
+    };
+    let pack3_signed = dummy_signed_object(client_key, stream_id, 3, Some(pack2_id), 100);
+    let pack3_id = graph
+        .append_pack(pack3_signed, pack3_plain, stream_id, 3, Some(pack2_id))
+        .expect("pack 3");
+
+    // Fast cold start: apply tail events on top of the snapshot
+    let view_accelerated = reduce_ticket_from_snapshot(&snapshot, &graph, &resolver);
+    assert_eq!(view_accelerated.messages.len(), 3);
+    assert_eq!(
+        view_accelerated.messages[2].body,
+        "Tail Message 3 arrived after snapshot"
+    );
+    assert_eq!(
+        view_accelerated.incorporated_packs,
+        vec![pack1_id, pack2_id, pack3_id]
+    );
+}
+
+#[test]
+fn test_local_search_index() {
+    use crate::canonical::events::reducer::{AttachmentView, ChatMessageView};
+    use crate::canonical::events::search::{LocalSearchIndex, MatchType};
+
+    let mut search_index = LocalSearchIndex::new();
+    let ticket_id = TicketId::from_bytes([0xee; 16]);
+    let initial_epoch = AccessEpoch::from_bytes([0x11; 16]);
+
+    let view = crate::canonical::events::reducer::TicketView {
+        ticket_id,
+        title: "VPN Gateway Connection Refused".into(),
+        safety: TicketSafetyState::new_client_open(ticket_id, initial_epoch),
+        messages: vec![ChatMessageView {
+            pack_id: ObjectId::from_bytes([0x01; 32]),
+            seq: 1,
+            body: "Client cannot reach remote gateway IP 192.168.1.1".into(),
+            edit_history: Vec::new(),
+        }],
+        attachments: vec![AttachmentView {
+            pack_id: ObjectId::from_bytes([0x02; 32]),
+            blob_id: BlobId::from_bytes([0x33; 32]),
+            filename: "diagnostic-packet-dump.pcap".into(),
+            size_bytes: 65536,
+        }],
+        incorporated_packs: vec![],
+    };
+
+    search_index.index_ticket(view);
+
+    // Search matches title
+    let res_title = search_index.search("gateway");
+    assert!(!res_title.is_empty());
+    assert!(res_title.iter().any(|r| r.match_type == MatchType::Title));
+
+    // Search matches message body
+    let res_body = search_index.search("192.168.1.1");
+    assert_eq!(res_body.len(), 1);
+    assert_eq!(res_body[0].match_type, MatchType::MessageBody);
+
+    // Search matches attachment filename
+    let res_att = search_index.search(".pcap");
+    assert_eq!(res_att.len(), 1);
+    assert_eq!(res_att[0].match_type, MatchType::AttachmentFilename);
+
+    // Search nonexistent query
+    let res_none = search_index.search("completely_unrelated_query");
+    assert!(res_none.is_empty());
+}
+
+#[test]
+fn test_eventpack_overhead_amortization_proof() {
+    use crate::canonical::codec::to_canonical_cbor;
+
+    let ticket_id = TicketId::from_bytes([0x12; 16]);
+
+    // Scenario A: 32 individual EventPacks (each containing 1 message, signed & framed individually)
+    let mut individual_bytes = 0usize;
+    for i in 1..=32 {
+        let single_pack = EventPackPlaintext {
+            schema_version: 1,
+            ticket_id: Some(ticket_id),
+            ticket_crypto_epoch: Some(1),
+            pack_nonce: [i as u8; 16],
+            events: vec![LogicalEvent::ChatMessage {
+                ticket_id,
+                seq: i,
+                body: format!("Short status message number {}", i),
+            }],
+        };
+        let cbor = to_canonical_cbor(&single_pack).expect("cbor");
+        let signed = dummy_signed_object(
+            KeyId::from_bytes([0x01; 32]),
+            StreamId::from_bytes([0x02; 16]),
+            i,
+            None,
+            cbor.len() as u64,
+        );
+        let signed_cbor = to_canonical_cbor(&signed).expect("signed cbor");
+        individual_bytes += cbor.len() + signed_cbor.len();
+    }
+
+    // Scenario B: 1 EventPack amortizing all 32 messages
+    let batch_pack = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0xff; 16],
+        events: (1..=32)
+            .map(|i| LogicalEvent::ChatMessage {
+                ticket_id,
+                seq: i,
+                body: format!("Short status message number {}", i),
+            })
+            .collect(),
+    };
+    let batch_cbor = to_canonical_cbor(&batch_pack).expect("cbor");
+    let batch_signed = dummy_signed_object(
+        KeyId::from_bytes([0x01; 32]),
+        StreamId::from_bytes([0x02; 16]),
+        1,
+        None,
+        batch_cbor.len() as u64,
+    );
+    let batch_signed_cbor = to_canonical_cbor(&batch_signed).expect("signed cbor");
+    let batched_bytes = batch_cbor.len() + batch_signed_cbor.len();
+
+    // PROOF: Batched representation consumes less than 40% of the wire framing overhead
+    let overhead_ratio = (batched_bytes as f64) / (individual_bytes as f64);
+    assert!(
+        overhead_ratio < 0.40,
+        "EventPack must achieve >60% overhead reduction vs individual messages; got ratio {}",
+        overhead_ratio
+    );
+}

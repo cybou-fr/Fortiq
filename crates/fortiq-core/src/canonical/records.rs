@@ -132,6 +132,11 @@ pub enum LogicalEvent {
         seq: u64,
         body: String,
     },
+    ChatMessageRevised {
+        ticket_id: TicketId,
+        original_seq: u64,
+        replacement_body: String,
+    },
     FileAttached {
         ticket_id: TicketId,
         blob_id: BlobId,

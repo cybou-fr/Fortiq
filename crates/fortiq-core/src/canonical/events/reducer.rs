@@ -8,18 +8,21 @@ use crate::canonical::events::graph::EventGraph;
 use crate::canonical::events::safety::{AuthorRole, TicketSafetyState};
 use crate::canonical::records::LogicalEvent;
 use crate::canonical::types::{AccessEpoch, BlobId, KeyId, ObjectId, TicketId};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 /// View of a chat message in the ticket timeline.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatMessageView {
     pub pack_id: ObjectId,
     pub seq: u64,
     pub body: String,
+    #[serde(default)]
+    pub edit_history: Vec<String>,
 }
 
 /// View of an attachment associated with the ticket.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttachmentView {
     pub pack_id: ObjectId,
     pub blob_id: BlobId,
@@ -28,7 +31,7 @@ pub struct AttachmentView {
 }
 
 /// Consolidated materialized view of a support ticket.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketView {
     pub ticket_id: TicketId,
     pub title: String,
@@ -169,7 +172,21 @@ pub fn reduce_ticket_with_resolver(
                             pack_id,
                             seq: *seq,
                             body: body.clone(),
+                            edit_history: Vec::new(),
                         });
+                    }
+                }
+                LogicalEvent::ChatMessageRevised {
+                    original_seq,
+                    replacement_body,
+                    ..
+                } => {
+                    if let Some(v) = &mut view {
+                        if let Some(msg) = v.messages.iter_mut().find(|m| m.seq == *original_seq) {
+                            let old_body =
+                                std::mem::replace(&mut msg.body, replacement_body.clone());
+                            msg.edit_history.push(old_body);
+                        }
                     }
                 }
                 LogicalEvent::FileAttached {
