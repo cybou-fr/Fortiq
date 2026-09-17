@@ -2,8 +2,12 @@ use crate::canonical::crypto::keys::MnemonicEntropy;
 use crate::canonical::crypto::provider::StandardCryptoProvider;
 use crate::canonical::events::reducer::TicketView;
 use crate::canonical::events::safety::TicketSafetyState;
-use crate::canonical::portable::certificate::{CertificateError, OperatorSessionCertificate};
-use crate::canonical::portable::mnemonic::MnemonicDeriver;
+use crate::canonical::portable::certificate::{
+    CertificateError, OperatorCapabilities, OperatorSessionCertificate, MAX_SESSION_TTL_SECS,
+};
+use crate::canonical::portable::mnemonic::{
+    entropy_to_mnemonic, parse_mnemonic_phrase, MnemonicDeriver, MnemonicError,
+};
 use crate::canonical::portable::workspace::{MemoryWorkspace, WorkspaceError};
 use crate::canonical::signing::{Signer, SigningError, Verifier};
 use crate::canonical::types::{
@@ -70,17 +74,24 @@ fn test_session_certificate_issuance_and_verification() {
 
     let net_id = NetworkId::from_bytes([0x22; 32]);
     let owner_id = OwnerId::from_bytes([0x33; 32]);
-    let op_key = KeyId::from_bytes([0x44; 32]);
+    let host_entity = EntityId::from_bytes([0x66; 32]);
     let op_entity = EntityId::from_bytes([0x55; 32]);
+    let op_key = KeyId::from_bytes([0x44; 32]);
+    let session_pubkey = [0x77; 32];
+    let capabilities = OperatorCapabilities::from_names(["ticket:read", "shell:execute"]);
+    let nonce = [0x88; 16];
 
     let cert = OperatorSessionCertificate::issue(
         net_id,
         owner_id,
-        op_key,
+        host_entity,
         op_entity,
-        vec!["ticket:read".into(), "shell:execute".into()],
+        op_key,
+        session_pubkey,
+        capabilities,
         1000,
         5000,
+        nonce,
         &root_signer,
     )
     .expect("certificate issuance must succeed");
@@ -93,10 +104,111 @@ fn test_session_certificate_issuance_and_verification() {
     let err = cert.verify(&verifier, 6000).unwrap_err();
     assert_eq!(err, CertificateError::Expired(5000, 6000));
 
-    // 3. Tampered signature fails verification
+    // 3. Not yet valid (current_time = 500 < not_before 1000)
+    let err = cert.verify(&verifier, 500).unwrap_err();
+    assert_eq!(err, CertificateError::NotYetValid(1000, 500));
+
+    // 4. Tampered signature fails verification
     let mut tampered = cert.clone();
     tampered.owner_signature[0] ^= 0xFF;
     assert!(tampered.verify(&verifier, 3000).is_err());
+}
+
+#[test]
+fn test_session_certificate_max_ttl_and_window_validation() {
+    let root_signer = MockSigner {
+        key_id: KeyId::from_bytes([0x11; 32]),
+    };
+    let net_id = NetworkId::from_bytes([0x22; 32]);
+    let owner_id = OwnerId::from_bytes([0x33; 32]);
+    let host_entity = EntityId::from_bytes([0x66; 32]);
+    let op_entity = EntityId::from_bytes([0x55; 32]);
+    let op_key = KeyId::from_bytes([0x44; 32]);
+
+    // TTL exceeding 86,400s must be rejected
+    let too_long_ttl = OperatorSessionCertificate::issue(
+        net_id,
+        owner_id,
+        host_entity,
+        op_entity,
+        op_key,
+        [0x77; 32],
+        OperatorCapabilities::from_bits(OperatorCapabilities::ADMIN),
+        1000,
+        1000 + MAX_SESSION_TTL_SECS + 1, // 86401 seconds
+        [0x88; 16],
+        &root_signer,
+    );
+    assert_eq!(
+        too_long_ttl,
+        Err(CertificateError::TtlExceeded(
+            MAX_SESSION_TTL_SECS + 1,
+            MAX_SESSION_TTL_SECS
+        ))
+    );
+
+    // Inverted validity window (expires_at < not_before)
+    let inverted = OperatorSessionCertificate::issue(
+        net_id,
+        owner_id,
+        host_entity,
+        op_entity,
+        op_key,
+        [0x77; 32],
+        OperatorCapabilities::default(),
+        5000,
+        4000,
+        [0x88; 16],
+        &root_signer,
+    );
+    assert_eq!(
+        inverted,
+        Err(CertificateError::InvalidValidityWindow(4000, 5000))
+    );
+}
+
+#[test]
+fn test_bip39_24_word_mnemonic_validation_and_checksum() {
+    let original_entropy = MnemonicEntropy::new([0x42; 32]);
+    let phrase = entropy_to_mnemonic(&original_entropy);
+
+    // Must be exactly 24 words
+    let words: Vec<&str> = phrase.split_whitespace().collect();
+    assert_eq!(words.len(), 24);
+
+    // Roundtrip parsing must recover identical 256-bit entropy
+    let parsed_entropy = parse_mnemonic_phrase(&phrase).expect("valid mnemonic phrase");
+    assert_eq!(original_entropy.as_bytes(), parsed_entropy.as_bytes());
+
+    // Error case 1: Invalid word count (23 words)
+    let bad_count_phrase = words[..23].join(" ");
+    assert_eq!(
+        parse_mnemonic_phrase(&bad_count_phrase),
+        Err(MnemonicError::InvalidWordCount(23))
+    );
+
+    // Error case 2: Unknown word outside BIP-39 dictionary
+    let mut bad_words = words.clone();
+    bad_words[0] = "foobarxyznonexistent";
+    let unknown_phrase = bad_words.join(" ");
+    assert_eq!(
+        parse_mnemonic_phrase(&unknown_phrase),
+        Err(MnemonicError::UnknownWord("foobarxyznonexistent".into()))
+    );
+
+    // Error case 3: Tampered word (corrupted checksum)
+    let mut corrupted_words = words.clone();
+    // Swap last word (which carries the 8-bit checksum) to a different valid dictionary word
+    corrupted_words[23] = if corrupted_words[23] == "abandon" {
+        "ability"
+    } else {
+        "abandon"
+    };
+    let corrupted_phrase = corrupted_words.join(" ");
+    assert_eq!(
+        parse_mnemonic_phrase(&corrupted_phrase),
+        Err(MnemonicError::InvalidChecksum)
+    );
 }
 
 #[test]

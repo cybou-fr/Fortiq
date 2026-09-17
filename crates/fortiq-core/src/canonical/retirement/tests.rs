@@ -3,7 +3,9 @@
 use super::*;
 use crate::canonical::control::capabilities;
 use crate::canonical::events::graph::EventGraph;
-use crate::canonical::portable::certificate::OperatorSessionCertificate;
+use crate::canonical::portable::certificate::{
+    OperatorCapabilities, OperatorSessionCertificate,
+};
 use crate::canonical::records::LogicalEvent;
 use crate::canonical::signing::{Signer, SigningError, Verifier};
 use crate::canonical::types::{AccessEpoch, EntityId, KeyId, NetworkId, OwnerId, StreamId};
@@ -167,17 +169,24 @@ fn test_canonical_authority_resolution_and_rejection_of_static_roles() {
     let owner_verifier = MockVerifier;
     let network_id = NetworkId::from_bytes([0x11; 32]);
     let owner_id = OwnerId::from_bytes([0x22; 32]);
-    let operator_key_id = KeyId::from_bytes([0x33; 32]);
+    let host_entity = EntityId::from_bytes([0x66; 32]);
     let operator_entity = EntityId::from_bytes([0x88; 32]);
+    let operator_key_id = KeyId::from_bytes([0x33; 32]);
+    let session_pubkey = [0x55; 32];
+    let capabilities = OperatorCapabilities::from_names(["admin", "shell"]);
+    let nonce = [0x77; 16];
 
     let cert = OperatorSessionCertificate::issue(
         network_id,
         owner_id,
-        operator_key_id,
+        host_entity,
         operator_entity,
-        vec!["admin".to_string(), "shell".to_string()],
+        operator_key_id,
+        session_pubkey,
+        capabilities,
         1_000,
         2_000,
+        nonce,
         &owner_signer,
     )
     .expect("Certificate issuance must succeed");

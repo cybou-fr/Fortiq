@@ -1,0 +1,130 @@
+import { FortiqTheme } from "../theme.slint";
+
+export component OperatorUnlockDialog inherits Rectangle {
+    in-out property <bool> is-open: false;
+    in-out property <string> mnemonic-input: "";
+    in-out property <string> error-message: "";
+    callback unlock(string);
+    callback close();
+
+    if root.is-open : Rectangle {
+        background: #000000aa;
+
+        TouchArea {
+            // Block clicks from passing through
+        }
+
+        Rectangle {
+            width: 500px;
+            height: 320px;
+            border-radius: FortiqTheme.radius-lg;
+            background: FortiqTheme.surface;
+            border-width: 1px;
+            border-color: FortiqTheme.border;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+
+            VerticalLayout {
+                padding: FortiqTheme.spacing-xl;
+                spacing: FortiqTheme.spacing-md;
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text {
+                        text: "Déverrouiller l'Espace Opérateur";
+                        color: FortiqTheme.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                    }
+
+                    Rectangle {
+                        width: 24px;
+                        height: 24px;
+                        TouchArea { clicked => { root.close(); } }
+                        Text {
+                            text: "✕";
+                            color: FortiqTheme.text-muted;
+                            font-size: 14px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Text {
+                    text: "Saisissez votre phrase mnémonique de 24 mots pour émettre un certificat de session cryptographique borné dans le temps.";
+                    color: FortiqTheme.text-secondary;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+
+                Rectangle {
+                    height: 90px;
+                    border-radius: FortiqTheme.radius-sm;
+                    background: FortiqTheme.background;
+                    border-width: 1px;
+                    border-color: FortiqTheme.border;
+
+                    HorizontalLayout {
+                        padding: FortiqTheme.spacing-sm;
+
+                        TextInput {
+                            text <=> root.mnemonic-input;
+                            color: FortiqTheme.text-primary;
+                            font-family: "monospace";
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                if root.error-message != "" : Text {
+                    text: root.error-message;
+                    color: FortiqTheme.danger;
+                    font-size: 12px;
+                }
+
+                HorizontalLayout {
+                    spacing: FortiqTheme.spacing-md;
+                    alignment: end;
+
+                    Rectangle {
+                        width: 90px;
+                        height: 34px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: FortiqTheme.surface-elevated;
+                        TouchArea { clicked => { root.close(); } }
+                        Text {
+                            text: "Annuler";
+                            color: FortiqTheme.text-primary;
+                            font-size: 12px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 120px;
+                        height: 34px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: unlock-btn.has-hover ? FortiqTheme.primary-hover : FortiqTheme.primary;
+                        unlock-btn := TouchArea {
+                            clicked => {
+                                root.unlock(root.mnemonic-input);
+                            }
+                        }
+                        Text {
+                            text: "Déverrouiller";
+                            color: #ffffff;
+                            font-size: 12px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

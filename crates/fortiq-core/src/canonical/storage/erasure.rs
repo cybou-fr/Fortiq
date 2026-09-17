@@ -9,12 +9,19 @@
 use crate::canonical::signing::compute_shard_checksum;
 use crate::canonical::types::RsProfile;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ErasureError {
-    #[error("Invalid RS profile: data_shards ({data}) and parity_shards ({parity}) must be > 0 and sum <= 256")]
+    #[error(
+        "Invalid RS profile: data_shards ({data}) and parity_shards ({parity}) must sum <= 128"
+    )]
     InvalidProfile { data: u8, parity: u8 },
+    #[error("Invalid shard index {index}: must be < total shards {total}")]
+    InvalidShardIndex { index: u8, total: u8 },
+    #[error("Duplicate shard index {index} encountered")]
+    DuplicateShardIndex { index: u8 },
     #[error(
         "Not enough valid shards to reconstruct: need {needed}, but only {available} are available"
     )]
@@ -25,6 +32,69 @@ pub enum ErasureError {
     SingularMatrix,
     #[error("Invalid shard length: expected {expected}, got {got}")]
     ShardLengthMismatch { expected: usize, got: usize },
+}
+
+/// Strongly typed, validated Reed-Solomon profile guaranteeing k + m <= 128
+/// and disjoint Cauchy evaluation sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ValidatedRsProfile {
+    pub data_shards: u8,
+    pub parity_shards: u8,
+}
+
+impl ValidatedRsProfile {
+    pub const RS_2_1: Self = Self {
+        data_shards: 2,
+        parity_shards: 1,
+    };
+    pub const RS_4_2: Self = Self {
+        data_shards: 4,
+        parity_shards: 2,
+    };
+    pub const RS_6_3: Self = Self {
+        data_shards: 6,
+        parity_shards: 3,
+    };
+    pub const RS_8_4: Self = Self {
+        data_shards: 8,
+        parity_shards: 4,
+    };
+
+    pub fn new(data_shards: u8, parity_shards: u8) -> Result<Self, ErasureError> {
+        let total = (data_shards as usize) + (parity_shards as usize);
+        if data_shards == 0 || total > 128 {
+            return Err(ErasureError::InvalidProfile {
+                data: data_shards,
+                parity: parity_shards,
+            });
+        }
+        Ok(Self {
+            data_shards,
+            parity_shards,
+        })
+    }
+
+    #[inline]
+    pub fn total_shards(&self) -> u8 {
+        self.data_shards + self.parity_shards
+    }
+}
+
+impl TryFrom<RsProfile> for ValidatedRsProfile {
+    type Error = ErasureError;
+
+    fn try_from(profile: RsProfile) -> Result<Self, Self::Error> {
+        Self::new(profile.data_shards, profile.parity_shards)
+    }
+}
+
+impl From<ValidatedRsProfile> for RsProfile {
+    fn from(val: ValidatedRsProfile) -> Self {
+        RsProfile {
+            data_shards: val.data_shards,
+            parity_shards: val.parity_shards,
+        }
+    }
 }
 
 /// Single erasure coded shard with cryptographic BLAKE3 integrity checksum.
@@ -251,7 +321,13 @@ impl ReedSolomonCoder {
     }
 
     /// Constructs the systematic (k + m) * k Cauchy encoding matrix.
-    fn build_cauchy_matrix(k: usize, m: usize) -> Matrix {
+    fn build_cauchy_matrix(k: usize, m: usize) -> Result<Matrix, ErasureError> {
+        if k == 0 || (k + m) > 128 {
+            return Err(ErasureError::InvalidProfile {
+                data: k as u8,
+                parity: m as u8,
+            });
+        }
         let total = k + m;
         let mut mat = Matrix::new(total, k);
 
@@ -261,33 +337,31 @@ impl ReedSolomonCoder {
         }
 
         // Cauchy matrix for parity shards: k..k+m
+        // Because k + m <= 128:
+        // row in [k, k+m) < 128 has bit 7 clear (row < 128).
+        // x = row ^ 0x80 has bit 7 set (x >= 128).
+        // d in [0, k) < 128 has bit 7 clear (y < 128).
+        // Therefore x != y and diff = x ^ y is strictly non-zero in GF(2^8).
         for p in 0..m {
             let row = k + p;
             let x = (row as u8) ^ 0x80; // disjoint evaluation set
             for d in 0..k {
                 let y = d as u8;
                 let diff = x ^ y;
-                // diff is non-zero because x has bit 7 set and y does not (for k, m <= 128)
-                let inv = GF.inv(diff).expect("diff is non-zero");
+                let inv = GF.inv(diff).ok_or(ErasureError::SingularMatrix)?;
                 mat.set(row, d, inv);
             }
         }
 
-        mat
+        Ok(mat)
     }
 }
 
 impl ErasureCoder for ReedSolomonCoder {
     fn encode(&self, payload: &[u8], profile: RsProfile) -> Result<Vec<Shard>, ErasureError> {
-        let k = profile.data_shards as usize;
-        let m = profile.parity_shards as usize;
-
-        if k == 0 || (k + m) > 256 {
-            return Err(ErasureError::InvalidProfile {
-                data: profile.data_shards,
-                parity: profile.parity_shards,
-            });
-        }
+        let v_profile = ValidatedRsProfile::try_from(profile)?;
+        let k = v_profile.data_shards as usize;
+        let m = v_profile.parity_shards as usize;
 
         // Shard size rounded up to multiple of k
         let shard_len = payload.len().div_ceil(k).max(1);
@@ -306,7 +380,7 @@ impl ErasureCoder for ReedSolomonCoder {
         }
 
         // Compute parity shards
-        let matrix = Self::build_cauchy_matrix(k, m);
+        let matrix = Self::build_cauchy_matrix(k, m)?;
         let mut parity_shards: Vec<Vec<u8>> = Vec::with_capacity(m);
 
         for p in 0..m {
@@ -341,19 +415,24 @@ impl ErasureCoder for ReedSolomonCoder {
         original_len: usize,
         profile: RsProfile,
     ) -> Result<Vec<u8>, ErasureError> {
-        let k = profile.data_shards as usize;
-        let m = profile.parity_shards as usize;
+        let v_profile = ValidatedRsProfile::try_from(profile)?;
+        let k = v_profile.data_shards as usize;
+        let m = v_profile.parity_shards as usize;
+        let total = v_profile.total_shards();
 
-        if k == 0 || (k + m) > 256 {
-            return Err(ErasureError::InvalidProfile {
-                data: profile.data_shards,
-                parity: profile.parity_shards,
-            });
-        }
-
-        // Filter and verify shards, strictly discarding corrupt ones
+        // Validate shard indices and uniqueness, strictly discarding corrupt ones
+        let mut seen_indices = HashSet::new();
         let mut valid_shards: Vec<&Shard> = Vec::new();
         for s in shards.iter().flatten() {
+            if s.index >= total {
+                return Err(ErasureError::InvalidShardIndex {
+                    index: s.index,
+                    total,
+                });
+            }
+            if !seen_indices.insert(s.index) {
+                return Err(ErasureError::DuplicateShardIndex { index: s.index });
+            }
             if s.verify_checksum() {
                 valid_shards.push(s);
             }
@@ -395,7 +474,7 @@ impl ErasureCoder for ReedSolomonCoder {
         }
 
         // Construct submatrix for the selected shard rows
-        let full_matrix = Self::build_cauchy_matrix(k, m);
+        let full_matrix = Self::build_cauchy_matrix(k, m)?;
         let mut submatrix = Matrix::new(k, k);
         for (row_idx, s) in selected.iter().enumerate() {
             let orig_row = s.index as usize;

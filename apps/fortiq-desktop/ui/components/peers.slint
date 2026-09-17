@@ -1,0 +1,136 @@
+import { FortiqTheme } from "../theme.slint";
+import { PeerItem } from "../types.slint";
+
+export component PeersView inherits Rectangle {
+    in-out property <[PeerItem]> peers: [];
+    callback refresh-peers();
+
+    background: FortiqTheme.background;
+
+    VerticalLayout {
+        padding: FortiqTheme.spacing-lg;
+        spacing: FortiqTheme.spacing-md;
+
+        HorizontalLayout {
+            alignment: space-between;
+            Text {
+                text: "Pairs Réseau Découverts";
+                color: FortiqTheme.text-primary;
+                font-size: 18px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: 100px;
+                height: 32px;
+                border-radius: FortiqTheme.radius-sm;
+                background: ref-area.has-hover ? FortiqTheme.primary-hover : FortiqTheme.primary;
+
+                ref-area := TouchArea {
+                    clicked => { root.refresh-peers(); }
+                }
+
+                Text {
+                    text: "Actualiser";
+                    color: #ffffff;
+                    font-size: 12px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: FortiqTheme.border;
+        }
+
+        if root.peers.length == 0 : VerticalLayout {
+            alignment: center;
+            height: 150px;
+            Text {
+                text: "Aucun pair découvert sur le réseau local ou le relais.";
+                color: FortiqTheme.text-muted;
+                font-size: 14px;
+                horizontal-alignment: center;
+            }
+        }
+
+        Flickable {
+            VerticalLayout {
+                spacing: FortiqTheme.spacing-sm;
+                alignment: start;
+
+                for peer in root.peers : Rectangle {
+                    height: 64px;
+                    border-radius: FortiqTheme.radius-md;
+                    background: FortiqTheme.surface;
+                    border-width: 1px;
+                    border-color: FortiqTheme.border;
+
+                    HorizontalLayout {
+                        padding: FortiqTheme.spacing-md;
+                        alignment: space-between;
+
+                        HorizontalLayout {
+                            spacing: FortiqTheme.spacing-md;
+                            alignment: center;
+
+                            Rectangle {
+                                width: 10px;
+                                height: 10px;
+                                border-radius: 5px;
+                                background: peer.status == "online" ? FortiqTheme.success : FortiqTheme.text-muted;
+                                y: 27px;
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                Text {
+                                    text: peer.hostname != "" ? peer.hostname : "Hôte inconnu";
+                                    color: FortiqTheme.text-primary;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                }
+                                Text {
+                                    text: peer.peer_id;
+                                    color: FortiqTheme.text-muted;
+                                    font-size: 11px;
+                                    font-family: "monospace";
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: FortiqTheme.spacing-lg;
+                            alignment: center;
+
+                            Text {
+                                text: peer.os;
+                                color: FortiqTheme.text-secondary;
+                                font-size: 12px;
+                            }
+
+                            Rectangle {
+                                width: 60px;
+                                height: 22px;
+                                border-radius: FortiqTheme.radius-sm;
+                                background: FortiqTheme.surface-elevated;
+                                Text {
+                                    text: peer.transport;
+                                    color: FortiqTheme.text-primary;
+                                    font-size: 11px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

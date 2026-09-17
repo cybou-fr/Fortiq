@@ -48,17 +48,18 @@ fn test_one_payload_n_recipients_envelope_model() {
         .seal_payload(plaintext, aad)
         .expect("payload seal failed");
 
-    // Step 2: Define 3 distinct recipients with independent keys
-    let recipient_a_pk = vec![0x11; 32];
-    let recipient_a_sk = vec![0x11; 32];
+    // Step 2: Define 3 distinct recipients with genuine independent asymmetric keypairs
+    let (recipient_a_pk, recipient_a_sk) = crate::canonical::crypto::provider::generate_kem_keypair();
+    let (recipient_b_pk, recipient_b_sk) = crate::canonical::crypto::provider::generate_kem_keypair();
+    let (recipient_c_pk, recipient_c_sk) = crate::canonical::crypto::provider::generate_kem_keypair();
+
+    // Verify asymmetric invariant: public key is NOT the secret key
+    assert_ne!(recipient_a_pk, recipient_a_sk, "Public key must not equal secret key");
+    assert_ne!(recipient_b_pk, recipient_b_sk, "Public key must not equal secret key");
+    assert_ne!(recipient_c_pk, recipient_c_sk, "Public key must not equal secret key");
+
     let key_id_a = KeyId::from_bytes([0x01; 32]);
-
-    let recipient_b_pk = vec![0x22; 32];
-    let recipient_b_sk = vec![0x22; 32];
     let key_id_b = KeyId::from_bytes([0x02; 32]);
-
-    let recipient_c_pk = vec![0x33; 32];
-    let recipient_c_sk = vec![0x33; 32];
     let key_id_c = KeyId::from_bytes([0x03; 32]);
 
     // Step 3: Wrap DEK for each recipient

@@ -43,21 +43,21 @@ pub struct TicketView {
 
 /// Trait to resolve an author role from the writer key id.
 pub trait RoleResolver {
-    fn resolve_role(&self, writer_key_id: &KeyId) -> AuthorRole;
+    fn resolve_role(&self, writer_key_id: &KeyId) -> Option<AuthorRole>;
 }
 
-/// Default role resolver mapping specific client and operator keys.
+/// Role resolver mapping specific client, operator, and admin keys.
+/// Unknown keys resolve to None (fail-closed, never escalate).
+#[derive(Debug, Clone, Default)]
 pub struct SimpleRoleResolver {
     pub client_keys: HashSet<KeyId>,
     pub operator_keys: HashSet<KeyId>,
+    pub admin_keys: HashSet<KeyId>,
 }
 
 impl SimpleRoleResolver {
     pub fn new() -> Self {
-        Self {
-            client_keys: HashSet::new(),
-            operator_keys: HashSet::new(),
-        }
+        Self::default()
     }
 
     pub fn with_client(mut self, key_id: KeyId) -> Self {
@@ -69,38 +69,34 @@ impl SimpleRoleResolver {
         self.operator_keys.insert(key_id);
         self
     }
-}
 
-impl Default for SimpleRoleResolver {
-    fn default() -> Self {
-        Self::new()
+    pub fn with_admin(mut self, key_id: KeyId) -> Self {
+        self.admin_keys.insert(key_id);
+        self
     }
 }
 
 impl RoleResolver for SimpleRoleResolver {
-    fn resolve_role(&self, writer_key_id: &KeyId) -> AuthorRole {
+    fn resolve_role(&self, writer_key_id: &KeyId) -> Option<AuthorRole> {
         if self.client_keys.contains(writer_key_id) {
-            AuthorRole::Client
+            Some(AuthorRole::Client)
         } else if self.operator_keys.contains(writer_key_id) {
-            AuthorRole::Operator
+            Some(AuthorRole::Operator)
+        } else if self.admin_keys.contains(writer_key_id) {
+            Some(AuthorRole::Admin)
         } else {
-            AuthorRole::Admin
+            None
         }
     }
 }
 
-/// Permissive resolver defaulting to Client for tests/unconfigured scenarios.
-pub struct DefaultRoleResolver;
-
-impl RoleResolver for DefaultRoleResolver {
-    fn resolve_role(&self, _writer_key_id: &KeyId) -> AuthorRole {
-        AuthorRole::Client
-    }
-}
-
-/// Deterministically reduces all valid events for `ticket_id` from the `EventGraph`.
-pub fn reduce_ticket(ticket_id: TicketId, graph: &EventGraph) -> Option<TicketView> {
-    reduce_ticket_with_resolver(ticket_id, graph, &DefaultRoleResolver)
+/// Deterministically reduces all valid events for `ticket_id` from the `EventGraph` using a resolver.
+pub fn reduce_ticket(
+    ticket_id: TicketId,
+    graph: &EventGraph,
+    resolver: &impl RoleResolver,
+) -> Option<TicketView> {
+    reduce_ticket_with_resolver(ticket_id, graph, resolver)
 }
 
 /// Deterministically reduces events using an explicit author role resolver.
@@ -114,10 +110,16 @@ pub fn reduce_ticket_with_resolver(
         return None;
     }
 
-    // Optional admin canonical head filter
+    // Optional admin canonical head filter walking backward to include full ancestry
     let head_set_filter: Option<HashSet<ObjectId>> = graph
         .get_canonical_heads(&ticket_id)
-        .map(|h| h.canonical_heads.iter().copied().collect());
+        .map(|heads| {
+            let mut allowed = HashSet::new();
+            for head in &heads.canonical_heads {
+                allowed.extend(graph.get_pack_ancestors_inclusive(head));
+            }
+            allowed
+        });
 
     let mut view: Option<TicketView> = None;
 
@@ -127,7 +129,7 @@ pub fn reduce_ticket_with_resolver(
             continue;
         }
 
-        // If CanonicalHeadSet is set, ensure pack is part of the designated head set
+        // If CanonicalHeadSet is set, ensure pack is part of the designated head set or its ancestry
         if let Some(ref heads) = head_set_filter {
             if !heads.contains(&pack_id) {
                 continue;
@@ -139,11 +141,14 @@ pub fn reduce_ticket_with_resolver(
             None => continue,
         };
 
-        // Determine author role from the writer key id
-        let role = graph
+        // Determine author role from the writer key id (fail-closed)
+        let role = match graph
             .get_object(&pack_id)
-            .map(|obj| resolver.resolve_role(&obj.tbs.writer_key_id))
-            .unwrap_or(AuthorRole::Client);
+            .and_then(|obj| resolver.resolve_role(&obj.tbs.writer_key_id))
+        {
+            Some(r) => r,
+            None => continue, // Drop unauthorized/unknown writer pack completely
+        };
 
         for event in &plaintext.events {
             match event {

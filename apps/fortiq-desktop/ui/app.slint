@@ -1,0 +1,168 @@
+import { FortiqTheme } from "theme.slint";
+import { TicketItem, ChatMessageItem, AttachmentItem, PeerItem } from "types.slint";
+import { Sidebar } from "components/sidebar.slint";
+import { Topbar } from "components/topbar.slint";
+import { TicketList } from "components/ticket-list.slint";
+import { TicketDetail } from "components/ticket-detail.slint";
+import { PeersView } from "components/peers.slint";
+import { SelfSupportView } from "components/self-support.slint";
+import { SettingsView } from "components/settings.slint";
+import { OperatorUnlockDialog } from "components/operator-unlock.slint";
+import { TicketCreateDialog } from "components/ticket-create.slint";
+
+export component AppWindow inherits Window {
+    title: "FORTIQ Desktop";
+    min-width: 900px;
+    min-height: 600px;
+    preferred-width: 1100px;
+    preferred-height: 720px;
+    background: FortiqTheme.background;
+
+    // Navigation and View State
+    in-out property <int> active-tab: 0; // 0: Tickets, 1: Peers, 2: Self-support, 3: Settings
+    in-out property <string> agent-state: "offline";
+    in-out property <string> peer-id: "";
+    in-out property <string> version: "0.1.0";
+    in-out property <string> toast-message: "";
+    in-out property <bool> is-operator-unlocked: false;
+
+    // Tickets State
+    in-out property <[TicketItem]> tickets: [];
+    in-out property <string> selected-ticket-id: "";
+    in-out property <string> selected-ticket-title: "";
+    in-out property <int> selected-ticket-priority: 2;
+    in-out property <string> selected-ticket-state: "OPEN";
+    in-out property <string> selected-ticket-epoch: "";
+    in-out property <[ChatMessageItem]> ticket-messages: [];
+    in-out property <[AttachmentItem]> ticket-files: [];
+
+    // Terminal State
+    in-out property <bool> terminal-connected: false;
+    in-out property <string> terminal-text: "";
+    in-out property <string> terminal-denied: "";
+
+    // Peers State
+    in-out property <[PeerItem]> peers: [];
+
+    // Self-support State
+    in-out property <bool> db-healthy: true;
+    in-out property <bool> peers-stale: false;
+    in-out property <string> last-action-result: "";
+
+    // Settings State
+    in-out property <string> daemon-pipe: "";
+    in-out property <bool> minimize-to-tray: true;
+
+    // Modals
+    in-out property <bool> operator-dialog-open: false;
+    in-out property <bool> ticket-dialog-open: false;
+
+    // Callbacks to Rust Backend
+    callback refresh();
+    callback select-ticket(string);
+    callback create-ticket(string, int);
+    callback send-message(string);
+    callback pick-and-send-file();
+    callback start-shell();
+    callback close-shell();
+    callback revoke-shell();
+    callback send-terminal-input(string);
+    callback unlock-operator(string);
+    callback lock-operator();
+    callback run-diagnostic();
+    callback repair-database();
+    callback reset-peers();
+    callback save-settings();
+
+    HorizontalLayout {
+        // Left Navigation Sidebar
+        Sidebar {
+            active-tab <=> root.active-tab;
+            is-operator-unlocked: root.is-operator-unlocked;
+            tab-selected(idx) => { root.active-tab = idx; }
+            unlock-operator-clicked => { root.operator-dialog-open = true; }
+            lock-operator-clicked => { root.lock-operator(); }
+        }
+
+        // Main Content Area
+        VerticalLayout {
+            Topbar {
+                agent-state: root.agent-state;
+                peer-id: root.peer-id;
+                version: root.version;
+                toast-message: root.toast-message;
+                refresh-clicked => { root.refresh(); }
+            }
+
+            // Tab Views Switcher
+            if root.active-tab == 0 : HorizontalLayout {
+                // Tickets split view: Left list, right detail
+                TicketList {
+                    tickets: root.tickets;
+                    selected-ticket-id: root.selected-ticket-id;
+                    ticket-selected(id) => { root.select-ticket(id); }
+                    new-ticket-clicked => { root.ticket-dialog-open = true; }
+                }
+
+                TicketDetail {
+                    ticket-id: root.selected-ticket-id;
+                    ticket-title: root.selected-ticket-title;
+                    priority: root.selected-ticket-priority;
+                    state: root.selected-ticket-state;
+                    epoch: root.selected-ticket-epoch;
+                    messages: root.ticket-messages;
+                    files: root.ticket-files;
+                    terminal-connected: root.terminal-connected;
+                    terminal-text: root.terminal-text;
+                    terminal-denied: root.terminal-denied;
+
+                    send-message(text) => { root.send-message(text); }
+                    pick-file => { root.pick-and-send-file(); }
+                    start-shell => { root.start-shell(); }
+                    close-shell => { root.close-shell(); }
+                    revoke-shell => { root.revoke-shell(); }
+                    send-terminal-input(str) => { root.send-terminal-input(str); }
+                }
+            }
+
+            if root.active-tab == 1 : PeersView {
+                peers: root.peers;
+                refresh-peers => { root.refresh(); }
+            }
+
+            if root.active-tab == 2 : SelfSupportView {
+                db-healthy: root.db-healthy;
+                peers-stale: root.peers-stale;
+                last-action-result: root.last-action-result;
+                run-diagnostic => { root.run-diagnostic(); }
+                repair-database => { root.repair-database(); }
+                reset-peers => { root.reset-peers(); }
+            }
+
+            if root.active-tab == 3 : SettingsView {
+                daemon-pipe <=> root.daemon-pipe;
+                minimize-to-tray <=> root.minimize-to-tray;
+                save-settings => { root.save-settings(); }
+            }
+        }
+    }
+
+    // Modal Overlays
+    OperatorUnlockDialog {
+        is-open <=> root.operator-dialog-open;
+        unlock(mnemonic) => {
+            root.unlock-operator(mnemonic);
+            root.operator-dialog-open = false;
+        }
+        close => { root.operator-dialog-open = false; }
+    }
+
+    TicketCreateDialog {
+        is-open <=> root.ticket-dialog-open;
+        create(title, prio) => {
+            root.create-ticket(title, prio);
+            root.ticket-dialog-open = false;
+        }
+        close => { root.ticket-dialog-open = false; }
+    }
+}

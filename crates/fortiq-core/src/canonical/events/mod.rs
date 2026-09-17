@@ -20,10 +20,10 @@ pub mod tombstone;
 mod tests;
 
 pub use batcher::{BatchPolicy, EventPackBatcher, FlushDecision};
-pub use graph::{EventGraph, EventGraphError};
+pub use graph::{EventGraph, EventGraphError, VerifiedEventPack};
 pub use reducer::{
-    reduce_ticket, reduce_ticket_with_resolver, AttachmentView, ChatMessageView,
-    DefaultRoleResolver, RoleResolver, SimpleRoleResolver, TicketView,
+    reduce_ticket, reduce_ticket_with_resolver, AttachmentView, ChatMessageView, RoleResolver,
+    SimpleRoleResolver, TicketView,
 };
 pub use safety::{AuthorRole, TicketLifecycle, TicketSafetyState};
 pub use search::{LocalSearchIndex, MatchType, SearchResult};

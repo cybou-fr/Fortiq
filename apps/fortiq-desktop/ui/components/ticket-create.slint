@@ -1,0 +1,201 @@
+import { FortiqTheme } from "../theme.slint";
+
+export component TicketCreateDialog inherits Rectangle {
+    in-out property <bool> is-open: false;
+    in-out property <string> ticket-title: "";
+    in-out property <int> priority: 2;
+    callback create(string, int);
+    callback close();
+
+    if root.is-open : Rectangle {
+        background: #000000aa;
+
+        TouchArea {
+            // Modal backdrop interceptor
+        }
+
+        Rectangle {
+            width: 440px;
+            height: 260px;
+            border-radius: FortiqTheme.radius-lg;
+            background: FortiqTheme.surface;
+            border-width: 1px;
+            border-color: FortiqTheme.border;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+
+            VerticalLayout {
+                padding: FortiqTheme.spacing-xl;
+                spacing: FortiqTheme.spacing-md;
+
+                HorizontalLayout {
+                    alignment: space-between;
+                    Text {
+                        text: "Créer un Nouveau Ticket";
+                        color: FortiqTheme.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                    }
+
+                    Rectangle {
+                        width: 24px;
+                        height: 24px;
+                        TouchArea { clicked => { root.close(); } }
+                        Text {
+                            text: "✕";
+                            color: FortiqTheme.text-muted;
+                            font-size: 14px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: FortiqTheme.spacing-xs;
+                    Text {
+                        text: "Titre du Ticket";
+                        color: FortiqTheme.text-secondary;
+                        font-size: 12px;
+                        font-weight: 600;
+                    }
+                    Rectangle {
+                        height: 38px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: FortiqTheme.background;
+                        border-width: 1px;
+                        border-color: FortiqTheme.border;
+
+                        HorizontalLayout {
+                            padding-left: FortiqTheme.spacing-sm;
+                            padding-right: FortiqTheme.spacing-sm;
+
+                            TextInput {
+                                text <=> root.ticket-title;
+                                color: FortiqTheme.text-primary;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: FortiqTheme.spacing-sm;
+                    alignment: start;
+                    Text {
+                        text: "Priorité:";
+                        color: FortiqTheme.text-secondary;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        width: 65px;
+                        height: 28px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: root.priority == 1 ? FortiqTheme.primary : FortiqTheme.surface-elevated;
+                        TouchArea { clicked => { root.priority = 1; } }
+                        Text {
+                            text: "Basse";
+                            color: #ffffff;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 65px;
+                        height: 28px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: root.priority == 2 ? FortiqTheme.primary : FortiqTheme.surface-elevated;
+                        TouchArea { clicked => { root.priority = 2; } }
+                        Text {
+                            text: "Normale";
+                            color: #ffffff;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 65px;
+                        height: 28px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: root.priority == 3 ? FortiqTheme.primary : FortiqTheme.surface-elevated;
+                        TouchArea { clicked => { root.priority = 3; } }
+                        Text {
+                            text: "Haute";
+                            color: #ffffff;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 65px;
+                        height: 28px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: root.priority == 4 ? FortiqTheme.danger : FortiqTheme.surface-elevated;
+                        TouchArea { clicked => { root.priority = 4; } }
+                        Text {
+                            text: "Critique";
+                            color: #ffffff;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: FortiqTheme.spacing-md;
+                    alignment: end;
+
+                    Rectangle {
+                        width: 90px;
+                        height: 34px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: FortiqTheme.surface-elevated;
+                        TouchArea { clicked => { root.close(); } }
+                        Text {
+                            text: "Annuler";
+                            color: FortiqTheme.text-primary;
+                            font-size: 12px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 100px;
+                        height: 34px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: root.ticket-title != "" ? FortiqTheme.primary : FortiqTheme.surface-elevated;
+                        TouchArea {
+                            clicked => {
+                                if root.ticket-title != "" {
+                                    root.create(root.ticket-title, root.priority);
+                                    root.ticket-title = "";
+                                    root.close();
+                                }
+                            }
+                        }
+                        Text {
+                            text: "Créer";
+                            color: #ffffff;
+                            font-size: 12px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

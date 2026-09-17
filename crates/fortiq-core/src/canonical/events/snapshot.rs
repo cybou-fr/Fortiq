@@ -10,7 +10,6 @@ use crate::canonical::events::graph::EventGraph;
 use crate::canonical::events::reducer::{
     AttachmentView, ChatMessageView, RoleResolver, TicketView,
 };
-use crate::canonical::events::safety::AuthorRole;
 use crate::canonical::records::LogicalEvent;
 use crate::canonical::types::{ObjectId, TicketId};
 use serde::{Deserialize, Serialize};
@@ -71,11 +70,14 @@ pub fn reduce_ticket_from_snapshot(
             None => continue,
         };
 
-        // Determine author role from the writer key id
-        let role = graph
+        // Determine author role from the writer key id (fail-closed)
+        let role = match graph
             .get_object(&pack_id)
-            .map(|obj| resolver.resolve_role(&obj.tbs.writer_key_id))
-            .unwrap_or(AuthorRole::Client);
+            .and_then(|obj| resolver.resolve_role(&obj.tbs.writer_key_id))
+        {
+            Some(r) => r,
+            None => continue,
+        };
 
         // Apply tail events on top of the snapshot
         for event in &plaintext.events {

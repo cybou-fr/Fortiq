@@ -1,5 +1,5 @@
 use crate::canonical::events::batcher::{BatchPolicy, EventPackBatcher, FlushDecision};
-use crate::canonical::events::graph::EventGraph;
+use crate::canonical::events::graph::{EventGraph, VerifiedEventPack};
 use crate::canonical::events::reducer::{reduce_ticket_with_resolver, SimpleRoleResolver};
 use crate::canonical::events::safety::{TicketLifecycle, TicketSafetyState};
 use crate::canonical::events::stream::{StreamCursor, StreamError};
@@ -35,6 +35,14 @@ fn dummy_signed_object(
         tbs,
         signature: vec![0xaa; 64],
     }
+}
+
+fn append_pack_unchecked(
+    graph: &mut EventGraph,
+    signed_obj: SignedObject,
+    plaintext: EventPackPlaintext,
+) -> Result<ObjectId, crate::canonical::events::graph::EventGraphError> {
+    graph.append_pack(VerifiedEventPack::new_unchecked(signed_obj, plaintext)?)
 }
 
 #[test]
@@ -210,8 +218,7 @@ fn test_reducer_full_ticket_reconstruction_and_tombstone() {
         }],
     };
     let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
-    let pack1_id = graph
-        .append_pack(pack1_signed, pack1_plain, stream_id, 1, None)
+    let pack1_id = append_pack_unchecked(&mut graph, pack1_signed, pack1_plain)
         .expect("pack 1 append failed");
 
     // Pack 2: ChatMessage + FileAttached
@@ -236,8 +243,7 @@ fn test_reducer_full_ticket_reconstruction_and_tombstone() {
         ],
     };
     let pack2_signed = dummy_signed_object(client_key, stream_id, 2, Some(pack1_id), 200);
-    let pack2_id = graph
-        .append_pack(pack2_signed, pack2_plain, stream_id, 2, Some(pack1_id))
+    let pack2_id = append_pack_unchecked(&mut graph, pack2_signed, pack2_plain)
         .expect("pack 2 append failed");
 
     // Reduce: both messages and attachments present
@@ -291,9 +297,7 @@ fn test_canonical_head_set_cannot_override_client_safety_revocation() {
         }],
     };
     let pack1_signed = dummy_signed_object(client_key, stream_client, 1, None, 100);
-    let pack1_id = graph
-        .append_pack(pack1_signed, pack1_plain, stream_client, 1, None)
-        .expect("pack 1");
+    let pack1_id = append_pack_unchecked(&mut graph, pack1_signed, pack1_plain).expect("pack 1");
 
     // Pack 2: Client revokes access immediately
     let mut epoch_bytes = [0u8; 16];
@@ -309,9 +313,7 @@ fn test_canonical_head_set_cannot_override_client_safety_revocation() {
         }],
     };
     let pack2_signed = dummy_signed_object(client_key, stream_client, 2, Some(pack1_id), 100);
-    let pack2_id = graph
-        .append_pack(pack2_signed, pack2_plain, stream_client, 2, Some(pack1_id))
-        .expect("pack 2");
+    let pack2_id = append_pack_unchecked(&mut graph, pack2_signed, pack2_plain).expect("pack 2");
 
     // Pack 3: Operator tries to set InProgress
     let pack3_plain = EventPackPlaintext {
@@ -326,9 +328,7 @@ fn test_canonical_head_set_cannot_override_client_safety_revocation() {
         }],
     };
     let pack3_signed = dummy_signed_object(operator_key, stream_op, 1, None, 100);
-    let pack3_id = graph
-        .append_pack(pack3_signed, pack3_plain, stream_op, 1, None)
-        .expect("pack 3");
+    let pack3_id = append_pack_unchecked(&mut graph, pack3_signed, pack3_plain).expect("pack 3");
 
     // Admin attempts to pick Pack 3 as CanonicalHeadSet
     let head_set = CanonicalHeadSet::new(
@@ -376,9 +376,7 @@ fn test_chat_message_revision_audit_trail() {
         ],
     };
     let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
-    let pack1_id = graph
-        .append_pack(pack1_signed, pack1_plain, stream_id, 1, None)
-        .expect("pack 1");
+    let pack1_id = append_pack_unchecked(&mut graph, pack1_signed, pack1_plain).expect("pack 1");
 
     // Pack 2: ChatMessageRevised
     let pack2_plain = EventPackPlaintext {
@@ -393,9 +391,7 @@ fn test_chat_message_revision_audit_trail() {
         }],
     };
     let pack2_signed = dummy_signed_object(client_key, stream_id, 2, Some(pack1_id), 100);
-    graph
-        .append_pack(pack2_signed, pack2_plain, stream_id, 2, Some(pack1_id))
-        .expect("pack 2");
+    append_pack_unchecked(&mut graph, pack2_signed, pack2_plain).expect("pack 2");
 
     let view = reduce_ticket_with_resolver(ticket_id, &graph, &resolver).expect("ticket view");
     assert_eq!(view.messages.len(), 1);
@@ -441,9 +437,7 @@ fn test_ticket_snapshot_cold_start_acceleration() {
         ],
     };
     let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
-    let pack1_id = graph
-        .append_pack(pack1_signed, pack1_plain, stream_id, 1, None)
-        .expect("pack 1");
+    let pack1_id = append_pack_unchecked(&mut graph, pack1_signed, pack1_plain).expect("pack 1");
 
     // Pack 2: message 2
     let pack2_plain = EventPackPlaintext {
@@ -458,9 +452,7 @@ fn test_ticket_snapshot_cold_start_acceleration() {
         }],
     };
     let pack2_signed = dummy_signed_object(client_key, stream_id, 2, Some(pack1_id), 100);
-    let pack2_id = graph
-        .append_pack(pack2_signed, pack2_plain, stream_id, 2, Some(pack1_id))
-        .expect("pack 2");
+    let pack2_id = append_pack_unchecked(&mut graph, pack2_signed, pack2_plain).expect("pack 2");
 
     // Materialize state and create Snapshot
     let view_before = reduce_ticket_with_resolver(ticket_id, &graph, &resolver).expect("view");
@@ -483,9 +475,7 @@ fn test_ticket_snapshot_cold_start_acceleration() {
         }],
     };
     let pack3_signed = dummy_signed_object(client_key, stream_id, 3, Some(pack2_id), 100);
-    let pack3_id = graph
-        .append_pack(pack3_signed, pack3_plain, stream_id, 3, Some(pack2_id))
-        .expect("pack 3");
+    let pack3_id = append_pack_unchecked(&mut graph, pack3_signed, pack3_plain).expect("pack 3");
 
     // Fast cold start: apply tail events on top of the snapshot
     let view_accelerated = reduce_ticket_from_snapshot(&snapshot, &graph, &resolver);
@@ -614,4 +604,192 @@ fn test_eventpack_overhead_amortization_proof() {
         "EventPack must achieve >60% overhead reduction vs individual messages; got ratio {}",
         overhead_ratio
     );
+}
+
+#[test]
+fn test_verified_event_pack_typestate_and_signature_verification() {
+    use crate::canonical::signing::{SigningError, Verifier};
+
+    struct TestVerifier {
+        expected_sig: Vec<u8>,
+    }
+    impl Verifier for TestVerifier {
+        fn verify(
+            &self,
+            _domain_separated_data: &[u8],
+            signature: &[u8],
+        ) -> Result<(), SigningError> {
+            if signature == self.expected_sig.as_slice() {
+                Ok(())
+            } else {
+                Err(SigningError::VerificationFailed(
+                    "signature mismatch".into(),
+                ))
+            }
+        }
+    }
+
+    let mut graph = EventGraph::new();
+    let stream_id = StreamId::from_bytes([0x01; 16]);
+    let client_key = KeyId::from_bytes([0x01; 32]);
+    let signed_obj = dummy_signed_object(client_key, stream_id, 1, None, 100);
+    let plaintext = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: None,
+        ticket_crypto_epoch: None,
+        pack_nonce: [0x01; 16],
+        events: vec![],
+    };
+
+    // Case 1: Bad signature -> VerifiedEventPack::verify returns Err
+    let bad_verifier = TestVerifier {
+        expected_sig: vec![0xff; 64],
+    };
+    let err = VerifiedEventPack::verify(signed_obj.clone(), plaintext.clone(), &bad_verifier);
+    assert!(err.is_err());
+
+    // Case 2: Good signature -> VerifiedEventPack::verify returns Ok(verified)
+    let good_verifier = TestVerifier {
+        expected_sig: signed_obj.signature.clone(),
+    };
+    let verified = VerifiedEventPack::verify(signed_obj, plaintext, &good_verifier)
+        .expect("verification ok");
+    let pack_id = graph.append_pack(verified).expect("append verified pack");
+    assert!(graph.get_object(&pack_id).is_some());
+}
+
+#[test]
+fn test_simple_role_resolver_fail_closed() {
+    let mut graph = EventGraph::new();
+    let ticket_id = TicketId::from_bytes([0x77; 16]);
+    let stream_id = StreamId::from_bytes([0x01; 16]);
+    let client_key = KeyId::from_bytes([0x01; 32]);
+    let unknown_key = KeyId::from_bytes([0x99; 32]);
+
+    // Resolver ONLY recognizes client_key
+    let resolver = SimpleRoleResolver::new().with_client(client_key);
+
+    // Pack 1: Client creates ticket
+    let pack1_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x01; 16],
+        events: vec![LogicalEvent::TicketCreated {
+            ticket_id,
+            title: "Authorized Ticket".into(),
+            initial_epoch: 100,
+        }],
+    };
+    let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
+    let pack1_id = append_pack_unchecked(&mut graph, pack1_signed, pack1_plain).expect("pack 1");
+
+    // Pack 2: Unknown key attempts to inject a message and change ticket state
+    let pack2_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x02; 16],
+        events: vec![
+            LogicalEvent::ChatMessage {
+                ticket_id,
+                seq: 1,
+                body: "Malicious injection".into(),
+            },
+            LogicalEvent::TicketStateChanged {
+                ticket_id,
+                new_state: 3, // Closed
+                epoch: 1,
+            },
+        ],
+    };
+    let pack2_signed = dummy_signed_object(unknown_key, stream_id, 2, Some(pack1_id), 100);
+    append_pack_unchecked(&mut graph, pack2_signed, pack2_plain)
+        .expect("pack 2 append into graph");
+
+    // Reduce: The unauthorized pack MUST be completely dropped by the fail-closed resolver!
+    let view = reduce_ticket_with_resolver(ticket_id, &graph, &resolver).expect("ticket view");
+    assert_eq!(view.title, "Authorized Ticket");
+    assert_eq!(
+        view.messages.len(),
+        0,
+        "Unauthorized message must be dropped"
+    );
+    assert_eq!(view.incorporated_packs, vec![pack1_id]);
+}
+
+#[test]
+fn test_canonical_head_set_ancestry_retention() {
+    let mut graph = EventGraph::new();
+    let ticket_id = TicketId::from_bytes([0x88; 16]);
+    let stream_id = StreamId::from_bytes([0x01; 16]);
+    let client_key = KeyId::from_bytes([0x01; 32]);
+    let resolver = SimpleRoleResolver::new().with_client(client_key);
+
+    // Pack 1: Create ticket
+    let pack1_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x01; 16],
+        events: vec![LogicalEvent::TicketCreated {
+            ticket_id,
+            title: "Ancestry Ticket".into(),
+            initial_epoch: 100,
+        }],
+    };
+    let pack1_signed = dummy_signed_object(client_key, stream_id, 1, None, 100);
+    let pack1_id = append_pack_unchecked(&mut graph, pack1_signed, pack1_plain).expect("pack 1");
+
+    // Pack 2: First message (parent = pack1)
+    let pack2_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x02; 16],
+        events: vec![LogicalEvent::ChatMessage {
+            ticket_id,
+            seq: 1,
+            body: "First message in ancestor chain".into(),
+        }],
+    };
+    let pack2_signed = dummy_signed_object(client_key, stream_id, 2, Some(pack1_id), 100);
+    let pack2_id = append_pack_unchecked(&mut graph, pack2_signed, pack2_plain).expect("pack 2");
+
+    // Pack 3: Second message (parent = pack2)
+    let pack3_plain = EventPackPlaintext {
+        schema_version: 1,
+        ticket_id: Some(ticket_id),
+        ticket_crypto_epoch: Some(1),
+        pack_nonce: [0x03; 16],
+        events: vec![LogicalEvent::ChatMessage {
+            ticket_id,
+            seq: 2,
+            body: "Second message at the head".into(),
+        }],
+    };
+    let pack3_signed = dummy_signed_object(client_key, stream_id, 3, Some(pack2_id), 100);
+    let pack3_id = append_pack_unchecked(&mut graph, pack3_signed, pack3_plain).expect("pack 3");
+
+    // Admin sets CanonicalHeadSet containing ONLY the leaf head (pack3_id)
+    let head_set = CanonicalHeadSet::new(
+        ticket_id,
+        vec![pack3_id], // ONLY the tip/leaf
+        crate::canonical::types::EntityId::from_bytes([0x99; 32]),
+        3000,
+    );
+    graph.set_canonical_heads(head_set);
+
+    // Reduction MUST walk ancestry backwards from pack3 and include pack1 and pack2!
+    let view = reduce_ticket_with_resolver(ticket_id, &graph, &resolver)
+        .expect("ticket view must exist despite head set only containing leaf");
+    assert_eq!(view.title, "Ancestry Ticket");
+    assert_eq!(
+        view.messages.len(),
+        2,
+        "Both ancestor messages must be present"
+    );
+    assert_eq!(view.messages[0].body, "First message in ancestor chain");
+    assert_eq!(view.messages[1].body, "Second message at the head");
+    assert_eq!(view.incorporated_packs, vec![pack1_id, pack2_id, pack3_id]);
 }

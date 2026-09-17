@@ -11,7 +11,8 @@
 //! - OwnerSegmentMasterSeed remains only in unlocked memory session.
 
 use hkdf::Hkdf;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
+use std::sync::OnceLock;
 use thiserror::Error;
 
 use crate::canonical::crypto::keys::{
@@ -23,10 +24,116 @@ pub const ROOT_SIGNING_INFO: &[u8] = b"FORTIQ-OWNER-ROOT-SIGNING-v1:";
 pub const SEGMENT_MASTER_INFO: &[u8] = b"FORTIQ-OWNER-SEGMENT-MASTER-v1:";
 pub const OPERATOR_SESSION_INFO: &[u8] = b"FORTIQ-OPERATOR-SESSION-v1:";
 
+static WORDLIST: OnceLock<Vec<&'static str>> = OnceLock::new();
+
+/// Returns the official BIP-39 English 2048-word dictionary.
+pub fn get_wordlist() -> &'static [&'static str] {
+    WORDLIST.get_or_init(|| {
+        include_str!("bip39_english.txt")
+            .lines()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect()
+    })
+}
+
+/// Resolves a word to its 11-bit dictionary index [0, 2047] via binary search.
+pub fn word_to_index(word: &str) -> Option<u16> {
+    let words = get_wordlist();
+    words.binary_search(&word).ok().map(|idx| idx as u16)
+}
+
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum MnemonicError {
+    #[error("invalid word count: expected 24 words, got {0}")]
+    InvalidWordCount(usize),
+    #[error("unknown word in mnemonic phrase: '{0}'")]
+    UnknownWord(String),
+    #[error("invalid mnemonic checksum")]
+    InvalidChecksum,
     #[error("HKDF key derivation failed: {0}")]
     DerivationFailed(String),
+}
+
+/// Converts a 24-word BIP-39 mnemonic phrase into validated 256-bit MnemonicEntropy.
+pub fn parse_mnemonic_phrase(phrase: &str) -> Result<MnemonicEntropy, MnemonicError> {
+    let words: Vec<&str> = phrase.split_whitespace().collect();
+    if words.len() != 24 {
+        return Err(MnemonicError::InvalidWordCount(words.len()));
+    }
+
+    let mut indices = [0u16; 24];
+    for (i, word) in words.iter().enumerate() {
+        let idx = word_to_index(word).ok_or_else(|| MnemonicError::UnknownWord(word.to_string()))?;
+        indices[i] = idx;
+    }
+
+    let mut bits = [false; 264];
+    for (i, &word_idx) in indices.iter().enumerate() {
+        for bit in 0..11 {
+            bits[i * 11 + bit] = ((word_idx >> (10 - bit)) & 1) == 1;
+        }
+    }
+
+    let mut bytes = [0u8; 33];
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        let mut b = 0u8;
+        for bit in 0..8 {
+            if bits[i * 8 + bit] {
+                b |= 1 << (7 - bit);
+            }
+        }
+        *byte = b;
+    }
+
+    let mut entropy_bytes = [0u8; 32];
+    entropy_bytes.copy_from_slice(&bytes[..32]);
+    let expected_checksum = bytes[32];
+
+    let mut hasher = Sha256::new();
+    hasher.update(entropy_bytes);
+    let hash: [u8; 32] = hasher.finalize().into();
+    let actual_checksum = hash[0];
+
+    if actual_checksum != expected_checksum {
+        return Err(MnemonicError::InvalidChecksum);
+    }
+
+    Ok(MnemonicEntropy::new(entropy_bytes))
+}
+
+/// Encodes a 256-bit MnemonicEntropy into a 24-word BIP-39 mnemonic phrase.
+pub fn entropy_to_mnemonic(entropy: &MnemonicEntropy) -> String {
+    let entropy_bytes = entropy.as_bytes();
+    let mut hasher = Sha256::new();
+    hasher.update(entropy_bytes);
+    let hash: [u8; 32] = hasher.finalize().into();
+    let checksum = hash[0];
+
+    let mut bytes = [0u8; 33];
+    bytes[..32].copy_from_slice(entropy_bytes);
+    bytes[32] = checksum;
+
+    let mut bits = [false; 264];
+    for (i, &b) in bytes.iter().enumerate() {
+        for bit in 0..8 {
+            bits[i * 8 + bit] = ((b >> (7 - bit)) & 1) == 1;
+        }
+    }
+
+    let wordlist = get_wordlist();
+    let mut words = Vec::with_capacity(24);
+    for i in 0..24 {
+        let mut idx = 0u16;
+        for bit in 0..11 {
+            if bits[i * 11 + bit] {
+                idx |= 1 << (10 - bit);
+            }
+        }
+        words.push(wordlist[idx as usize]);
+    }
+
+    words.join(" ")
 }
 
 /// Helper for deriving domain-separated keys from raw mnemonic entropy.

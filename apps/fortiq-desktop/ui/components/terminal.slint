@@ -1,0 +1,182 @@
+import { FortiqTheme } from "../theme.slint";
+
+export component TerminalPane inherits Rectangle {
+    in-out property <bool> is-connected: false;
+    in-out property <string> terminal-text: "Session P2P liée au ticket sélectionné.\nL'accès nécessite le consentement explicite du client.\nCliquez sur 'Démarrer le shell' pour initier la session.";
+    in-out property <string> denied-message: "";
+    in-out property <string> input-line: "";
+    callback start-shell-clicked();
+    callback close-shell-clicked();
+    callback revoke-shell-clicked();
+    callback send-input(string);
+
+    background: #09111d;
+
+    VerticalLayout {
+        // Terminal Header Bar
+        Rectangle {
+            height: 48px;
+            background: #101a2a;
+
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                width: 100%;
+                background: #203048;
+            }
+
+            HorizontalLayout {
+                padding-left: FortiqTheme.spacing-md;
+                padding-right: FortiqTheme.spacing-md;
+                spacing: FortiqTheme.spacing-md;
+                alignment: space-between;
+
+                HorizontalLayout {
+                    spacing: FortiqTheme.spacing-sm;
+                    alignment: center;
+
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: root.is-connected ? FortiqTheme.success : FortiqTheme.text-muted;
+                        y: 20px;
+                    }
+
+                    Text {
+                        text: "Session PTY Sécurisée";
+                        color: #eef4fb;
+                        font-size: 13px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: FortiqTheme.spacing-sm;
+                    alignment: center;
+
+                    // Toggle Shell Button
+                    Rectangle {
+                        width: 130px;
+                        height: 30px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: root.is-connected ? FortiqTheme.surface-elevated : FortiqTheme.primary;
+
+                        toggle-touch := TouchArea {
+                            clicked => {
+                                if root.is-connected {
+                                    root.close-shell-clicked();
+                                } else {
+                                    root.start-shell-clicked();
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: root.is-connected ? "Fermer le shell" : "Démarrer le shell";
+                            color: #ffffff;
+                            font-size: 12px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // Emergency Revocation Button
+                    Rectangle {
+                        width: 140px;
+                        height: 30px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: revoke-touch.has-hover ? FortiqTheme.danger-hover : FortiqTheme.danger;
+
+                        revoke-touch := TouchArea {
+                            clicked => { root.revoke-shell-clicked(); }
+                        }
+
+                        Text {
+                            text: "Révocation d'urgence";
+                            color: #ffffff;
+                            font-size: 11px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Denied banner (if any)
+        if root.denied-message != "" : Rectangle {
+            height: 32px;
+            background: #701a1e;
+            HorizontalLayout {
+                padding-left: FortiqTheme.spacing-md;
+                alignment: start;
+                Text {
+                    text: root.denied-message;
+                    color: #ffffff;
+                    font-size: 12px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Terminal screen text display
+        Flickable {
+            HorizontalLayout {
+                padding: FortiqTheme.spacing-md;
+                Text {
+                    text: root.terminal-text;
+                    color: #d1d5db;
+                    font-family: "Courier New, monospace";
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        // Interactive terminal input line
+        if root.is-connected : Rectangle {
+            height: 36px;
+            background: #101a2a;
+
+            Rectangle {
+                y: 0px;
+                height: 1px;
+                width: 100%;
+                background: #203048;
+            }
+
+            HorizontalLayout {
+                padding-left: FortiqTheme.spacing-sm;
+                padding-right: FortiqTheme.spacing-sm;
+                spacing: FortiqTheme.spacing-xs;
+
+                Text {
+                    text: ">";
+                    color: FortiqTheme.primary;
+                    font-size: 14px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+
+                term-input := TextInput {
+                    text <=> root.input-line;
+                    color: #ffffff;
+                    font-family: "monospace";
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    accepted => {
+                        if root.input-line != "" {
+                            root.send-input(root.input-line + "\n");
+                            root.input-line = "";
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

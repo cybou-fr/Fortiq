@@ -6,10 +6,12 @@
 use crate::canonical::events::stream::{StreamAppendEntry, StreamCursor, StreamError};
 use crate::canonical::events::tombstone::{CanonicalHeadSet, Tombstone};
 use crate::canonical::records::{EventPackPlaintext, SignedObject};
-use crate::canonical::signing::{compute_tbs_bytes, derive_object_id};
+use crate::canonical::signing::{compute_tbs_bytes, construct_signing_payload, derive_object_id};
 use crate::canonical::types::{ObjectId, StreamId, TicketId};
 use std::collections::HashMap;
 use thiserror::Error;
+
+use std::collections::HashSet;
 
 #[derive(Debug, Error)]
 pub enum EventGraphError {
@@ -17,8 +19,74 @@ pub enum EventGraphError {
     Serialization(String),
     #[error("Stream validation error: {0}")]
     Stream(#[from] StreamError),
+    #[error("Signature verification error: {0}")]
+    SignatureVerification(String),
     #[error("Object already exists with id {0}")]
     DuplicateObject(ObjectId),
+}
+
+/// Typestate representing an EventPack whose cryptographic signature and TBS binding
+/// have been strictly verified against the writer's key before ingestion into EventGraph.
+#[derive(Debug, Clone)]
+pub struct VerifiedEventPack {
+    pub signed_obj: SignedObject,
+    pub plaintext: EventPackPlaintext,
+    pub stream_id: StreamId,
+    pub seq: u64,
+    pub prev_pack_id: Option<ObjectId>,
+    pub object_id: ObjectId,
+}
+
+impl VerifiedEventPack {
+    /// Cryptographically verifies signed_obj signature and TBS binding before creating a VerifiedEventPack.
+    pub fn verify(
+        signed_obj: SignedObject,
+        plaintext: EventPackPlaintext,
+        verifier: &impl crate::canonical::signing::Verifier,
+    ) -> Result<Self, EventGraphError> {
+        let tbs_bytes = compute_tbs_bytes(&signed_obj.tbs)
+            .map_err(|e| EventGraphError::Serialization(e.to_string()))?;
+        let payload = construct_signing_payload(&tbs_bytes);
+        verifier
+            .verify(&payload, &signed_obj.signature)
+            .map_err(|e| EventGraphError::SignatureVerification(e.to_string()))?;
+
+        let object_id = derive_object_id(&tbs_bytes, &signed_obj.signature);
+        let stream_id = signed_obj.tbs.writer_stream_id;
+        let seq = signed_obj.tbs.writer_seq;
+        let prev_pack_id = signed_obj.tbs.prev_pack_id;
+
+        Ok(Self {
+            signed_obj,
+            plaintext,
+            stream_id,
+            seq,
+            prev_pack_id,
+            object_id,
+        })
+    }
+
+    /// For internal migration and trusted testing builders.
+    pub fn new_unchecked(
+        signed_obj: SignedObject,
+        plaintext: EventPackPlaintext,
+    ) -> Result<Self, EventGraphError> {
+        let tbs_bytes = compute_tbs_bytes(&signed_obj.tbs)
+            .map_err(|e| EventGraphError::Serialization(e.to_string()))?;
+        let object_id = derive_object_id(&tbs_bytes, &signed_obj.signature);
+        let stream_id = signed_obj.tbs.writer_stream_id;
+        let seq = signed_obj.tbs.writer_seq;
+        let prev_pack_id = signed_obj.tbs.prev_pack_id;
+
+        Ok(Self {
+            signed_obj,
+            plaintext,
+            stream_id,
+            seq,
+            prev_pack_id,
+            object_id,
+        })
+    }
 }
 
 /// In-memory append-only Event Graph.
@@ -32,6 +100,8 @@ pub struct EventGraph {
     stream_chains: HashMap<StreamId, Vec<StreamAppendEntry>>,
     /// Active sequence cursors per writer stream.
     stream_cursors: HashMap<StreamId, StreamCursor>,
+    /// Predecessor parent map for ancestry graph traversal.
+    parent_packs: HashMap<ObjectId, Option<ObjectId>>,
     /// Index from TicketId to associated pack ObjectIds in append order.
     ticket_packs: HashMap<TicketId, Vec<ObjectId>>,
     /// Active tombstones by target ObjectId.
@@ -45,18 +115,9 @@ impl EventGraph {
         Self::default()
     }
 
-    /// Appends a new verified EventPack into the graph and its writer stream.
-    pub fn append_pack(
-        &mut self,
-        signed_obj: SignedObject,
-        plaintext: EventPackPlaintext,
-        stream_id: StreamId,
-        seq: u64,
-        prev_pack_id: Option<ObjectId>,
-    ) -> Result<ObjectId, EventGraphError> {
-        let tbs_bytes = compute_tbs_bytes(&signed_obj.tbs)
-            .map_err(|e| EventGraphError::Serialization(e.to_string()))?;
-        let object_id = derive_object_id(&tbs_bytes, &signed_obj.signature);
+    /// Appends a verified EventPack into the graph and updates its writer stream cursor.
+    pub fn append_pack(&mut self, pack: VerifiedEventPack) -> Result<ObjectId, EventGraphError> {
+        let object_id = pack.object_id;
 
         if self.objects.contains_key(&object_id) {
             return Err(EventGraphError::DuplicateObject(object_id));
@@ -65,16 +126,19 @@ impl EventGraph {
         // Validate and update stream cursor
         let cursor = self
             .stream_cursors
-            .entry(stream_id)
-            .or_insert_with(|| StreamCursor::new(stream_id));
+            .entry(pack.stream_id)
+            .or_insert_with(|| StreamCursor::new(pack.stream_id));
 
-        let entry = cursor.accept_append(seq, prev_pack_id, object_id)?;
+        let entry = cursor.accept_append(pack.seq, pack.prev_pack_id, object_id)?;
 
         // Record stream append
-        self.stream_chains.entry(stream_id).or_default().push(entry);
+        self.stream_chains.entry(pack.stream_id).or_default().push(entry);
+
+        // Record parent relationship for ancestry graph traversal
+        self.parent_packs.insert(object_id, pack.prev_pack_id);
 
         // Record ticket indexing
-        if let Some(ticket_id) = plaintext.ticket_id {
+        if let Some(ticket_id) = pack.plaintext.ticket_id {
             self.ticket_packs
                 .entry(ticket_id)
                 .or_default()
@@ -82,10 +146,23 @@ impl EventGraph {
         }
 
         // Store object and plaintext
-        self.objects.insert(object_id, signed_obj);
-        self.plaintexts.insert(object_id, plaintext);
+        self.objects.insert(object_id, pack.signed_obj);
+        self.plaintexts.insert(object_id, pack.plaintext);
 
         Ok(object_id)
+    }
+
+    /// Returns the set containing the given pack id and all its ancestors recursively.
+    pub fn get_pack_ancestors_inclusive(&self, head_id: &ObjectId) -> HashSet<ObjectId> {
+        let mut ancestors = HashSet::new();
+        let mut current = Some(*head_id);
+        while let Some(id) = current {
+            if !ancestors.insert(id) {
+                break; // cycle protection
+            }
+            current = self.parent_packs.get(&id).copied().flatten();
+        }
+        ancestors
     }
 
     /// Returns a reference to the signed object if present.

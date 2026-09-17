@@ -1,0 +1,109 @@
+import { FortiqTheme } from "../theme.slint";
+
+export component SettingsView inherits Rectangle {
+    in-out property <string> daemon-pipe: "";
+    in-out property <bool> minimize-to-tray: true;
+    in-out property <bool> auto-start: false;
+    callback save-settings();
+
+    background: FortiqTheme.background;
+
+    VerticalLayout {
+        padding: FortiqTheme.spacing-lg;
+        spacing: FortiqTheme.spacing-md;
+
+        Text {
+            text: "Paramètres de l'Application";
+            color: FortiqTheme.text-primary;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        Rectangle {
+            height: 1px;
+            background: FortiqTheme.border;
+        }
+
+        // Daemon Endpoint
+        VerticalLayout {
+            spacing: FortiqTheme.spacing-xs;
+            Text {
+                text: "Endpoint IPC du Démon";
+                color: FortiqTheme.text-secondary;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            Rectangle {
+                height: 40px;
+                border-radius: FortiqTheme.radius-sm;
+                background: FortiqTheme.surface;
+                border-width: 1px;
+                border-color: FortiqTheme.border;
+
+                HorizontalLayout {
+                    padding-left: FortiqTheme.spacing-sm;
+                    padding-right: FortiqTheme.spacing-sm;
+
+                    TextInput {
+                        text <=> root.daemon-pipe;
+                        color: FortiqTheme.text-primary;
+                        font-family: "monospace";
+                        font-size: 13px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Minimize to tray
+        HorizontalLayout {
+            spacing: FortiqTheme.spacing-md;
+            alignment: start;
+
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: root.minimize-to-tray ? FortiqTheme.primary : FortiqTheme.border;
+                background: root.minimize-to-tray ? FortiqTheme.primary : transparent;
+
+                TouchArea {
+                    clicked => { root.minimize-to-tray = !root.minimize-to-tray; }
+                }
+
+                if root.minimize-to-tray : Text {
+                    text: "✓";
+                    color: #ffffff;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Text {
+                text: "Réduire dans la zone de notification lors de la fermeture";
+                color: FortiqTheme.text-primary;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+        }
+
+        // Save Button
+        Rectangle {
+            height: 38px;
+            width: 160px;
+            border-radius: FortiqTheme.radius-sm;
+            background: save-btn.has-hover ? FortiqTheme.primary-hover : FortiqTheme.primary;
+            save-btn := TouchArea { clicked => { root.save-settings(); } }
+            Text {
+                text: "Enregistrer";
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

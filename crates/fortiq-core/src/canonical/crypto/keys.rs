@@ -47,7 +47,7 @@ impl DerivedSegmentSecret {
 
 /// Raw 256-bit entropy derived from a 24-word BIP-39 mnemonic.
 /// Automatically zeroizes memory on drop.
-#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Debug, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct MnemonicEntropy(pub [u8; 32]);
 
 impl MnemonicEntropy {

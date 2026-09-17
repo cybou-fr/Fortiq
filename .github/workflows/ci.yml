@@ -36,7 +36,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libxkbcommon-dev libxkbcommon-x11-dev
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -50,33 +50,3 @@ jobs:
 
       - name: Run Workspace Tests
         run: cargo test --workspace -- --nocapture
-
-
-  desktop-frontend:
-    name: Tauri Desktop Frontend & Backend Check
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Build Frontend
-        working-directory: apps/fortiq-desktop
-        run: |
-          npm ci
-          npm run build
-
-      - name: Check Desktop Tauri Backend
-        run: cargo check --manifest-path apps/fortiq-desktop/src-tauri/Cargo.toml

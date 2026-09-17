@@ -1,0 +1,154 @@
+import { FortiqTheme } from "../theme.slint";
+
+export component SelfSupportView inherits Rectangle {
+    in-out property <bool> db-healthy: true;
+    in-out property <bool> peers-stale: false;
+    in-out property <string> last-action-result: "";
+    callback run-diagnostic();
+    callback repair-database();
+    callback reset-peers();
+
+    background: FortiqTheme.background;
+
+    VerticalLayout {
+        padding: FortiqTheme.spacing-lg;
+        spacing: FortiqTheme.spacing-md;
+
+        Text {
+            text: "Diagnostic & Auto-Réparation";
+            color: FortiqTheme.text-primary;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        Rectangle {
+            height: 1px;
+            background: FortiqTheme.border;
+        }
+
+        // Diagnostics Cards
+        HorizontalLayout {
+            spacing: FortiqTheme.spacing-md;
+
+            // Database Card
+            Rectangle {
+                border-radius: FortiqTheme.radius-md;
+                background: FortiqTheme.surface;
+                border-width: 1px;
+                border-color: FortiqTheme.border;
+                height: 110px;
+
+                VerticalLayout {
+                    padding: FortiqTheme.spacing-md;
+                    spacing: FortiqTheme.spacing-xs;
+                    Text {
+                        text: "Base de données & Shards";
+                        color: FortiqTheme.text-secondary;
+                        font-size: 13px;
+                    }
+                    Text {
+                        text: root.db-healthy ? "Intégrité vérifiée (OK)" : "Corruption détectée";
+                        color: root.db-healthy ? FortiqTheme.success : FortiqTheme.danger;
+                        font-size: 15px;
+                        font-weight: 700;
+                    }
+                    Rectangle { }
+                    Rectangle {
+                        height: 26px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: db-btn.has-hover ? FortiqTheme.surface-elevated : FortiqTheme.surface-hover;
+                        db-btn := TouchArea { clicked => { root.repair-database(); } }
+                        Text {
+                            text: "Vérifier et réparer";
+                            color: FortiqTheme.text-primary;
+                            font-size: 11px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // Peers Sync Card
+            Rectangle {
+                border-radius: FortiqTheme.radius-md;
+                background: FortiqTheme.surface;
+                border-width: 1px;
+                border-color: FortiqTheme.border;
+                height: 110px;
+
+                VerticalLayout {
+                    padding: FortiqTheme.spacing-md;
+                    spacing: FortiqTheme.spacing-xs;
+                    Text {
+                        text: "Synchronisation des Pairs";
+                        color: FortiqTheme.text-secondary;
+                        font-size: 13px;
+                    }
+                    Text {
+                        text: !root.peers-stale ? "À jour" : "Synchronisation requise";
+                        color: !root.peers-stale ? FortiqTheme.success : FortiqTheme.warning;
+                        font-size: 15px;
+                        font-weight: 700;
+                    }
+                    Rectangle { }
+                    Rectangle {
+                        height: 26px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: peer-btn.has-hover ? FortiqTheme.surface-elevated : FortiqTheme.surface-hover;
+                        peer-btn := TouchArea { clicked => { root.reset-peers(); } }
+                        Text {
+                            text: "Réinitialiser la table";
+                            color: FortiqTheme.text-primary;
+                            font-size: 11px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Global Diagnostic Trigger
+        Rectangle {
+            height: 40px;
+            width: 200px;
+            border-radius: FortiqTheme.radius-sm;
+            background: diag-btn.has-hover ? FortiqTheme.primary-hover : FortiqTheme.primary;
+            diag-btn := TouchArea { clicked => { root.run-diagnostic(); } }
+            Text {
+                text: "Lancer le diagnostic complet";
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        if root.last-action-result != "" : Rectangle {
+            border-radius: FortiqTheme.radius-md;
+            background: FortiqTheme.surface;
+            border-width: 1px;
+            border-color: FortiqTheme.border;
+
+            VerticalLayout {
+                padding: FortiqTheme.spacing-md;
+                spacing: FortiqTheme.spacing-xs;
+                Text {
+                    text: "Résultat:";
+                    color: FortiqTheme.text-secondary;
+                    font-size: 12px;
+                    font-weight: 600;
+                }
+                Text {
+                    text: root.last-action-result;
+                    color: FortiqTheme.text-primary;
+                    font-size: 13px;
+                }
+            }
+        }
+    }
+}

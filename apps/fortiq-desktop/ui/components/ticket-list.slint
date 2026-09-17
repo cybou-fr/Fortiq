@@ -1,0 +1,129 @@
+import { FortiqTheme } from "../theme.slint";
+import { TicketItem } from "../types.slint";
+
+export component TicketList inherits Rectangle {
+    in-out property <[TicketItem]> tickets: [];
+    in-out property <string> selected-ticket-id: "";
+    callback ticket-selected(string);
+    callback new-ticket-clicked();
+
+    width: 280px;
+    background: FortiqTheme.surface;
+
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        height: 100%;
+        background: FortiqTheme.border;
+    }
+
+    VerticalLayout {
+        padding: FortiqTheme.spacing-md;
+        spacing: FortiqTheme.spacing-md;
+
+        // Header + Create Button
+        HorizontalLayout {
+            alignment: space-between;
+            Text {
+                text: "Tickets";
+                color: FortiqTheme.text-primary;
+                font-size: 16px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: 80px;
+                height: 30px;
+                border-radius: FortiqTheme.radius-sm;
+                background: new-btn-area.has-hover ? FortiqTheme.primary-hover : FortiqTheme.primary;
+
+                new-btn-area := TouchArea {
+                    clicked => { root.new-ticket-clicked(); }
+                }
+
+                Text {
+                    text: "+ Nouveau";
+                    color: #ffffff;
+                    font-size: 12px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: FortiqTheme.border;
+        }
+
+        // Tickets Scrollable List
+        Flickable {
+            VerticalLayout {
+                spacing: FortiqTheme.spacing-xs;
+                alignment: start;
+
+                for ticket in root.tickets : Rectangle {
+                    height: 64px;
+                    border-radius: FortiqTheme.radius-md;
+                    background: ticket.id == root.selected-ticket-id
+                        ? FortiqTheme.surface-elevated
+                        : (item-touch.has-hover ? FortiqTheme.surface-hover : transparent);
+                    border-width: ticket.id == root.selected-ticket-id ? 1px : 0px;
+                    border-color: FortiqTheme.primary;
+
+                    item-touch := TouchArea {
+                        clicked => { root.ticket-selected(ticket.id); }
+                    }
+
+                    VerticalLayout {
+                        padding: FortiqTheme.spacing-sm;
+                        spacing: FortiqTheme.spacing-xs;
+                        alignment: center;
+
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: ticket.title != "" ? ticket.title : "Sans titre";
+                                color: FortiqTheme.text-primary;
+                                font-size: 13px;
+                                font-weight: 600;
+                                overflow: elide;
+                            }
+                            Rectangle {
+                                width: 50px;
+                                height: 18px;
+                                border-radius: FortiqTheme.radius-sm;
+                                background: ticket.state == "OPEN" ? #0b84ff22 : (ticket.state == "IN_PROGRESS" ? #16a36d22 : #8fa0b522);
+                                Text {
+                                    text: ticket.state;
+                                    color: ticket.state == "OPEN" ? FortiqTheme.primary : (ticket.state == "IN_PROGRESS" ? FortiqTheme.success : FortiqTheme.text-secondary);
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: "#" + ticket.id;
+                                color: FortiqTheme.text-muted;
+                                font-size: 11px;
+                                font-family: "monospace";
+                            }
+                            Text {
+                                text: "Prio " + ticket.priority;
+                                color: ticket.priority >= 3 ? FortiqTheme.danger : FortiqTheme.text-secondary;
+                                font-size: 11px;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

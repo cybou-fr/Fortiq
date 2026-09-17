@@ -1,0 +1,29 @@
+export struct TicketItem {
+    id: string,
+    title: string,
+    priority: int,
+    state: string,
+    created_at: string,
+}
+
+export struct ChatMessageItem {
+    id: string,
+    sender: string,
+    body: string,
+    is_operator: bool,
+}
+
+export struct AttachmentItem {
+    id: string,
+    filename: string,
+    size_str: string,
+    sha256: string,
+}
+
+export struct PeerItem {
+    peer_id: string,
+    hostname: string,
+    os: string,
+    transport: string,
+    status: string,
+}

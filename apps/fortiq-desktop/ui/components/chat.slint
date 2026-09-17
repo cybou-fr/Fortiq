@@ -1,0 +1,108 @@
+import { FortiqTheme } from "../theme.slint";
+import { ChatMessageItem } from "../types.slint";
+
+export component ChatPane inherits Rectangle {
+    in-out property <[ChatMessageItem]> messages: [];
+    in-out property <string> draft-text: "";
+    callback send-message(string);
+
+    background: FortiqTheme.background;
+
+    VerticalLayout {
+        padding: FortiqTheme.spacing-md;
+        spacing: FortiqTheme.spacing-md;
+
+        // Messages timeline
+        Flickable {
+            VerticalLayout {
+                spacing: FortiqTheme.spacing-sm;
+                alignment: start;
+
+                for msg in root.messages : Rectangle {
+                    border-radius: FortiqTheme.radius-md;
+                    background: msg.is_operator ? #0b84ff18 : FortiqTheme.surface;
+                    border-width: 1px;
+                    border-color: msg.is_operator ? FortiqTheme.primary : FortiqTheme.border;
+
+                    VerticalLayout {
+                        padding: FortiqTheme.spacing-md;
+                        spacing: FortiqTheme.spacing-xs;
+
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: msg.sender;
+                                color: msg.is_operator ? FortiqTheme.primary : FortiqTheme.text-secondary;
+                                font-size: 12px;
+                                font-weight: 700;
+                            }
+                            Text {
+                                text: msg.id;
+                                color: FortiqTheme.text-muted;
+                                font-size: 11px;
+                            }
+                        }
+
+                        Text {
+                            text: msg.body;
+                            color: FortiqTheme.text-primary;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Message input bar
+        Rectangle {
+            height: 44px;
+            border-radius: FortiqTheme.radius-md;
+            background: FortiqTheme.surface;
+            border-width: 1px;
+            border-color: FortiqTheme.border;
+
+            HorizontalLayout {
+                padding: FortiqTheme.spacing-xs;
+                spacing: FortiqTheme.spacing-sm;
+
+                input-box := TextInput {
+                    text <=> root.draft-text;
+                    color: FortiqTheme.text-primary;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    accepted => {
+                        if root.draft-text != "" {
+                            root.send-message(root.draft-text);
+                            root.draft-text = "";
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 70px;
+                    border-radius: FortiqTheme.radius-sm;
+                    background: send-area.has-hover ? FortiqTheme.primary-hover : FortiqTheme.primary;
+
+                    send-area := TouchArea {
+                        clicked => {
+                            if root.draft-text != "" {
+                                root.send-message(root.draft-text);
+                                root.draft-text = "";
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "Envoyer";
+                        color: #ffffff;
+                        font-size: 12px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,231 @@
+import { FortiqTheme } from "../theme.slint";
+
+export component Sidebar inherits Rectangle {
+    in-out property <int> active-tab: 0;
+    in-out property <bool> is-operator-unlocked: false;
+    callback tab-selected(int);
+    callback unlock-operator-clicked();
+    callback lock-operator-clicked();
+
+    background: FortiqTheme.surface;
+    width: 220px;
+
+    VerticalLayout {
+        padding: FortiqTheme.spacing-lg;
+        spacing: FortiqTheme.spacing-md;
+
+        // Header / Logo
+        HorizontalLayout {
+            spacing: FortiqTheme.spacing-sm;
+            alignment: start;
+
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: FortiqTheme.radius-sm;
+                background: FortiqTheme.primary;
+                Text {
+                    text: "F";
+                    color: #ffffff;
+                    font-size: 18px;
+                    font-weight: 800;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Text {
+                    text: "FORTIQ";
+                    color: FortiqTheme.text-primary;
+                    font-size: 16px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: "Sovereign Desktop";
+                    color: FortiqTheme.text-muted;
+                    font-size: 11px;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: FortiqTheme.border;
+        }
+
+        // Navigation Items
+        VerticalLayout {
+            spacing: FortiqTheme.spacing-xs;
+
+            // Tickets Tab
+            Rectangle {
+                height: 38px;
+                border-radius: FortiqTheme.radius-md;
+                background: root.active-tab == 0 ? FortiqTheme.primary : (tickets-area.has-hover ? FortiqTheme.surface-hover : transparent);
+
+                tickets-area := TouchArea {
+                    clicked => { root.tab-selected(0); }
+                }
+
+                HorizontalLayout {
+                    padding-left: FortiqTheme.spacing-md;
+                    alignment: start;
+                    spacing: FortiqTheme.spacing-sm;
+
+                    Text {
+                        text: "Tickets";
+                        color: root.active-tab == 0 ? #ffffff : FortiqTheme.text-primary;
+                        font-size: 14px;
+                        font-weight: root.active-tab == 0 ? 600 : 400;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Peers Tab
+            Rectangle {
+                height: 38px;
+                border-radius: FortiqTheme.radius-md;
+                background: root.active-tab == 1 ? FortiqTheme.primary : (peers-area.has-hover ? FortiqTheme.surface-hover : transparent);
+
+                peers-area := TouchArea {
+                    clicked => { root.tab-selected(1); }
+                }
+
+                HorizontalLayout {
+                    padding-left: FortiqTheme.spacing-md;
+                    alignment: start;
+                    spacing: FortiqTheme.spacing-sm;
+
+                    Text {
+                        text: "Pairs Réseau";
+                        color: root.active-tab == 1 ? #ffffff : FortiqTheme.text-primary;
+                        font-size: 14px;
+                        font-weight: root.active-tab == 1 ? 600 : 400;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Auto-Support Tab
+            Rectangle {
+                height: 38px;
+                border-radius: FortiqTheme.radius-md;
+                background: root.active-tab == 2 ? FortiqTheme.primary : (support-area.has-hover ? FortiqTheme.surface-hover : transparent);
+
+                support-area := TouchArea {
+                    clicked => { root.tab-selected(2); }
+                }
+
+                HorizontalLayout {
+                    padding-left: FortiqTheme.spacing-md;
+                    alignment: start;
+                    spacing: FortiqTheme.spacing-sm;
+
+                    Text {
+                        text: "Auto-Support";
+                        color: root.active-tab == 2 ? #ffffff : FortiqTheme.text-primary;
+                        font-size: 14px;
+                        font-weight: root.active-tab == 2 ? 600 : 400;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Settings Tab
+            Rectangle {
+                height: 38px;
+                border-radius: FortiqTheme.radius-md;
+                background: root.active-tab == 3 ? FortiqTheme.primary : (settings-area.has-hover ? FortiqTheme.surface-hover : transparent);
+
+                settings-area := TouchArea {
+                    clicked => { root.tab-selected(3); }
+                }
+
+                HorizontalLayout {
+                    padding-left: FortiqTheme.spacing-md;
+                    alignment: start;
+                    spacing: FortiqTheme.spacing-sm;
+
+                    Text {
+                        text: "Paramètres";
+                        color: root.active-tab == 3 ? #ffffff : FortiqTheme.text-primary;
+                        font-size: 14px;
+                        font-weight: root.active-tab == 3 ? 600 : 400;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Spacer to push operator status to bottom
+        Rectangle { }
+
+        // Operator workspace session widget
+        Rectangle {
+            border-radius: FortiqTheme.radius-md;
+            background: FortiqTheme.surface-elevated;
+            border-width: 1px;
+            border-color: root.is-operator-unlocked ? FortiqTheme.success : FortiqTheme.border;
+
+            VerticalLayout {
+                padding: FortiqTheme.spacing-sm;
+                spacing: FortiqTheme.spacing-xs;
+
+                HorizontalLayout {
+                    spacing: FortiqTheme.spacing-xs;
+                    alignment: start;
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: root.is-operator-unlocked ? FortiqTheme.success : FortiqTheme.text-muted;
+                        y: 4px;
+                    }
+                    Text {
+                        text: root.is-operator-unlocked ? "Opérateur Déverrouillé" : "Opérateur Verrouillé";
+                        color: FortiqTheme.text-primary;
+                        font-size: 11px;
+                        font-weight: 600;
+                    }
+                }
+
+                if !root.is-operator-unlocked : Rectangle {
+                    height: 28px;
+                    border-radius: FortiqTheme.radius-sm;
+                    background: op-unlock-area.has-hover ? FortiqTheme.primary-hover : FortiqTheme.primary;
+                    op-unlock-area := TouchArea {
+                        clicked => { root.unlock-operator-clicked(); }
+                    }
+                    Text {
+                        text: "Déverrouiller (24 mots)";
+                        color: #ffffff;
+                        font-size: 11px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.is-operator-unlocked : Rectangle {
+                    height: 28px;
+                    border-radius: FortiqTheme.radius-sm;
+                    background: op-lock-area.has-hover ? FortiqTheme.danger-hover : FortiqTheme.danger;
+                    op-lock-area := TouchArea {
+                        clicked => { root.lock-operator-clicked(); }
+                    }
+                    Text {
+                        text: "Verrouiller la session";
+                        color: #ffffff;
+                        font-size: 11px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

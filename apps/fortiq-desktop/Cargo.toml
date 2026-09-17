@@ -1,0 +1,29 @@
+[package]
+name = "fortiq-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+slint = { workspace = true, features = ["compat-1-18", "backend-default", "renderer-femtovg", "system-tray", "std"] }
+fortiq-core = { path = "../../crates/fortiq-core" }
+fortiq-shell = { path = "../../crates/fortiq-shell" }
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+fs2.workspace = true
+vte.workspace = true
+toml.workspace = true
+rfd.workspace = true
+rand_core.workspace = true
+blake3.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

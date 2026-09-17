@@ -15,7 +15,10 @@ use fortiq_core::canonical::{
         purge_auth::PurgeAuthorization,
         tombstone::SignedTombstone,
     },
-    portable::{certificate::OperatorSessionCertificate, mnemonic::MnemonicDeriver},
+    portable::{
+        certificate::{OperatorCapabilities, OperatorSessionCertificate},
+        mnemonic::MnemonicDeriver,
+    },
     records::LogicalEvent,
     retirement::authority::{AuthorityError, CanonicalAuthorityResolver},
     self_support::{LocalIpcError, LocalIpcFramed, MAX_LOCAL_IPC_FRAME_SIZE},
@@ -309,8 +312,12 @@ fn test_expired_session_certificate_rejection() {
     let owner_verifier = MockVerifier;
     let network_id = NetworkId::from_bytes([0x20; 32]);
     let owner_id = OwnerId::from_bytes([0x30; 32]);
-    let operator_key_id = KeyId::from_bytes([0x40; 32]);
+    let host_entity = EntityId::from_bytes([0x60; 32]);
     let operator_entity = EntityId::from_bytes([0x50; 32]);
+    let operator_key_id = KeyId::from_bytes([0x40; 32]);
+    let session_pubkey = [0x70; 32];
+    let capabilities = OperatorCapabilities::from_names(["admin"]);
+    let nonce = [0x80; 16];
 
     let issued_at = 1_000;
     let expires_at = 2_000;
@@ -318,11 +325,14 @@ fn test_expired_session_certificate_rejection() {
     let cert = OperatorSessionCertificate::issue(
         network_id,
         owner_id,
-        operator_key_id,
+        host_entity,
         operator_entity,
-        vec!["admin".to_string()],
+        operator_key_id,
+        session_pubkey,
+        capabilities,
         issued_at,
         expires_at,
+        nonce,
         &owner_signer,
     )
     .unwrap();

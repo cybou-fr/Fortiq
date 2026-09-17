@@ -1,0 +1,104 @@
+import { FortiqTheme } from "../theme.slint";
+import { AttachmentItem } from "../types.slint";
+
+export component FilesPane inherits Rectangle {
+    in-out property <[AttachmentItem]> files: [];
+    callback pick-file-clicked();
+
+    background: FortiqTheme.background;
+
+    VerticalLayout {
+        padding: FortiqTheme.spacing-md;
+        spacing: FortiqTheme.spacing-md;
+
+        HorizontalLayout {
+            alignment: space-between;
+            Text {
+                text: "Pièces jointes";
+                color: FortiqTheme.text-primary;
+                font-size: 15px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: 130px;
+                height: 32px;
+                border-radius: FortiqTheme.radius-sm;
+                background: pick-area.has-hover ? FortiqTheme.primary-hover : FortiqTheme.primary;
+
+                pick-area := TouchArea {
+                    clicked => { root.pick-file-clicked(); }
+                }
+
+                Text {
+                    text: "+ Joindre un fichier";
+                    color: #ffffff;
+                    font-size: 12px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: FortiqTheme.border;
+        }
+
+        if root.files.length == 0 : VerticalLayout {
+            alignment: center;
+            height: 120px;
+            Text {
+                text: "Aucun fichier attaché à ce ticket.";
+                color: FortiqTheme.text-muted;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+        }
+
+        Flickable {
+            VerticalLayout {
+                spacing: FortiqTheme.spacing-xs;
+                alignment: start;
+
+                for file in root.files : Rectangle {
+                    height: 52px;
+                    border-radius: FortiqTheme.radius-md;
+                    background: FortiqTheme.surface;
+                    border-width: 1px;
+                    border-color: FortiqTheme.border;
+
+                    HorizontalLayout {
+                        padding: FortiqTheme.spacing-md;
+                        alignment: space-between;
+
+                        VerticalLayout {
+                            alignment: center;
+                            Text {
+                                text: file.filename;
+                                color: FortiqTheme.text-primary;
+                                font-size: 13px;
+                                font-weight: 600;
+                            }
+                            Text {
+                                text: "SHA-256: " + file.sha256;
+                                color: FortiqTheme.text-muted;
+                                font-size: 11px;
+                                font-family: "monospace";
+                            }
+                        }
+
+                        Text {
+                            text: file.size_str;
+                            color: FortiqTheme.text-secondary;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

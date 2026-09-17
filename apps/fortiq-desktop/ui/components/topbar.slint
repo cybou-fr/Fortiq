@@ -1,0 +1,104 @@
+import { FortiqTheme } from "../theme.slint";
+
+export component Topbar inherits Rectangle {
+    in-out property <string> agent-state: "offline";
+    in-out property <string> peer-id: "";
+    in-out property <string> version: "";
+    in-out property <string> toast-message: "";
+    callback refresh-clicked();
+
+    height: 52px;
+    background: FortiqTheme.surface;
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        width: 100%;
+        background: FortiqTheme.border;
+    }
+
+    HorizontalLayout {
+        padding-left: FortiqTheme.spacing-lg;
+        padding-right: FortiqTheme.spacing-lg;
+        spacing: FortiqTheme.spacing-md;
+        alignment: space-between;
+
+        // Left: Node Status Indicator & Peer ID
+        HorizontalLayout {
+            spacing: FortiqTheme.spacing-sm;
+            alignment: center;
+
+            Rectangle {
+                width: 10px;
+                height: 10px;
+                border-radius: 5px;
+                background: root.agent-state == "active" || root.agent-state == "running"
+                    ? FortiqTheme.success
+                    : (root.agent-state == "offline" ? FortiqTheme.danger : FortiqTheme.warning);
+                y: 21px;
+            }
+
+            Text {
+                text: root.agent-state == "active" || root.agent-state == "running"
+                    ? "Démon En Ligne"
+                    : (root.agent-state == "offline" ? "Démon Déconnecté" : root.agent-state);
+                color: FortiqTheme.text-primary;
+                font-size: 13px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+
+            if root.peer-id != "" : Text {
+                text: "• " + root.peer-id;
+                color: FortiqTheme.text-secondary;
+                font-size: 12px;
+                font-family: "monospace";
+                vertical-alignment: center;
+            }
+        }
+
+        // Center: Toast Notification (if any)
+        if root.toast-message != "" : HorizontalLayout {
+            alignment: center;
+            Text {
+                text: root.toast-message;
+                color: FortiqTheme.warning;
+                font-size: 12px;
+                font-weight: 500;
+                vertical-alignment: center;
+            }
+        }
+
+        // Right: Version & Refresh
+        HorizontalLayout {
+            spacing: FortiqTheme.spacing-md;
+            alignment: center;
+
+            Text {
+                text: "v" + root.version;
+                color: FortiqTheme.text-muted;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: FortiqTheme.radius-sm;
+                background: refresh-area.has-hover ? FortiqTheme.surface-hover : FortiqTheme.surface-elevated;
+
+                refresh-area := TouchArea {
+                    clicked => { root.refresh-clicked(); }
+                }
+
+                Text {
+                    text: "↻";
+                    color: FortiqTheme.text-primary;
+                    font-size: 16px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

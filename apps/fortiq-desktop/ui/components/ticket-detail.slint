@@ -1,0 +1,175 @@
+import { FortiqTheme } from "../theme.slint";
+import { ChatMessageItem, AttachmentItem } from "../types.slint";
+import { ChatPane } from "chat.slint";
+import { FilesPane } from "files.slint";
+import { TerminalPane } from "terminal.slint";
+
+export component TicketDetail inherits Rectangle {
+    in-out property <string> ticket-id: "";
+    in-out property <string> ticket-title: "";
+    in-out property <int> priority: 2;
+    in-out property <string> state: "OPEN";
+    in-out property <string> epoch: "";
+    in-out property <int> sub-tab: 0;
+
+    in-out property <[ChatMessageItem]> messages: [];
+    in-out property <[AttachmentItem]> files: [];
+    in-out property <bool> terminal-connected: false;
+    in-out property <string> terminal-text: "";
+    in-out property <string> terminal-denied: "";
+
+    callback send-message(string);
+    callback pick-file();
+    callback start-shell();
+    callback close-shell();
+    callback revoke-shell();
+    callback send-terminal-input(string);
+
+    background: FortiqTheme.background;
+
+    if root.ticket-id == "" : VerticalLayout {
+        alignment: center;
+        Text {
+            text: "Sélectionnez un ticket pour afficher les détails.";
+            color: FortiqTheme.text-muted;
+            font-size: 14px;
+            horizontal-alignment: center;
+        }
+    }
+
+    if root.ticket-id != "" : VerticalLayout {
+        // Ticket Header Banner
+        Rectangle {
+            height: 64px;
+            background: FortiqTheme.surface;
+
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                width: 100%;
+                background: FortiqTheme.border;
+            }
+
+            HorizontalLayout {
+                padding-left: FortiqTheme.spacing-lg;
+                padding-right: FortiqTheme.spacing-lg;
+                alignment: space-between;
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+
+                    HorizontalLayout {
+                        spacing: FortiqTheme.spacing-sm;
+                        alignment: start;
+
+                        Text {
+                            text: root.ticket-title != "" ? root.ticket-title : "Sans titre";
+                            color: FortiqTheme.text-primary;
+                            font-size: 16px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle {
+                            width: 60px;
+                            height: 20px;
+                            border-radius: FortiqTheme.radius-sm;
+                            background: root.state == "OPEN" ? #0b84ff22 : #16a36d22;
+                            Text {
+                                text: root.state;
+                                color: root.state == "OPEN" ? FortiqTheme.primary : FortiqTheme.success;
+                                font-size: 11px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "ID: " + root.ticket-id + (root.epoch != "" ? " • Époque d'accès: " + root.epoch : "");
+                        color: FortiqTheme.text-muted;
+                        font-size: 11px;
+                        font-family: "monospace";
+                    }
+                }
+
+                // Sub-tabs switch
+                HorizontalLayout {
+                    spacing: FortiqTheme.spacing-xs;
+                    alignment: center;
+
+                    Rectangle {
+                        width: 90px;
+                        height: 32px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: root.sub-tab == 0 ? FortiqTheme.primary : FortiqTheme.surface-elevated;
+                        TouchArea { clicked => { root.sub-tab = 0; } }
+                        Text {
+                            text: "Discussion";
+                            color: #ffffff;
+                            font-size: 12px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 90px;
+                        height: 32px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: root.sub-tab == 1 ? FortiqTheme.primary : FortiqTheme.surface-elevated;
+                        TouchArea { clicked => { root.sub-tab = 1; } }
+                        Text {
+                            text: "Fichiers";
+                            color: #ffffff;
+                            font-size: 12px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 90px;
+                        height: 32px;
+                        border-radius: FortiqTheme.radius-sm;
+                        background: root.sub-tab == 2 ? FortiqTheme.primary : FortiqTheme.surface-elevated;
+                        TouchArea { clicked => { root.sub-tab = 2; } }
+                        Text {
+                            text: "Terminal";
+                            color: #ffffff;
+                            font-size: 12px;
+                            font-weight: 600;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sub-tab view container
+        if root.sub-tab == 0 : ChatPane {
+            messages: root.messages;
+            send-message(text) => { root.send-message(text); }
+        }
+
+        if root.sub-tab == 1 : FilesPane {
+            files: root.files;
+            pick-file-clicked() => { root.pick-file(); }
+        }
+
+        if root.sub-tab == 2 : TerminalPane {
+            is-connected: root.terminal-connected;
+            terminal-text: root.terminal-text;
+            denied-message: root.terminal-denied;
+            start-shell-clicked() => { root.start-shell(); }
+            close-shell-clicked() => { root.close-shell(); }
+            revoke-shell-clicked() => { root.revoke-shell(); }
+            send-input(str) => { root.send-terminal-input(str); }
+        }
+    }
+}

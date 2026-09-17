@@ -24,10 +24,21 @@ pub enum CryptoError {
     InvalidCiphertextLength(usize),
     #[error("key derivation failed: {0}")]
     KeyDerivationFailed(String),
+    #[error("invalid key length: expected 32 bytes, got {0}")]
+    InvalidKeyLength(usize),
     #[error("envelope unwrapping failed")]
     EnvelopeUnwrapFailed,
     #[error("recipient key mismatch: expected {0}, got {1}")]
     RecipientKeyMismatch(KeyId, KeyId),
+}
+
+/// Generates an asymmetric KEM public/private keypair for recipient envelopes.
+/// Returns (public_key_32_bytes, secret_key_32_bytes) where public_key != secret_key.
+pub fn generate_kem_keypair() -> ([u8; 32], [u8; 32]) {
+    let rng = OsRng;
+    let sk = x25519_dalek::StaticSecret::random_from_rng(rng);
+    let pk = x25519_dalek::PublicKey::from(&sk);
+    (*pk.as_bytes(), sk.to_bytes())
 }
 
 /// Abstract Cryptographic Provider decoupling protocol serialization from backend crypto crates.
@@ -57,7 +68,7 @@ pub trait CryptoProvider: Send + Sync {
         key_epoch: u64,
     ) -> Result<DerivedSegmentSecret, CryptoError>;
 
-    /// Wrap a DEK for a specific recipient key into a RecipientEnvelope.
+    /// Wrap a DEK for a specific recipient key into a RecipientEnvelope using genuine asymmetric KEM.
     fn wrap_dek(
         &self,
         dek: &DataEncryptionKey,
@@ -76,17 +87,20 @@ pub trait CryptoProvider: Send + Sync {
     ) -> Result<DataEncryptionKey, CryptoError>;
 }
 
-/// Standard reference CryptoProvider implementing FORTIQ-PQ1 primitives.
-#[derive(Default)]
-pub struct StandardCryptoProvider;
+/// Reference Cryptographic Provider implementing asymmetric KEM encapsulation
+/// with X25519 Diffie-Hellman, HKDF-SHA256 key derivation, and ChaCha20Poly1305 AEAD.
+#[derive(Default, Clone, Debug)]
+pub struct AsymmetricKemCryptoProvider;
 
-impl StandardCryptoProvider {
+impl AsymmetricKemCryptoProvider {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl CryptoProvider for StandardCryptoProvider {
+pub type StandardCryptoProvider = AsymmetricKemCryptoProvider;
+
+impl CryptoProvider for AsymmetricKemCryptoProvider {
     fn seal_payload(
         &self,
         plaintext: &[u8],
@@ -170,22 +184,34 @@ impl CryptoProvider for StandardCryptoProvider {
         key_epoch: u64,
         info: &[u8],
     ) -> Result<RecipientEnvelope, CryptoError> {
-        // Ephemeral KEM shared secret simulation (HKDF over ephemeral secret + recipient PK)
-        let mut ephemeral_secret = [0u8; 32];
-        OsRng.fill_bytes(&mut ephemeral_secret);
+        if recipient_pk.len() != 32 {
+            return Err(CryptoError::InvalidKeyLength(recipient_pk.len()));
+        }
+        let mut pk_arr = [0u8; 32];
+        pk_arr.copy_from_slice(recipient_pk);
+        let rec_pk = x25519_dalek::PublicKey::from(pk_arr);
 
-        let mut kdf_context = Vec::with_capacity(ENVELOPE_WRAP_DOMAIN.len() + info.len());
+        // Genuine ephemeral KEM encapsulation:
+        let ephemeral_sk = x25519_dalek::StaticSecret::random_from_rng(OsRng);
+        let ephemeral_pk = x25519_dalek::PublicKey::from(&ephemeral_sk);
+
+        // Diffie-Hellman shared secret
+        let shared_secret = ephemeral_sk.diffie_hellman(&rec_pk);
+
+        let mut kdf_context = Vec::with_capacity(ENVELOPE_WRAP_DOMAIN.len() + info.len() + 64);
         kdf_context.extend_from_slice(ENVELOPE_WRAP_DOMAIN);
         kdf_context.extend_from_slice(info);
+        kdf_context.extend_from_slice(ephemeral_pk.as_bytes());
+        kdf_context.extend_from_slice(rec_pk.as_bytes());
 
-        let hk = Hkdf::<Sha256>::new(Some(recipient_pk), &ephemeral_secret);
+        let hk = Hkdf::<Sha256>::new(Some(rec_pk.as_bytes()), shared_secret.as_bytes());
         let mut wrapping_key = [0u8; 32];
         hk.expand(&kdf_context, &mut wrapping_key)
             .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
 
         // Encrypt the DEK using the derived wrapping key
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&wrapping_key));
-        let nonce = Nonce::from_slice(&[0u8; 12]); // Fixed nonce since wrapping key is one-time ephemeral
+        let nonce = Nonce::from_slice(&[0u8; 12]);
         let sealed_key = cipher
             .encrypt(nonce, dek.as_bytes().as_slice())
             .map_err(|_| CryptoError::EncryptionFailed)?;
@@ -193,7 +219,7 @@ impl CryptoProvider for StandardCryptoProvider {
         Ok(RecipientEnvelope {
             key_id: recipient_key_id,
             key_epoch,
-            hpke_enc: ephemeral_secret.to_vec(),
+            hpke_enc: ephemeral_pk.as_bytes().to_vec(),
             sealed_key,
         })
     }
@@ -204,11 +230,32 @@ impl CryptoProvider for StandardCryptoProvider {
         recipient_sk: &[u8],
         info: &[u8],
     ) -> Result<DataEncryptionKey, CryptoError> {
-        let mut kdf_context = Vec::with_capacity(ENVELOPE_WRAP_DOMAIN.len() + info.len());
+        if recipient_sk.len() != 32 {
+            return Err(CryptoError::InvalidKeyLength(recipient_sk.len()));
+        }
+        if envelope.hpke_enc.len() != 32 {
+            return Err(CryptoError::EnvelopeUnwrapFailed);
+        }
+
+        let mut sk_arr = [0u8; 32];
+        sk_arr.copy_from_slice(recipient_sk);
+        let rec_sk = x25519_dalek::StaticSecret::from(sk_arr);
+        let rec_pk = x25519_dalek::PublicKey::from(&rec_sk);
+
+        let mut ephem_arr = [0u8; 32];
+        ephem_arr.copy_from_slice(&envelope.hpke_enc);
+        let ephemeral_pk = x25519_dalek::PublicKey::from(ephem_arr);
+
+        // Diffie-Hellman shared secret
+        let shared_secret = rec_sk.diffie_hellman(&ephemeral_pk);
+
+        let mut kdf_context = Vec::with_capacity(ENVELOPE_WRAP_DOMAIN.len() + info.len() + 64);
         kdf_context.extend_from_slice(ENVELOPE_WRAP_DOMAIN);
         kdf_context.extend_from_slice(info);
+        kdf_context.extend_from_slice(ephemeral_pk.as_bytes());
+        kdf_context.extend_from_slice(rec_pk.as_bytes());
 
-        let hk = Hkdf::<Sha256>::new(Some(recipient_sk), &envelope.hpke_enc);
+        let hk = Hkdf::<Sha256>::new(Some(rec_pk.as_bytes()), shared_secret.as_bytes());
         let mut wrapping_key = [0u8; 32];
         hk.expand(&kdf_context, &mut wrapping_key)
             .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
@@ -228,3 +275,8 @@ impl CryptoProvider for StandardCryptoProvider {
         Ok(DataEncryptionKey::new(dek_bytes))
     }
 }
+
+/// INSECURE test-only crypto provider with pseudo-wrapping. Strictly for unit tests.
+#[cfg(any(test, feature = "test-utils"))]
+#[derive(Default, Clone, Debug)]
+pub struct InsecureTestCryptoProvider;

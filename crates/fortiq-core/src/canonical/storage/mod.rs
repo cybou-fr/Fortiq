@@ -14,7 +14,7 @@ pub mod stripe;
 #[cfg(test)]
 mod tests;
 
-pub use erasure::{ErasureCoder, ErasureError, ReedSolomonCoder, Shard};
+pub use erasure::{ErasureCoder, ErasureError, ReedSolomonCoder, Shard, ValidatedRsProfile};
 pub use policy::{
     evaluate_shard_health, select_rs_profile, should_erasure_code, ShardHealth,
     DEFAULT_LOGICAL_STRIPE_SIZE_BYTES, STATE_PACK_RS_THRESHOLD_BYTES,

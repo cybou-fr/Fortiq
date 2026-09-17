@@ -1,4 +1,6 @@
-use crate::canonical::storage::erasure::{ErasureCoder, ErasureError, ReedSolomonCoder, Shard};
+use crate::canonical::storage::erasure::{
+    ErasureCoder, ErasureError, ReedSolomonCoder, Shard, ValidatedRsProfile,
+};
 use crate::canonical::storage::policy::{
     evaluate_shard_health, select_rs_profile, should_erasure_code, ShardHealth,
 };
@@ -237,4 +239,72 @@ fn test_adaptive_profile_selection_and_health() {
     assert_eq!(evaluate_shard_health(4, profile), ShardHealth::Critical);
     // 3 reachable -> Lost
     assert_eq!(evaluate_shard_health(3, profile), ShardHealth::Lost);
+}
+
+#[test]
+fn test_validated_rs_profile_boundaries() {
+    // Standard valid presets
+    assert!(ValidatedRsProfile::new(2, 1).is_ok());
+    assert!(ValidatedRsProfile::new(4, 2).is_ok());
+    assert!(ValidatedRsProfile::new(6, 3).is_ok());
+    assert!(ValidatedRsProfile::new(8, 4).is_ok());
+
+    // Boundary: 128 is maximum allowed sum
+    assert!(ValidatedRsProfile::new(64, 64).is_ok());
+    assert!(ValidatedRsProfile::new(128, 0).is_ok());
+
+    // Exceeding 128 must fail
+    assert_eq!(
+        ValidatedRsProfile::new(65, 64),
+        Err(ErasureError::InvalidProfile { data: 65, parity: 64 })
+    );
+    assert_eq!(
+        ValidatedRsProfile::new(129, 0),
+        Err(ErasureError::InvalidProfile { data: 129, parity: 0 })
+    );
+
+    // 0 data shards must fail
+    assert_eq!(
+        ValidatedRsProfile::new(0, 2),
+        Err(ErasureError::InvalidProfile { data: 0, parity: 2 })
+    );
+}
+
+#[test]
+fn test_reed_solomon_rejects_invalid_shard_index() {
+    let coder = ReedSolomonCoder::new();
+    let profile = RsProfile {
+        data_shards: 2,
+        parity_shards: 1,
+    };
+    let payload = b"Test payload for out-of-bounds shard index";
+    let shards = coder.encode(payload, profile).expect("encode");
+    assert_eq!(shards.len(), 3); // indices 0, 1, 2
+
+    // Craft a shard with index 3 (>= total shards 3)
+    let bad_shard = Shard::new(3, shards[0].data.clone());
+    let shards_opts = vec![Some(shards[0].clone()), Some(bad_shard)];
+
+    let res = coder.reconstruct(&shards_opts, payload.len(), profile);
+    assert_eq!(
+        res,
+        Err(ErasureError::InvalidShardIndex { index: 3, total: 3 })
+    );
+}
+
+#[test]
+fn test_reed_solomon_rejects_duplicate_shard_index() {
+    let coder = ReedSolomonCoder::new();
+    let profile = RsProfile {
+        data_shards: 2,
+        parity_shards: 1,
+    };
+    let payload = b"Test payload for duplicate shard index";
+    let shards = coder.encode(payload, profile).expect("encode");
+
+    // Provide two shards with index 0
+    let shards_opts = vec![Some(shards[0].clone()), Some(shards[0].clone())];
+
+    let res = coder.reconstruct(&shards_opts, payload.len(), profile);
+    assert_eq!(res, Err(ErasureError::DuplicateShardIndex { index: 0 }));
 }

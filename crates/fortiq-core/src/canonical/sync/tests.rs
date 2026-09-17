@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::canonical::crypto::keys::DataEncryptionKey;
-use crate::canonical::events::graph::EventGraph;
+use crate::canonical::events::graph::{EventGraph, VerifiedEventPack};
 use crate::canonical::events::snapshot::{reduce_ticket_from_snapshot, TicketSnapshot};
 use crate::canonical::records::LogicalEvent;
 use crate::canonical::signing::{Signer, SigningError, Verifier};
@@ -324,7 +324,10 @@ fn test_encrypted_snapshot_seal_open_and_fast_tail_catchup() {
     };
 
     let p1 = graph
-        .append_pack(pack1_signed, pack1_plain, stream_id, 1, None)
+        .append_pack(
+            VerifiedEventPack::new_unchecked(pack1_signed, pack1_plain)
+                .expect("verified pack 1"),
+        )
         .expect("pack 1 append must succeed");
 
     let base_view =
@@ -394,7 +397,10 @@ fn test_encrypted_snapshot_seal_open_and_fast_tail_catchup() {
     };
 
     let p2 = graph
-        .append_pack(pack2_signed, pack2_plain, stream_id, 2, Some(p1))
+        .append_pack(
+            VerifiedEventPack::new_unchecked(pack2_signed, pack2_plain)
+                .expect("verified pack 2"),
+        )
         .expect("pack 2 append must succeed");
 
     // Reduce state starting from snapshot + graph tail
