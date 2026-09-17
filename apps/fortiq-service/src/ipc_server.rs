@@ -700,7 +700,6 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                             let wire_msg = fortiq_p2p::ChatMessageWire {
                                 id: msg_id,
                                 ticket_id: ticket_id.clone(),
-                                sender_peer_id: state.peer_id.to_string(),
                                 body,
                                 created_at: now,
                             };

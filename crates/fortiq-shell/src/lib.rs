@@ -45,11 +45,11 @@ pub fn describe_denial(code: u8) -> &'static str {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ShellHandshake {
-    pub ticket_id: Option<String>,
+    pub ticket_id: String,
 }
 
 impl ShellHandshake {
-    pub fn new(ticket_id: Option<String>) -> Self {
+    pub fn new(ticket_id: String) -> Self {
         Self { ticket_id }
     }
 
@@ -782,7 +782,7 @@ mod tests {
     #[tokio::test]
     async fn handshake_encoding_decoding_roundtrip() {
         let (mut client, mut server) = tokio::io::duplex(256);
-        let handshake = ShellHandshake::new(Some("TCK-2026-001".to_string()));
+        let handshake = ShellHandshake::new("TCK-2026-001".to_string());
         handshake.write_to_tokio(&mut client).await.unwrap();
 
         let received = ShellHandshake::read_from_tokio(&mut server).await.unwrap();

@@ -214,9 +214,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
             message: ChatMessageWire {
                 id: op_msg_id.clone(),
                 ticket_id: created_ticket.id.clone(),
-                // Deliberately forged claim: the receiver must bind the sender
-                // to the authenticated libp2p peer instead.
-                sender_peer_id: managed_peer_id.to_string(),
                 body: "Bonjour, je prends en charge votre demande.".to_string(),
                 created_at: now_secs(),
             },
@@ -251,7 +248,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
             message: ChatMessageWire {
                 id: client_msg_id.clone(),
                 ticket_id: created_ticket.id.clone(),
-                sender_peer_id: managed_peer_id.to_string(),
                 body: "Merci, voici les logs d'erreur.".to_string(),
                 created_at: now_secs(),
             },

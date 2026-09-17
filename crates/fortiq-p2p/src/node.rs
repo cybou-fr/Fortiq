@@ -67,7 +67,6 @@ pub enum TicketSyncResponse {
 pub struct ChatMessageWire {
     pub id: String,
     pub ticket_id: String,
-    pub sender_peer_id: String,
     pub body: String,
     pub created_at: u64,
 }
@@ -86,7 +85,6 @@ pub struct FileOfferWire {
     pub filename: String,
     pub file_size: u64,
     pub sha256: String,
-    pub sender_peer_id: String,
 }
 
 fn is_ticket_counterparty(
@@ -421,7 +419,7 @@ fn spawn_open_shell_stream(
         .await
         {
             Ok(Ok(mut stream)) => {
-                let handshake = fortiq_shell::ShellHandshake::new(Some(ticket_id));
+                let handshake = fortiq_shell::ShellHandshake::new(ticket_id);
                 if let Err(e) = handshake.write_to_async(&mut stream).await {
                     Err(format!("Échec de l'envoi du handshake shell: {e}"))
                 } else {
@@ -510,7 +508,6 @@ fn spawn_send_file_stream(
                 filename: file_name.clone(),
                 file_size,
                 sha256: sha256.clone(),
-                sender_peer_id: sender_peer_id.clone(),
             };
 
             let mut stream = control
@@ -1162,7 +1159,6 @@ async fn event_loop(
                                 let wire = ChatMessageWire {
                                     id: message.id,
                                     ticket_id: message.ticket_id,
-                                    sender_peer_id: local_info.peer_id.clone(),
                                     body: message.body,
                                     created_at: message.created_at,
                                 };
@@ -1846,16 +1842,13 @@ async fn handle_incoming_shell_v2(
         }
     };
 
-    let ticket_id = match handshake.ticket_id.filter(|id| !id.trim().is_empty()) {
-        Some(id) => id,
-        None => {
-            warn!(remote_peer_id = %remote_peer, "denied shell v2: missing ticket id");
-            let _ =
-                fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_NO_TICKET)
-                    .await;
-            return;
-        }
-    };
+    if handshake.ticket_id.trim().is_empty() {
+        warn!(remote_peer_id = %remote_peer, "denied shell v2: missing ticket id");
+        let _ = fortiq_shell::send_authorization_code(&mut stream, fortiq_shell::DENIED_NO_TICKET)
+            .await;
+        return;
+    }
+    let ticket_id = handshake.ticket_id;
     let ticket_opt = ticket_store.db().get_ticket(&ticket_id).ok().flatten();
 
     let ticket = match ticket_opt {
