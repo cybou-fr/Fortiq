@@ -493,6 +493,12 @@ mod tests {
         assert!(!store.is_open().await.unwrap());
         let opened = store.open().await.unwrap();
         assert_eq!(opened.state, TicketState::Open);
+        assert!(!store.is_open().await.unwrap());
+        store
+            .db()
+            .set_remote_access(&opened.id, true, "local")
+            .unwrap()
+            .unwrap();
         assert!(store.is_open().await.unwrap());
 
         let reloaded = TicketStore::new(directory.path().join("ticket.json"));

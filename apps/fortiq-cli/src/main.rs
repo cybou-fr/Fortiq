@@ -448,15 +448,26 @@ async fn cmd_ticket_send_file(
     if !path.exists() {
         bail!("Fichier introuvable: {}", path.display());
     }
-    match ipc::send_command(
+    let staged_path = fortiq_core::ipc::new_upload_staging_path(path)?;
+    tokio::fs::copy(path, &staged_path)
+        .await
+        .with_context(|| format!("Impossible de préparer {}", path.display()))?;
+    let response = ipc::send_command(
         &IpcRequest::SendFile {
             ticket_id: ticket_id.to_string(),
-            file_path: path.to_string_lossy().to_string(),
+            staged_path: staged_path.to_string_lossy().to_string(),
         },
         pipe,
     )
-    .await?
-    {
+    .await;
+    let response = match response {
+        Ok(response) => response,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&staged_path).await;
+            return Err(error);
+        }
+    };
+    match response {
         IpcResponse::FileSent(att) => {
             println!("Fichier transféré avec succès !");
             println!("Nom:     {}", att.filename);
@@ -465,8 +476,14 @@ async fn cmd_ticket_send_file(
             println!("ID:      {}", att.id);
             Ok(())
         }
-        IpcResponse::Error(err) => bail!("Échec du transfert de fichier: {err}"),
-        _ => bail!("Réponse inattendue du démon"),
+        IpcResponse::Error(err) => {
+            let _ = tokio::fs::remove_file(&staged_path).await;
+            bail!("Échec du transfert de fichier: {err}")
+        }
+        _ => {
+            let _ = tokio::fs::remove_file(&staged_path).await;
+            bail!("Réponse inattendue du démon")
+        }
     }
 }
 

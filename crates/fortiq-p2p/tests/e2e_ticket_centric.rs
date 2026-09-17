@@ -170,6 +170,11 @@ async fn e2e_ticket_centric_full_lifecycle() {
             &operator_peer_id.to_string(),
         )
         .expect("failed to create ticket on managed node");
+    let created_ticket = managed_store
+        .db()
+        .set_remote_access(&created_ticket.id, true, &managed_peer_id.to_string())
+        .unwrap()
+        .unwrap();
     assert_eq!(created_ticket.state, TicketState::Open);
     assert!(created_ticket.remote_access_enabled);
 

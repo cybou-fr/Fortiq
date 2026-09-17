@@ -90,6 +90,11 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
             &operator_peer_id.to_string(),
         )
         .unwrap();
+    let opened_ticket = ticket_store
+        .db()
+        .set_remote_access(&opened_ticket.id, true, &managed_peer_id.to_string())
+        .unwrap()
+        .unwrap();
     assert_eq!(opened_ticket.state, TicketState::Open);
 
     let managed_config = Config {
@@ -507,6 +512,11 @@ async fn e2e_relay_production_rate_limiting_smoke() {
             &managed_peer_id.to_string(),
             &operator_peer_id.to_string(),
         )
+        .unwrap();
+    let opened_ticket = ticket_store
+        .db()
+        .set_remote_access(&opened_ticket.id, true, &managed_peer_id.to_string())
+        .unwrap()
         .unwrap();
     assert_eq!(opened_ticket.state, TicketState::Open);
 

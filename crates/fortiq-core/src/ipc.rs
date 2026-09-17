@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 use crate::{NodeMode, Ticket};
 
@@ -24,6 +25,30 @@ pub fn unix_socket_path() -> String {
 pub fn unix_terminal_socket_path() -> String {
     std::env::var("FORTIQ_TERMINAL_SOCK")
         .unwrap_or_else(|_| DEFAULT_UNIX_TERMINAL_SOCKET_PATH.to_owned())
+}
+
+pub fn upload_spool_dir() -> PathBuf {
+    if let Some(path) = std::env::var_os("FORTIQ_UPLOAD_SPOOL") {
+        return PathBuf::from(path);
+    }
+    #[cfg(windows)]
+    if let Some(public) = std::env::var_os("PUBLIC") {
+        return PathBuf::from(public)
+            .join("Documents")
+            .join("FortiqUploadSpool");
+    }
+    std::env::temp_dir().join("fortiq-upload-spool")
+}
+
+pub fn new_upload_staging_path(source: &Path) -> std::io::Result<PathBuf> {
+    let root = upload_spool_dir();
+    std::fs::create_dir_all(&root)?;
+    let name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("attachment.bin")
+        .replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+    Ok(root.join(format!("{}_{}", uuid::Uuid::new_v4().simple(), name)))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -84,7 +109,7 @@ pub enum IpcRequest {
     },
     SendFile {
         ticket_id: String,
-        file_path: String,
+        staged_path: String,
     },
     ListAttachments {
         ticket_id: String,

@@ -612,7 +612,10 @@ fn spawn_send_file_stream(
                 state: "STORED".to_string(),
             };
 
-            let _ = ticket_store.db().add_attachment(&attachment);
+            ticket_store
+                .db()
+                .add_attachment(&attachment)
+                .map_err(|e| format!("Échec de persistance de la pièce jointe locale: {e}"))?;
             let _ = ticket_store.db().record_event(
                 &ticket_id,
                 "ATTACHMENT_SENT",
@@ -1698,18 +1701,27 @@ async fn handle_chat(
                                 created_at: request.created_at,
                                 delivery_state: "DELIVERED".to_string(),
                             };
-                            let _ = ticket_store.db().add_chat_message(&chat_msg);
-                            let preview: String = request.body.chars().take(40).collect();
-                            let _ = ticket_store.db().record_event(
-                                &request.ticket_id,
-                                "CHAT_MESSAGE_RECEIVED",
-                                &peer.to_string(),
-                                Some(&format!("{}: {}", peer, preview)),
-                            );
-                            ChatAckWire {
-                                message_id: request.id,
-                                success: true,
-                                error: None,
+                            if let Err(error) = ticket_store.db().add_chat_message(&chat_msg) {
+                                ChatAckWire {
+                                    message_id: request.id,
+                                    success: false,
+                                    error: Some(format!(
+                                        "Échec de persistance du message: {error}"
+                                    )),
+                                }
+                            } else {
+                                let preview: String = request.body.chars().take(40).collect();
+                                let _ = ticket_store.db().record_event(
+                                    &request.ticket_id,
+                                    "CHAT_MESSAGE_RECEIVED",
+                                    &peer.to_string(),
+                                    Some(&format!("{}: {}", peer, preview)),
+                                );
+                                ChatAckWire {
+                                    message_id: request.id,
+                                    success: true,
+                                    error: None,
+                                }
                             }
                         }
                     }
@@ -1922,6 +1934,14 @@ async fn handle_incoming_file_stream(
         Ok(o) => o,
         Err(_) => return,
     };
+    let file_id = match normalize_file_id(&offer.file_id) {
+        Some(id) => id,
+        None => {
+            warn!(remote_peer_id = %remote_peer, "denied file with invalid file id");
+            let _ = stream.write_all(&[FILE_DENIED]).await;
+            return;
+        }
+    };
 
     let ticket = match ticket_store.db().get_ticket(&offer.ticket_id) {
         Ok(Some(t)) => t,
@@ -1966,7 +1986,8 @@ async fn handle_incoming_file_stream(
         .unwrap_or("file.bin");
     let safe_name = original_name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
 
-    let ticket_dir = files_base_dir.join(&offer.ticket_id).join("files");
+    let ticket_storage_key = format!("{:x}", Sha256::digest(offer.ticket_id.as_bytes()));
+    let ticket_dir = files_base_dir.join(ticket_storage_key).join("files");
     if let Err(e) = tokio::fs::create_dir_all(&ticket_dir).await {
         warn!(%e, "failed to create files dir for ticket");
         let _ = stream.write_all(&[FILE_DENIED]).await;
@@ -1978,8 +1999,8 @@ async fn handle_incoming_file_stream(
     }
     let _ = stream.flush().await;
 
-    let part_path = ticket_dir.join(format!("{}.part", offer.file_id));
-    let final_path = ticket_dir.join(format!("{}_{}", offer.file_id, safe_name));
+    let part_path = ticket_dir.join(format!("{file_id}.part"));
+    let final_path = ticket_dir.join(format!("{file_id}_{safe_name}"));
 
     let mut part_file = match tokio::fs::File::create(&part_path).await {
         Ok(f) => f,
@@ -2049,7 +2070,7 @@ async fn handle_incoming_file_stream(
     }
 
     let attachment = fortiq_core::AttachmentRecord {
-        id: offer.file_id.clone(),
+        id: file_id,
         ticket_id: offer.ticket_id.clone(),
         sender_peer_id: remote_peer.to_string(),
         filename: safe_name.clone(),
@@ -2063,7 +2084,12 @@ async fn handle_incoming_file_stream(
         state: "STORED".to_string(),
     };
 
-    let _ = ticket_store.db().add_attachment(&attachment);
+    if let Err(error) = ticket_store.db().add_attachment(&attachment) {
+        warn!(%error, "failed to persist received attachment metadata");
+        let _ = tokio::fs::remove_file(&final_path).await;
+        let _ = stream.write_all(&[FILE_DENIED]).await;
+        return;
+    }
     let _ = ticket_store.db().record_event(
         &offer.ticket_id,
         "ATTACHMENT_RECEIVED",
@@ -2073,6 +2099,12 @@ async fn handle_incoming_file_stream(
 
     let _ = stream.write_all(&[FILE_ACCEPT]).await;
     let _ = stream.flush().await;
+}
+
+fn normalize_file_id(file_id: &str) -> Option<String> {
+    uuid::Uuid::parse_str(file_id)
+        .ok()
+        .map(|id| id.simple().to_string())
 }
 
 fn handle_hello(
@@ -2169,6 +2201,17 @@ mod tests {
         let info = NodeInfo::local(claimed_peer, "node".to_owned(), NodeMode::Operator);
         let error = validate_hello(&auth_peer, &info).unwrap_err();
         assert!(error.to_string().contains("HELLO PeerId mismatch"));
+    }
+
+    #[test]
+    fn file_id_must_be_a_uuid_and_cannot_traverse_paths() {
+        let id = uuid::Uuid::new_v4();
+        assert_eq!(
+            normalize_file_id(&id.to_string()),
+            Some(id.simple().to_string())
+        );
+        assert_eq!(normalize_file_id("../../authorized_keys"), None);
+        assert_eq!(normalize_file_id("..\\..\\authorized_keys"), None);
     }
 
     #[test]

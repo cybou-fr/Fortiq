@@ -333,7 +333,7 @@ impl TicketDb {
             priority,
             client_peer_id: client_peer_id.to_string(),
             operator_peer_id: operator_peer_id.to_string(),
-            remote_access_enabled: true,
+            remote_access_enabled: false,
             revision: 1,
             created_at: now,
             updated_at: now,
@@ -970,7 +970,7 @@ mod tests {
         assert_eq!(ticket.title, "VPN issue");
         assert_eq!(ticket.state, TicketState::Open);
         assert_eq!(ticket.priority, TicketPriority::High);
-        assert!(ticket.remote_access_enabled);
+        assert!(!ticket.remote_access_enabled);
 
         let retrieved = db.get_ticket(&ticket.id).unwrap().unwrap();
         assert_eq!(retrieved.id, ticket.id);
@@ -981,12 +981,12 @@ mod tests {
             .unwrap();
         assert_eq!(updated.state, TicketState::InProgress);
 
-        // Toggle remote access off
+        // Enabling remote access requires an explicit client action.
         let toggled = db
-            .set_remote_access(&ticket.id, false, "client_1")
+            .set_remote_access(&ticket.id, true, "client_1")
             .unwrap()
             .unwrap();
-        assert!(!toggled.remote_access_enabled);
+        assert!(toggled.remote_access_enabled);
 
         // Events check
         let events = db.list_events(&ticket.id).unwrap();
@@ -1162,14 +1162,14 @@ mod tests {
         let stale = ticket.clone();
 
         let current = db
-            .set_remote_access(&ticket.id, false, "c1")
+            .set_remote_access(&ticket.id, true, "c1")
             .unwrap()
             .unwrap();
         assert!(current.revision > stale.revision);
         assert!(db.import_ticket(&stale).is_err());
 
         let stored = db.get_ticket(&ticket.id).unwrap().unwrap();
-        assert!(!stored.remote_access_enabled);
+        assert!(stored.remote_access_enabled);
         assert_eq!(stored.revision, current.revision);
     }
 

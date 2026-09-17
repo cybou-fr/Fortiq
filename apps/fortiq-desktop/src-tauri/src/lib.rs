@@ -329,15 +329,32 @@ async fn send_file(
     ticket_id: String,
     file_path: String,
 ) -> Result<fortiq_core::AttachmentRecord, String> {
+    let source = std::path::Path::new(&file_path);
+    let staged_path = fortiq_core::ipc::new_upload_staging_path(source)
+        .map_err(|error| format!("Impossible de créer le staging: {error}"))?;
+    tokio::fs::copy(source, &staged_path)
+        .await
+        .map_err(|error| format!("Impossible de lire le fichier sélectionné: {error}"))?;
     if let Some(resp) =
-        send_ipc_request(&fortiq_core::ipc::IpcRequest::SendFile { ticket_id, file_path }).await
+        send_ipc_request(&fortiq_core::ipc::IpcRequest::SendFile {
+            ticket_id,
+            staged_path: staged_path.to_string_lossy().to_string(),
+        })
+        .await
     {
         match resp {
             fortiq_core::ipc::IpcResponse::FileSent(att) => Ok(att),
-            fortiq_core::ipc::IpcResponse::Error(err) => Err(err),
-            _ => Err("Réponse inattendue du démon".to_string()),
+            fortiq_core::ipc::IpcResponse::Error(err) => {
+                let _ = tokio::fs::remove_file(&staged_path).await;
+                Err(err)
+            }
+            _ => {
+                let _ = tokio::fs::remove_file(&staged_path).await;
+                Err("Réponse inattendue du démon".to_string())
+            }
         }
     } else {
+        let _ = tokio::fs::remove_file(&staged_path).await;
         Err("Service FORTIQ indisponible".to_string())
     }
 }

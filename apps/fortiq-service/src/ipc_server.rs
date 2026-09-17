@@ -18,6 +18,62 @@ pub struct IpcState {
     pub p2p_sender: Option<tokio::sync::mpsc::Sender<fortiq_p2p::P2pCommand>>,
 }
 
+async fn import_staged_upload(
+    ticket_store: &TicketStore,
+    staged_path: &str,
+) -> std::result::Result<std::path::PathBuf, String> {
+    let spool = fortiq_core::ipc::upload_spool_dir();
+    import_staged_upload_from(ticket_store, staged_path, &spool).await
+}
+
+async fn import_staged_upload_from(
+    ticket_store: &TicketStore,
+    staged_path: &str,
+    spool: &std::path::Path,
+) -> std::result::Result<std::path::PathBuf, String> {
+    tokio::fs::create_dir_all(&spool)
+        .await
+        .map_err(|error| format!("Impossible de préparer le spool: {error}"))?;
+    let canonical_spool = tokio::fs::canonicalize(&spool)
+        .await
+        .map_err(|error| format!("Spool inaccessible: {error}"))?;
+    let canonical_source = tokio::fs::canonicalize(staged_path)
+        .await
+        .map_err(|error| format!("Fichier staged inaccessible: {error}"))?;
+    if canonical_source.parent() != Some(canonical_spool.as_path()) {
+        return Err("Le service refuse tout fichier situé hors du spool d'upload".to_string());
+    }
+    let staged_name = canonical_source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Nom de fichier staged invalide".to_string())?;
+    let (id, original_name) = staged_name
+        .split_once('_')
+        .ok_or_else(|| "Nom de fichier staged invalide".to_string())?;
+    uuid::Uuid::parse_str(id).map_err(|_| "Identifiant de staging invalide".to_string())?;
+    let metadata = tokio::fs::metadata(&canonical_source)
+        .await
+        .map_err(|error| format!("Metadata staged inaccessible: {error}"))?;
+    if !metadata.is_file() || metadata.len() > fortiq_p2p::MAX_FILE_SIZE {
+        return Err("Le fichier staged est invalide ou trop volumineux".to_string());
+    }
+
+    let private_dir = ticket_store.storage_dir().join("outbox-files");
+    tokio::fs::create_dir_all(&private_dir)
+        .await
+        .map_err(|error| format!("Impossible de créer le spool privé: {error}"))?;
+    let destination = private_dir.join(format!(
+        "{}_{}",
+        uuid::Uuid::new_v4().simple(),
+        original_name
+    ));
+    tokio::fs::copy(&canonical_source, &destination)
+        .await
+        .map_err(|error| format!("Impossible d'importer le fichier staged: {error}"))?;
+    let _ = tokio::fs::remove_file(&canonical_source).await;
+    Ok(destination)
+}
+
 pub async fn run_ipc_server(state: Arc<IpcState>) -> Result<()> {
     tokio::try_join!(
         run_command_ipc(Arc::clone(&state)),
@@ -471,6 +527,11 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             description,
             priority,
         } => {
+            if state.config.mode() != NodeMode::Managed {
+                return IpcResponse::Error(
+                    "Seul le client managed peut créer un ticket".to_string(),
+                );
+            }
             let client_peer = if state.config.mode() == NodeMode::Managed {
                 state.peer_id.to_string()
             } else {
@@ -632,7 +693,11 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                         created_at: now,
                         delivery_state: "PENDING".to_string(),
                     };
-                    let _ = state.ticket_store.db().add_chat_message(&chat_msg);
+                    if let Err(error) = state.ticket_store.db().add_chat_message(&chat_msg) {
+                        return IpcResponse::Error(format!(
+                            "Échec de persistance du message local: {error}"
+                        ));
+                    }
                     let preview: String = body.chars().take(40).collect();
                     let _ = state.ticket_store.db().record_event(
                         &ticket_id,
@@ -697,7 +762,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
         }
         IpcRequest::SendFile {
             ticket_id,
-            file_path,
+            staged_path,
         } => match state.ticket_store.db().get_ticket(&ticket_id) {
             Ok(Some(ticket)) => {
                 if !ticket.state.permits_work() {
@@ -715,13 +780,18 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     Err(e) => return IpcResponse::Error(format!("PeerId distant invalide: {e}")),
                 };
                 if let Some(ref sender) = state.p2p_sender {
+                    let file_path =
+                        match import_staged_upload(&state.ticket_store, &staged_path).await {
+                            Ok(path) => path,
+                            Err(error) => return IpcResponse::Error(error),
+                        };
                     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
                     if sender
                         .send(fortiq_p2p::P2pCommand::SendFile {
                             peer,
                             dial: None,
                             ticket_id: ticket_id.clone(),
-                            file_path: std::path::PathBuf::from(file_path),
+                            file_path,
                             reply: reply_tx,
                         })
                         .await
@@ -901,6 +971,25 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn staged_upload_rejects_files_outside_the_public_spool() {
+        let dir = tempfile::tempdir().unwrap();
+        let spool = dir.path().join("public-spool");
+        tokio::fs::create_dir_all(&spool).await.unwrap();
+        let outside = dir
+            .path()
+            .join(format!("{}_secret.txt", uuid::Uuid::new_v4().simple()));
+        tokio::fs::write(&outside, b"secret").await.unwrap();
+        let store = TicketStore::new(dir.path().join("tickets.json"));
+
+        let error = import_staged_upload_from(&store, outside.to_str().unwrap(), &spool)
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("hors du spool"));
+        assert!(outside.exists());
+    }
 
     #[tokio::test]
     async fn test_terminal_client_rejected_on_managed_mode() {
