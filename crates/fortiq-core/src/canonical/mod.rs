@@ -12,6 +12,7 @@ pub mod events;
 pub mod records;
 pub mod signing;
 pub mod storage;
+pub mod sync;
 pub mod types;
 
 #[cfg(test)]
