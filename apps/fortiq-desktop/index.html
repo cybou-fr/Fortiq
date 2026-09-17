@@ -54,17 +54,6 @@
               <span id="tickets-count-badge" class="badge">0 Ticket</span>
             </div>
           </div>
-          <div class="ticket-queue-tools">
-            <label class="search-field" for="ticket-search">
-              <i class="ph ph-magnifying-glass"></i>
-              <input id="ticket-search" type="search" placeholder="Rechercher un ticket ou un client…" autocomplete="off" />
-            </label>
-            <select id="ticket-sort" class="queue-sort" aria-label="Trier les tickets">
-              <option value="activity">Dernière activité</option>
-              <option value="priority">Priorité</option>
-              <option value="oldest">Plus ancien</option>
-            </select>
-          </div>
           <div class="ticket-filter-bar">
             <button class="filter-btn active" data-filter="ALL">Tous</button>
             <button class="filter-btn" data-filter="OPEN">Ouverts</button>
@@ -94,11 +83,11 @@
             </div>
           </div>
 
-          <div class="ticket-tabs" role="tablist" aria-label="Contenu du ticket">
-            <button class="ticket-tab-btn active" role="tab" aria-selected="true" aria-controls="ticket-pane-overview" data-ttab="overview"><i class="ph ph-info"></i> Aperçu</button>
-            <button class="ticket-tab-btn" role="tab" aria-selected="false" aria-controls="ticket-pane-chat" data-ttab="chat"><i class="ph ph-chat-centered-text"></i> Discussion</button>
-            <button class="ticket-tab-btn" role="tab" aria-selected="false" aria-controls="ticket-pane-files" data-ttab="files"><i class="ph ph-paperclip"></i> Fichiers</button>
-            <button class="ticket-tab-btn" role="tab" aria-selected="false" aria-controls="ticket-pane-events" data-ttab="events"><i class="ph ph-clock-counter-clockwise"></i> Activité</button>
+          <div class="ticket-tabs">
+            <button class="ticket-tab-btn active" data-ttab="overview"><i class="ph ph-info"></i> Aperçu</button>
+            <button class="ticket-tab-btn" data-ttab="chat"><i class="ph ph-chat-centered-text"></i> Chat</button>
+            <button class="ticket-tab-btn" data-ttab="files"><i class="ph ph-paperclip"></i> Fichiers</button>
+            <button class="ticket-tab-btn" data-ttab="events"><i class="ph ph-clock-counter-clockwise"></i> Journal</button>
           </div>
 
           <!-- Tab 1: Overview -->
@@ -152,7 +141,7 @@
               </div>
               <div class="chat-input-row">
                 <input type="text" id="operator-chat-input" class="chat-input" placeholder="Écrire un message au client..." disabled />
-                <button id="btn-operator-chat-send" class="btn btn-primary" aria-label="Envoyer le message" disabled><i class="ph ph-paper-plane-right"></i></button>
+                <button id="btn-operator-chat-send" class="btn btn-primary" disabled><i class="ph ph-paper-plane-right"></i></button>
               </div>
             </div>
           </div>
@@ -167,8 +156,8 @@
                 </div>
               </div>
               <div class="attachments-upload-bar">
-                <div class="file-picker-copy"><strong>Joindre un fichier</strong><span>50 MB maximum</span></div>
-                <button id="btn-operator-file-send" class="btn btn-primary" disabled><i class="ph ph-paperclip"></i> Choisir un fichier</button>
+                <input type="text" id="operator-file-path" class="chat-input" placeholder="Chemin absolu du fichier à transférer..." disabled />
+                <button id="btn-operator-file-send" class="btn btn-primary" disabled><i class="ph ph-upload-simple"></i> Envoyer</button>
               </div>
             </div>
           </div>
@@ -185,7 +174,7 @@
         </section>
 
         <!-- Panel 3: Live Terminal -->
-        <section class="panel panel-terminal" aria-hidden="true">
+        <section class="panel panel-terminal">
           <div class="panel-header terminal-header">
             <div class="terminal-title">
               <span class="status-dot" id="terminal-dot"></span>
@@ -242,14 +231,14 @@
           <div class="managed-card-header">
             <div class="managed-beacon">
               <span id="managed-beacon-dot" class="status-dot offline"></span>
-              <span id="managed-beacon-text" class="managed-beacon-text">Service disponible · Échanges sécurisés</span>
+              <span id="managed-beacon-text" class="managed-beacon-text">Service Agent Actif · Réseau P2P Sécurisé</span>
             </div>
-            <span class="badge transport">PROTÉGÉ</span>
+            <span class="badge transport">SOUVERAIN</span>
           </div>
 
           <div id="managed-offline-alert" class="offline-banner" style="display: none;">
             <i class="ph ph-warning-circle"></i>
-            <span>Le service FORTIQ n'est pas disponible pour le moment.</span>
+            <span>Démon FORTIQ hors-ligne. Le service local d'arrière-plan n'est pas démarré.</span>
           </div>
 
           <!-- State 1: No open ticket -> Form to create a ticket -->
@@ -303,12 +292,12 @@
             <p id="managed-ticket-desc-display" style="font-size: 13px; color: var(--text-secondary); text-align: left; width: 100%; margin-bottom: 14px;">Description</p>
 
             <!-- Remote Access Toggle Box -->
-            <div id="managed-consent-card" class="consent-card">
-              <div class="consent-copy">
-                <div class="consent-heading"><span>Télé-assistance</span><span id="managed-access-state" class="consent-state">DÉSACTIVÉE</span></div>
-                <div id="managed-access-description">Le technicien n'a pas accès au terminal de votre ordinateur.</div>
+            <div style="background: rgba(0, 132, 255, 0.08); border: 1px solid rgba(0, 180, 255, 0.2); border-radius: 8px; padding: 12px 16px; width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+              <div>
+                <div style="font-weight: 600; font-size: 13px;">Accès Télé-assistance à Distance</div>
+                <div style="font-size: 11px; color: var(--text-muted);">Vous pouvez autoriser ou révoquer l'accès terminal du technicien à tout instant.</div>
               </div>
-              <button id="btn-managed-access-toggle" class="btn btn-secondary btn-sm">Autoriser la télé-assistance</button>
+              <button id="btn-managed-access-toggle" class="btn btn-secondary btn-sm">AUTORISÉ (Cliquer pour révoquer)</button>
             </div>
 
             <!-- Client Sub-Tabs: Chat & Files -->
@@ -326,7 +315,7 @@
                 </div>
                 <div class="chat-input-row" style="padding: 8px 0 0 0;">
                   <input type="text" id="client-chat-input" class="chat-input" placeholder="Votre message..." />
-                  <button id="btn-client-chat-send" class="btn btn-primary" aria-label="Envoyer le message"><i class="ph ph-paper-plane-right"></i></button>
+                  <button id="btn-client-chat-send" class="btn btn-primary"><i class="ph ph-paper-plane-right"></i></button>
                 </div>
               </div>
             </div>
@@ -339,8 +328,8 @@
                   </div>
                 </div>
                 <div class="attachments-upload-bar" style="padding: 8px 0 0 0;">
-                  <div class="file-picker-copy"><strong>Joindre un fichier</strong><span>50 MB maximum</span></div>
-                  <button id="btn-client-file-send" class="btn btn-primary"><i class="ph ph-paperclip"></i> Choisir un fichier</button>
+                  <input type="text" id="client-file-path" class="chat-input" placeholder="Chemin du fichier à envoyer..." />
+                  <button id="btn-client-file-send" class="btn btn-primary"><i class="ph ph-upload-simple"></i> Envoyer</button>
                 </div>
               </div>
             </div>
@@ -352,19 +341,6 @@
           </div>
         </div>
       </main>
-    </div>
-
-    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-    <div id="confirm-dialog" class="modal-backdrop" hidden>
-      <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-description">
-        <div class="confirm-icon"><i class="ph ph-warning"></i></div>
-        <h2 id="confirm-title">Clôturer le ticket ?</h2>
-        <p id="confirm-description">Le chat, les fichiers et le terminal ne seront plus disponibles.</p>
-        <div class="confirm-actions">
-          <button id="confirm-cancel" class="btn btn-secondary">Annuler</button>
-          <button id="confirm-accept" class="btn btn-danger">Clôturer</button>
-        </div>
-      </div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

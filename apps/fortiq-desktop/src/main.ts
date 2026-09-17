@@ -1,7 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -95,8 +93,6 @@ export interface TicketDetail {
 let currentPeerId = "";
 let activeOperatorTab: "tickets" | "peers" = "tickets";
 let ticketFilter: "ALL" | "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED" = "ALL";
-let ticketSearch = "";
-let ticketSort: "activity" | "priority" | "oldest" = "activity";
 
 let ticketsCache: TicketRecord[] = [];
 let selectedTicketId: string | null = null;
@@ -128,69 +124,6 @@ function formatTimestamp(epochSecs: number): string {
   if (!epochSecs) return "—";
   const date = new Date(epochSecs * 1000);
   return date.toLocaleString();
-}
-
-function formatRelativeTime(epochSecs: number): string {
-  const seconds = Math.max(0, Math.floor(Date.now() / 1000) - epochSecs);
-  if (seconds < 60) return "à l'instant";
-  if (seconds < 3600) return `il y a ${Math.floor(seconds / 60)} min`;
-  if (seconds < 86400) return `il y a ${Math.floor(seconds / 3600)} h`;
-  return `il y a ${Math.floor(seconds / 86400)} j`;
-}
-
-function showToast(title: string, message: string, kind: "info" | "error" = "info") {
-  const region = document.getElementById("toast-region");
-  if (!region) return;
-  const toast = document.createElement("div");
-  toast.className = `toast ${kind === "error" ? "toast--error" : ""}`;
-  toast.innerHTML = `
-    <i class="ph ${kind === "error" ? "ph-warning-circle" : "ph-check-circle"}"></i>
-    <div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span></div>
-    <button class="toast__close" aria-label="Fermer la notification"><i class="ph ph-x"></i></button>`;
-  toast.querySelector("button")?.addEventListener("click", () => toast.remove());
-  region.appendChild(toast);
-  window.setTimeout(() => toast.remove(), kind === "error" ? 8000 : 4500);
-}
-
-function requestConfirmation(title: string, description: string, action: string): Promise<boolean> {
-  const backdrop = document.getElementById("confirm-dialog") as HTMLElement | null;
-  const titleEl = document.getElementById("confirm-title");
-  const descriptionEl = document.getElementById("confirm-description");
-  const cancel = document.getElementById("confirm-cancel") as HTMLButtonElement | null;
-  const accept = document.getElementById("confirm-accept") as HTMLButtonElement | null;
-  if (!backdrop || !cancel || !accept) return Promise.resolve(false);
-  if (titleEl) titleEl.textContent = title;
-  if (descriptionEl) descriptionEl.textContent = description;
-  accept.textContent = action;
-  backdrop.hidden = false;
-  cancel.focus();
-  return new Promise((resolve) => {
-    const finish = (value: boolean) => {
-      backdrop.hidden = true;
-      cancel.removeEventListener("click", onCancel);
-      accept.removeEventListener("click", onAccept);
-      resolve(value);
-    };
-    const onCancel = () => finish(false);
-    const onAccept = () => finish(true);
-    cancel.addEventListener("click", onCancel);
-    accept.addEventListener("click", onAccept);
-  });
-}
-
-function setTerminalPanelVisible(visible: boolean) {
-  const layout = document.getElementById("operator-view");
-  const panel = document.querySelector<HTMLElement>(".panel-terminal");
-  layout?.classList.toggle("terminal-open", visible);
-  panel?.setAttribute("aria-hidden", String(!visible));
-  if (visible) window.setTimeout(() => fitAddon?.fit(), 80);
-}
-
-async function chooseAndSendFile(ticketId: string): Promise<boolean> {
-  const selected = await open({ multiple: false, directory: false });
-  if (!selected || Array.isArray(selected)) return false;
-  await invoke("send_file", { ticketId, filePath: selected });
-  return true;
 }
 
 function isPeerConnected(status: string): boolean {
@@ -241,9 +174,7 @@ function setOperatorTab(tab: "tickets" | "peers") {
 
 function setTicketSubTab(tab: "overview" | "chat" | "files" | "events") {
   document.querySelectorAll<HTMLElement>(".ticket-tab-btn[data-ttab]").forEach((btn) => {
-    const selected = btn.dataset.ttab === tab;
-    btn.classList.toggle("active", selected);
-    btn.setAttribute("aria-selected", String(selected));
+    btn.classList.toggle("active", btn.dataset.ttab === tab);
   });
   const panes = ["overview", "chat", "files", "events"];
   panes.forEach((p) => {
@@ -254,9 +185,7 @@ function setTicketSubTab(tab: "overview" | "chat" | "files" | "events") {
 
 function setClientSubTab(tab: "chat" | "files") {
   document.querySelectorAll<HTMLElement>(".ticket-tab-btn[data-mttab]").forEach((btn) => {
-    const selected = btn.dataset.mttab === tab;
-    btn.classList.toggle("active", selected);
-    btn.setAttribute("aria-selected", String(selected));
+    btn.classList.toggle("active", btn.dataset.mttab === tab);
   });
   const chatPane = document.getElementById("client-pane-chat");
   const filesPane = document.getElementById("client-pane-files");
@@ -280,7 +209,7 @@ function updateStatusBadge(isOnline: boolean, stateText: string) {
     }
     if (managedDot) managedDot.className = "status-dot online";
     if (managedBeaconText) {
-      managedBeaconText.textContent = "Service disponible · Échanges sécurisés";
+      managedBeaconText.textContent = "Service Agent Actif · Réseau P2P Sécurisé";
       managedBeaconText.style.color = "#7ee787";
     }
     if (opOfflineAlert) opOfflineAlert.style.display = "none";
@@ -293,7 +222,7 @@ function updateStatusBadge(isOnline: boolean, stateText: string) {
     }
     if (managedDot) managedDot.className = "status-dot offline";
     if (managedBeaconText) {
-      managedBeaconText.textContent = "Service FORTIQ indisponible";
+      managedBeaconText.textContent = "Service Démon Indisponible";
       managedBeaconText.style.color = "var(--accent-red)";
     }
     if (opOfflineAlert) opOfflineAlert.style.display = "flex";
@@ -310,22 +239,10 @@ function renderTicketList(tickets: TicketRecord[], isOnline: boolean) {
   const countBadge = document.getElementById("tickets-count-badge");
   if (!container) return;
 
-  const query = ticketSearch.trim().toLocaleLowerCase();
-  const priorityWeight = { URGENT: 3, HIGH: 2, NORMAL: 1 } as const;
-  const filtered = tickets
-    .filter((t) => {
-      if (ticketFilter !== "ALL" && t.state !== ticketFilter) return false;
-      if (!query) return true;
-      return [t.id, t.title, t.description, t.client_peer_id]
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(query);
-    })
-    .sort((a, b) => {
-      if (ticketSort === "priority") return priorityWeight[b.priority] - priorityWeight[a.priority] || b.updated_at - a.updated_at;
-      if (ticketSort === "oldest") return a.created_at - b.created_at;
-      return b.updated_at - a.updated_at;
-    });
+  const filtered = tickets.filter((t) => {
+    if (ticketFilter === "ALL") return true;
+    return t.state === ticketFilter;
+  });
 
   if (countBadge) {
     countBadge.textContent = `${filtered.length} Ticket${filtered.length > 1 ? "s" : ""}`;
@@ -385,7 +302,7 @@ function renderTicketList(tickets: TicketRecord[], isOnline: boolean) {
       </div>
       <div class="ticket-card-title">${escapeHtml(ticket.title)}</div>
       <div class="ticket-card-meta">
-        <span>${escapeHtml(ticket.client_peer_id.substring(0, 10))}… · ${escapeHtml(formatRelativeTime(ticket.updated_at))}</span>
+        <span>Client: ${escapeHtml(ticket.client_peer_id.substring(0, 10))}...</span>
         ${accessBadge}
       </div>
     `;
@@ -469,7 +386,9 @@ function clearTicketDetails() {
   if (attList) {
     attList.innerHTML = `<div class="empty-state"><div class="empty-state-subtitle">Sélectionnez un ticket pour afficher les fichiers.</div></div>`;
   }
+  const filePathInput = document.getElementById("operator-file-path") as HTMLInputElement | null;
   const btnFileSend = document.getElementById("btn-operator-file-send") as HTMLButtonElement | null;
+  if (filePathInput) filePathInput.disabled = true;
   if (btnFileSend) btnFileSend.disabled = true;
 
   const eventsTimeline = document.getElementById("operator-events-timeline");
@@ -514,6 +433,7 @@ function renderTicketOverview(ticket: TicketRecord) {
   const btnTermToggle = document.getElementById("btn-terminal-toggle") as HTMLButtonElement | null;
   const chatInput = document.getElementById("operator-chat-input") as HTMLInputElement | null;
   const btnChatSend = document.getElementById("btn-operator-chat-send") as HTMLButtonElement | null;
+  const filePathInput = document.getElementById("operator-file-path") as HTMLInputElement | null;
   const btnFileSend = document.getElementById("btn-operator-file-send") as HTMLButtonElement | null;
 
   if (detailTitle) detailTitle.textContent = `Ticket ${ticket.id.substring(0, 8)}`;
@@ -561,11 +481,12 @@ function renderTicketOverview(ticket: TicketRecord) {
 
   if (btnTermToggle) {
     btnTermToggle.disabled = isClosed;
-    btnTermToggle.textContent = isTerminalActive ? "Terminer la session" : "Démarrer Terminal";
+    btnTermToggle.textContent = isTerminalActive ? "Fermer Terminal" : "Démarrer Terminal";
   }
 
   if (chatInput) chatInput.disabled = isClosed;
   if (btnChatSend) btnChatSend.disabled = isClosed;
+  if (filePathInput) filePathInput.disabled = isClosed;
   if (btnFileSend) btnFileSend.disabled = isClosed;
 
   // Update terminal denied banner if remote access is off or closed
@@ -585,7 +506,6 @@ function renderTicketOverview(ticket: TicketRecord) {
 function renderOperatorChat(messages: ChatMessage[]) {
   const container = document.getElementById("operator-chat-messages");
   if (!container) return;
-  const stayAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 48;
 
   if (messages.length === 0) {
     container.innerHTML = `
@@ -600,23 +520,21 @@ function renderOperatorChat(messages: ChatMessage[]) {
   container.innerHTML = messages
     .map((msg) => {
       const isMe = msg.sender_peer_id === currentPeerId;
-      const bubbleClass = isMe ? "message message--mine" : "message message--remote";
+      const bubbleClass = isMe ? "chat-bubble outgoing" : "chat-bubble incoming";
       const senderLabel = isMe ? "Moi (Opérateur)" : `Client (${msg.sender_peer_id.substring(0, 8)})`;
-      const state = msg.delivery_state || "PENDING";
       return `
         <div class="${bubbleClass}">
-          <div class="message__meta">
-            <span class="message__sender">${escapeHtml(senderLabel)}</span>
-            <span class="message__time">${escapeHtml(formatTimestamp(msg.created_at))}</span>
+          <div class="chat-meta">
+            <span class="chat-sender">${escapeHtml(senderLabel)}</span>
+            <span class="chat-time">${escapeHtml(formatTimestamp(msg.created_at))}</span>
           </div>
-          <div class="message__body">${escapeHtml(msg.body)}</div>
-          ${isMe ? `<span class="message__state ${state === "FAILED" ? "message__state--failed" : ""}">${escapeHtml(state === "DELIVERED" ? "Livré" : state === "FAILED" ? "Échec — réessayez" : "Envoi…")}</span>` : ""}
+          <div class="chat-body">${escapeHtml(msg.body)}</div>
         </div>
       `;
     })
     .join("");
 
-  if (stayAtBottom) container.scrollTop = container.scrollHeight;
+  container.scrollTop = container.scrollHeight;
 }
 
 function renderOperatorAttachments(attachments: AttachmentRecord[]) {
@@ -649,11 +567,6 @@ function renderOperatorAttachments(attachments: AttachmentRecord[]) {
               <span>•</span>
               <span class="code" title="SHA-256: ${escapeHtml(att.sha256)}">${escapeHtml(att.sha256.substring(0, 10))}...</span>
             </div>
-          </div>
-          <div class="attachment-actions">
-            <button class="btn-icon attachment-action" data-attachment-action="open" data-path="${escapeHtml(att.local_path)}" title="Ouvrir" aria-label="Ouvrir ${escapeHtml(att.filename)}"><i class="ph ph-arrow-square-out"></i></button>
-            <button class="btn-icon attachment-action" data-attachment-action="reveal" data-path="${escapeHtml(att.local_path)}" title="Afficher dans le dossier" aria-label="Afficher ${escapeHtml(att.filename)} dans le dossier"><i class="ph ph-folder-open"></i></button>
-            <button class="btn-icon attachment-action" data-attachment-action="hash" data-hash="${escapeHtml(att.sha256)}" title="Copier SHA-256" aria-label="Copier le SHA-256"><i class="ph ph-copy"></i></button>
           </div>
           <span class="badge ${att.state === 'READY' ? 'online' : ''}">${escapeHtml(att.state)}</span>
         </div>
@@ -716,9 +629,6 @@ function renderManagedTicketPortal(activeTicket: TicketRecord | null, isOnline: 
   const managedTitleDisplay = document.getElementById("managed-ticket-title-display");
   const managedDescDisplay = document.getElementById("managed-ticket-desc-display");
   const btnAccessToggle = document.getElementById("btn-managed-access-toggle") as HTMLButtonElement | null;
-  const consentCard = document.getElementById("managed-consent-card");
-  const accessState = document.getElementById("managed-access-state");
-  const accessDescription = document.getElementById("managed-access-description");
   const btnCreate = document.getElementById("btn-managed-create") as HTMLButtonElement | null;
 
   if (btnCreate) btnCreate.disabled = !isOnline;
@@ -739,19 +649,12 @@ function renderManagedTicketPortal(activeTicket: TicketRecord | null, isOnline: 
 
     if (btnAccessToggle) {
       if (activeTicket.remote_access_enabled) {
-        btnAccessToggle.textContent = "Révoquer l'accès";
-        btnAccessToggle.className = "btn btn-danger btn-sm";
+        btnAccessToggle.textContent = "AUTORISÉ (Cliquer pour révoquer)";
+        btnAccessToggle.className = "btn btn-secondary btn-sm";
       } else {
-        btnAccessToggle.textContent = "Autoriser la télé-assistance";
-        btnAccessToggle.className = "btn btn-primary btn-sm";
+        btnAccessToggle.textContent = "RÉVOQUÉ (Cliquer pour autoriser)";
+        btnAccessToggle.className = "btn btn-danger btn-sm";
       }
-    }
-    consentCard?.classList.toggle("enabled", activeTicket.remote_access_enabled);
-    if (accessState) accessState.textContent = activeTicket.remote_access_enabled ? "ACTIVÉE" : "DÉSACTIVÉE";
-    if (accessDescription) {
-      accessDescription.textContent = activeTicket.remote_access_enabled
-        ? "Le technicien peut actuellement ouvrir une session à distance."
-        : "Le technicien n'a pas accès au terminal de votre ordinateur.";
     }
 
     loadManagedTicketSubData(activeTicket.id);
@@ -788,16 +691,15 @@ function renderClientChat(messages: ChatMessage[]) {
   container.innerHTML = messages
     .map((msg) => {
       const isMe = msg.sender_peer_id === currentPeerId;
-      const bubbleClass = isMe ? "message message--mine" : "message message--remote";
+      const bubbleClass = isMe ? "chat-bubble outgoing" : "chat-bubble incoming";
       const senderLabel = isMe ? "Vous" : "Technicien Opérateur";
       return `
         <div class="${bubbleClass}">
-          <div class="message__meta">
-            <span class="message__sender">${escapeHtml(senderLabel)}</span>
-            <span class="message__time">${escapeHtml(formatTimestamp(msg.created_at))}</span>
+          <div class="chat-meta">
+            <span class="chat-sender">${escapeHtml(senderLabel)}</span>
+            <span class="chat-time">${escapeHtml(formatTimestamp(msg.created_at))}</span>
           </div>
-          <div class="message__body">${escapeHtml(msg.body)}</div>
-          ${isMe ? `<span class="message__state ${msg.delivery_state === "FAILED" ? "message__state--failed" : ""}">${escapeHtml(msg.delivery_state === "DELIVERED" ? "Livré" : msg.delivery_state === "FAILED" ? "Échec — réessayez" : "Envoi…")}</span>` : ""}
+          <div class="chat-body">${escapeHtml(msg.body)}</div>
         </div>
       `;
     })
@@ -833,11 +735,6 @@ function renderClientAttachments(attachments: AttachmentRecord[]) {
               <span>•</span>
               <span>${escapeHtml(sender)}</span>
             </div>
-          </div>
-          <div class="attachment-actions">
-            <button class="btn-icon attachment-action" data-attachment-action="open" data-path="${escapeHtml(att.local_path)}" title="Ouvrir" aria-label="Ouvrir ${escapeHtml(att.filename)}"><i class="ph ph-arrow-square-out"></i></button>
-            <button class="btn-icon attachment-action" data-attachment-action="reveal" data-path="${escapeHtml(att.local_path)}" title="Afficher dans le dossier" aria-label="Afficher ${escapeHtml(att.filename)} dans le dossier"><i class="ph ph-folder-open"></i></button>
-            <button class="btn-icon attachment-action" data-attachment-action="hash" data-hash="${escapeHtml(att.sha256)}" title="Copier SHA-256" aria-label="Copier le SHA-256"><i class="ph ph-copy"></i></button>
           </div>
           <span class="badge ${att.state === 'READY' ? 'online' : ''}">${escapeHtml(att.state)}</span>
         </div>
@@ -1029,14 +926,10 @@ function initTerminal() {
     const btnToggle = document.getElementById("btn-terminal-toggle") as HTMLButtonElement | null;
     if (termDot) termDot.className = "status-dot";
     if (termTitle) termTitle.textContent = "Terminal P2P — Session terminée";
-    if (btnToggle) {
-      btnToggle.disabled = false;
-      btnToggle.textContent = "Démarrer Terminal";
-    }
+    if (btnToggle) btnToggle.textContent = "Démarrer Terminal";
     if (term) {
       term.write("\r\n\x1b[33m[FORTIQ] Session terminal fermée.\x1b[0m\r\n");
     }
-    window.setTimeout(() => setTerminalPanelVisible(false), 500);
   });
 }
 
@@ -1057,7 +950,6 @@ async function connectTerminalSession(peerId: string, ticketId: string | null | 
   const deniedMsg = document.getElementById("terminal-denied-msg");
 
   if (deniedBanner) deniedBanner.style.display = "none";
-  setTerminalPanelVisible(true);
   if (placeholder) placeholder.style.display = "none";
   if (container) container.style.display = "block";
 
@@ -1095,7 +987,7 @@ async function connectTerminalSession(peerId: string, ticketId: string | null | 
     isTerminalActive = true;
     if (termDot) termDot.className = "status-dot online";
     if (termTitle) termTitle.textContent = `Terminal actif — ${peerId.substring(0, 14)}`;
-    if (btnToggle) btnToggle.textContent = "Terminer la session";
+    if (btnToggle) btnToggle.textContent = "Fermer Terminal";
   } catch (err: any) {
     if (generation !== terminalSwitchGeneration) return;
     isTerminalActive = false;
@@ -1115,7 +1007,6 @@ async function connectTerminalSession(peerId: string, ticketId: string | null | 
         }
       }
     }
-    showToast("Session impossible", errMsg, "error");
   } finally {
     if (btnToggle) {
       btnToggle.disabled = false;
@@ -1168,17 +1059,6 @@ function initEventListeners() {
     });
   });
 
-  const ticketSearchInput = document.getElementById("ticket-search") as HTMLInputElement | null;
-  ticketSearchInput?.addEventListener("input", () => {
-    ticketSearch = ticketSearchInput.value;
-    renderTicketList(ticketsCache, true);
-  });
-  const ticketSortSelect = document.getElementById("ticket-sort") as HTMLSelectElement | null;
-  ticketSortSelect?.addEventListener("change", () => {
-    ticketSort = ticketSortSelect.value as typeof ticketSort;
-    renderTicketList(ticketsCache, true);
-  });
-
   // Overview action buttons
   const btnTake = document.getElementById("btn-ticket-take");
   if (btnTake) {
@@ -1187,9 +1067,8 @@ function initEventListeners() {
       try {
         await invoke("update_ticket_status", { ticketId: selectedTicketId, state: "IN_PROGRESS" });
         await refresh();
-        showToast("Ticket pris en charge", "Le client voit maintenant le ticket en cours.");
       } catch (err) {
-        showToast("Mise à jour impossible", String(err), "error");
+        alert(`Erreur lors de la prise en charge : ${err}`);
       }
     });
   }
@@ -1201,9 +1080,8 @@ function initEventListeners() {
       try {
         await invoke("update_ticket_status", { ticketId: selectedTicketId, state: "RESOLVED" });
         await refresh();
-        showToast("Ticket résolu", "La résolution a été enregistrée sur le poste client.");
       } catch (err) {
-        showToast("Mise à jour impossible", String(err), "error");
+        alert(`Erreur lors du marquage résolu : ${err}`);
       }
     });
   }
@@ -1212,17 +1090,12 @@ function initEventListeners() {
   if (btnClose) {
     btnClose.addEventListener("click", async () => {
       if (!selectedTicketId) return;
-      if (!await requestConfirmation(
-        "Clôturer le ticket ?",
-        "Le chat, les fichiers et le terminal ne seront plus disponibles.",
-        "Clôturer",
-      )) return;
+      if (!confirm("Voulez-vous vraiment clôturer définitivement ce ticket ?")) return;
       try {
         await invoke("update_ticket_status", { ticketId: selectedTicketId, state: "CLOSED" });
         await refresh();
-        showToast("Ticket clôturé", "La demande est désormais en lecture seule.");
       } catch (err) {
-        showToast("Clôture impossible", String(err), "error");
+        alert(`Erreur lors de la clôture : ${err}`);
       }
     });
   }
@@ -1234,19 +1107,12 @@ function initEventListeners() {
     if (!selectedTicketId || !opChatInput) return;
     const body = opChatInput.value.trim();
     if (!body) return;
-    const sendButton = btnOpChatSend as HTMLButtonElement | null;
     try {
-      opChatInput.disabled = true;
-      if (sendButton) sendButton.disabled = true;
-      await invoke("send_chat_message", { ticketId: selectedTicketId, body });
       opChatInput.value = "";
+      await invoke("send_chat_message", { ticketId: selectedTicketId, body });
       await loadSelectedTicketDetail(selectedTicketId);
     } catch (err) {
-      showToast("Message non envoyé", `${String(err)} Votre texte a été conservé.`, "error");
-    } finally {
-      opChatInput.disabled = false;
-      if (sendButton) sendButton.disabled = false;
-      opChatInput.focus();
+      alert(`Erreur d'envoi du message : ${err}`);
     }
   };
   if (btnOpChatSend) btnOpChatSend.addEventListener("click", sendOpChat);
@@ -1261,39 +1127,43 @@ function initEventListeners() {
 
   // Operator File Send
   const btnOpFileSend = document.getElementById("btn-operator-file-send");
+  const opFilePathInput = document.getElementById("operator-file-path") as HTMLInputElement | null;
   const sendOpFile = async () => {
-    if (!selectedTicketId) return;
+    if (!selectedTicketId || !opFilePathInput) return;
+    const filePath = opFilePathInput.value.trim();
+    if (!filePath) return;
     try {
-      (btnOpFileSend as HTMLButtonElement | null)?.setAttribute("disabled", "true");
-      const sent = await chooseAndSendFile(selectedTicketId);
-      if (!sent) return;
+      opFilePathInput.value = "";
+      await invoke("send_file", { ticketId: selectedTicketId, filePath });
       await loadSelectedTicketDetail(selectedTicketId);
-      showToast("Fichier ajouté", "Le transfert est enregistré dans le ticket.");
     } catch (err) {
-      showToast("Fichier non envoyé", String(err), "error");
-    } finally {
-      (btnOpFileSend as HTMLButtonElement | null)?.removeAttribute("disabled");
+      alert(`Erreur d'envoi du fichier : ${err}`);
     }
   };
   if (btnOpFileSend) btnOpFileSend.addEventListener("click", sendOpFile);
+  if (opFilePathInput) {
+    opFilePathInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        sendOpFile();
+      }
+    });
+  }
 
   // Terminal Toggle Button
   const btnTermToggle = document.getElementById("btn-terminal-toggle");
   if (btnTermToggle) {
-    btnTermToggle.addEventListener("click", async () => {
+    btnTermToggle.addEventListener("click", () => {
       if (!currentTicketDetail) return;
       const ticket = currentTicketDetail.ticket;
       if (isTerminalActive) {
-        btnTermToggle.setAttribute("disabled", "true");
-        btnTermToggle.textContent = "Fermeture…";
-        try {
-          await invoke("close_terminal_session");
-          showToast("Session terminée", "Le terminal distant a été fermé.");
-        } catch (err) {
-          btnTermToggle.removeAttribute("disabled");
-          btnTermToggle.textContent = "Terminer la session";
-          showToast("Fermeture impossible", String(err), "error");
-        }
+        // Stop current session
+        isTerminalActive = false;
+        const placeholder = document.getElementById("terminal-placeholder");
+        const container = document.getElementById("xterm-container");
+        if (placeholder) placeholder.style.display = "flex";
+        if (container) container.style.display = "none";
+        btnTermToggle.textContent = "Démarrer Terminal";
         return;
       }
       queueTerminalSession(ticket.client_peer_id, ticket.id);
@@ -1330,8 +1200,7 @@ function initEventListeners() {
       if (!managedTitleInput) return;
       const title = managedTitleInput.value.trim();
       if (!title) {
-        showToast("Objet requis", "Indiquez brièvement le problème rencontré.", "error");
-        managedTitleInput.focus();
+        alert("Veuillez indiquer un objet pour la demande.");
         return;
       }
       const description = managedDescInput?.value.trim() || "";
@@ -1343,9 +1212,8 @@ function initEventListeners() {
         managedTitleInput.value = "";
         if (managedDescInput) managedDescInput.value = "";
         await refresh();
-        showToast("Demande créée", "Votre technicien peut maintenant voir ce ticket.");
       } catch (err) {
-        showToast("Création impossible", String(err), "error");
+        alert(`Échec de création du ticket : ${err}`);
       } finally {
         btnManagedCreate.disabled = false;
       }
@@ -1357,20 +1225,15 @@ function initEventListeners() {
   if (btnManagedClose) {
     btnManagedClose.addEventListener("click", async () => {
       if (!managedActiveTicket) return;
-      if (!await requestConfirmation(
-        "Clôturer votre demande ?",
-        "La discussion, les fichiers et la télé-assistance ne seront plus disponibles.",
-        "Clôturer",
-      )) return;
+      if (!confirm("Voulez-vous clôturer cette demande d'assistance ?")) return;
       try {
         await invoke("update_ticket_status", {
           ticketId: managedActiveTicket.id,
           state: "CLOSED",
         });
         await refresh();
-        showToast("Demande clôturée", "Le ticket est maintenant en lecture seule.");
       } catch (err) {
-        showToast("Clôture impossible", String(err), "error");
+        alert(`Erreur de clôture : ${err}`);
       }
     });
   }
@@ -1387,12 +1250,8 @@ function initEventListeners() {
           enabled: newEnabled,
         });
         await refresh();
-        showToast(
-          newEnabled ? "Télé-assistance autorisée" : "Télé-assistance révoquée",
-          newEnabled ? "Le technicien peut maintenant ouvrir une session distante." : "Toute session active sera terminée.",
-        );
       } catch (err) {
-        showToast("Modification impossible", String(err), "error");
+        alert(`Erreur de modification d'accès à distance : ${err}`);
       }
     });
   }
@@ -1405,17 +1264,11 @@ function initEventListeners() {
     const body = clientChatInput.value.trim();
     if (!body) return;
     try {
-      clientChatInput.disabled = true;
-      (btnClientChatSend as HTMLButtonElement | null)?.setAttribute("disabled", "true");
-      await invoke("send_chat_message", { ticketId: managedActiveTicket.id, body });
       clientChatInput.value = "";
+      await invoke("send_chat_message", { ticketId: managedActiveTicket.id, body });
       await loadManagedTicketSubData(managedActiveTicket.id);
     } catch (err) {
-      showToast("Message non envoyé", `${String(err)} Votre texte a été conservé.`, "error");
-    } finally {
-      clientChatInput.disabled = false;
-      (btnClientChatSend as HTMLButtonElement | null)?.removeAttribute("disabled");
-      clientChatInput.focus();
+      alert(`Erreur d'envoi du message : ${err}`);
     }
   };
   if (btnClientChatSend) btnClientChatSend.addEventListener("click", sendClientChat);
@@ -1430,43 +1283,33 @@ function initEventListeners() {
 
   // Managed view: File Send
   const btnClientFileSend = document.getElementById("btn-client-file-send");
+  const clientFilePathInput = document.getElementById("client-file-path") as HTMLInputElement | null;
   const sendClientFile = async () => {
-    if (!managedActiveTicket) return;
+    if (!managedActiveTicket || !clientFilePathInput) return;
+    const filePath = clientFilePathInput.value.trim();
+    if (!filePath) return;
     try {
-      (btnClientFileSend as HTMLButtonElement | null)?.setAttribute("disabled", "true");
-      const sent = await chooseAndSendFile(managedActiveTicket.id);
-      if (!sent) return;
+      clientFilePathInput.value = "";
+      await invoke("send_file", { ticketId: managedActiveTicket.id, filePath });
       await loadManagedTicketSubData(managedActiveTicket.id);
-      showToast("Fichier ajouté", "Votre technicien peut maintenant le consulter.");
     } catch (err) {
-      showToast("Fichier non envoyé", String(err), "error");
-    } finally {
-      (btnClientFileSend as HTMLButtonElement | null)?.removeAttribute("disabled");
+      alert(`Erreur d'envoi du fichier : ${err}`);
     }
   };
   if (btnClientFileSend) btnClientFileSend.addEventListener("click", sendClientFile);
-
-  document.addEventListener("click", async (event) => {
-    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-attachment-action]");
-    if (!button) return;
-    try {
-      if (button.dataset.attachmentAction === "open" && button.dataset.path) {
-        await openPath(button.dataset.path);
-      } else if (button.dataset.attachmentAction === "reveal" && button.dataset.path) {
-        await revealItemInDir(button.dataset.path);
-      } else if (button.dataset.attachmentAction === "hash" && button.dataset.hash) {
-        await navigator.clipboard.writeText(button.dataset.hash);
-        showToast("SHA-256 copié", "L'empreinte du fichier est dans le presse-papiers.");
+  if (clientFilePathInput) {
+    clientFilePathInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        sendClientFile();
       }
-    } catch (err) {
-      showToast("Action impossible", String(err), "error");
-    }
-  });
+    });
+  }
 }
 
 window.addEventListener("DOMContentLoaded", () => {
   initTerminal();
   initEventListeners();
   refresh();
-  setInterval(refresh, 15000);
+  setInterval(refresh, 2500);
 });
