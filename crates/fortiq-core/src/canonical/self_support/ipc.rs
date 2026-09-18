@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::canonical::self_support::this_device::LocalDiagnostics;
 use crate::canonical::shell::challenge::ShellAuthResponse;
-use crate::canonical::types::{AccessEpoch, EntityId, TicketId};
+use crate::canonical::types::{EntityId, TicketId};
 
 /// Maximum allowed payload size for local IPC frames (4 MiB).
 pub const MAX_LOCAL_IPC_FRAME_SIZE: usize = 4 * 1024 * 1024;
@@ -57,28 +57,17 @@ pub enum LocalIpcMessage {
         creator_id: EntityId,
     },
     /// Response with the created self-support ticket details.
-    SelfSupportTicketCreated {
-        ticket_id: TicketId,
-        initial_epoch: AccessEpoch,
-    },
+    SelfSupportTicketCreated { ticket_id: TicketId },
     /// Request to initiate a local shell session.
-    ShellRequest {
-        ticket_id: TicketId,
-        epoch: AccessEpoch,
-    },
+    ShellRequest { ticket_id: TicketId },
     /// Challenge issued by host for shell authentication.
-    ShellChallengePrompt {
-        challenge: [u8; 32],
-        epoch: AccessEpoch,
-    },
+    ShellChallengePrompt { challenge: [u8; 32] },
     /// Client response to the shell challenge.
     ShellChallengeResponse { auth_response: ShellAuthResponse },
     /// Confirmation that local shell is authenticated and ready for streaming.
     ShellReady,
     /// Raw terminal byte stream frame.
     ShellStreamData(Vec<u8>),
-    /// Instant client revocation signal.
-    ShellRevoke { epoch: AccessEpoch, reason: String },
     /// Clean shell session termination.
     ShellClosed,
     /// Protocol or processing error.

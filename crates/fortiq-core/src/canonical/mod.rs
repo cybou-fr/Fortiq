@@ -44,6 +44,6 @@ pub use signing::{
     SigningError, Verifier, OBJECT_ID_DOMAIN, OBJECT_SIG_DOMAIN,
 };
 pub use types::{
-    AccessEpoch, BlobId, CryptoProfileId, EntityId, KeyId, NetworkId, ObjectId, OwnerId, RsProfile,
-    SegmentId, StorageClass, StreamId, TicketId,
+    BlobId, CryptoProfileId, EntityId, KeyId, NetworkId, ObjectId, OwnerId, RsProfile, SegmentId,
+    StorageClass, StreamId, TicketId,
 };

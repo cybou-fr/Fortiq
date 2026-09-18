@@ -48,12 +48,7 @@ pub async fn is_operator_authorized_for(state: &IpcState, required: u32) -> bool
         .as_secs();
     let mut session_guard = state.operator_session.write().await;
     if let Some(session) = session_guard.as_ref() {
-        if session.expires_at > now
-            && session
-                .cert
-                .capabilities
-                .has(required)
-        {
+        if session.expires_at > now && session.cert.capabilities.has(required) {
             return true;
         }
         if now >= session.expires_at {

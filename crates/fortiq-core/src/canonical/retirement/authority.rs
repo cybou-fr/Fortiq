@@ -4,13 +4,13 @@
 //! - Deprecate and remove static configuration-derived `operator_peer_id` authority.
 //! - Deprecate and remove permanent node roles (OPERATOR / MANAGED).
 //! - Enforce dynamic cryptographic authority via Segment Capabilities,
-//!   Owner-signed OperatorSessionCertificates, and client-owned AccessEpochs.
+//!   Owner-signed OperatorSessionCertificates, and ticket lifecycle state.
 
 use thiserror::Error;
 
 use crate::canonical::portable::certificate::OperatorSessionCertificate;
 use crate::canonical::signing::Verifier;
-use crate::canonical::types::{AccessEpoch, EntityId};
+use crate::canonical::types::EntityId;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AuthorityError {
@@ -20,8 +20,6 @@ pub enum AuthorityError {
     InsufficientCapability { required: u32, held: u32 },
     #[error("Invalid or expired session certificate: {0}")]
     InvalidCertificate(String),
-    #[error("Shell access denied: client AccessEpoch is invalid or revoked")]
-    AccessEpochInvalid,
 }
 
 /// Sovereign cryptographic authority resolver replacing static node roles.
@@ -55,27 +53,6 @@ impl CanonicalAuthorityResolver {
                 held: held_capabilities,
             })
         }
-    }
-
-    /// Evaluates shell execution admission.
-    ///
-    /// Requires BOTH an authorized operator certificate and a valid, unrevoked client AccessEpoch.
-    pub fn authorize_shell_execution(
-        cert: &OperatorSessionCertificate,
-        owner_verifier: &impl Verifier,
-        current_time: u64,
-        presented_epoch: &AccessEpoch,
-        active_client_epoch: &AccessEpoch,
-    ) -> Result<(), AuthorityError> {
-        // 1. Verify cryptographic operator certificate
-        Self::verify_operator_session(cert, owner_verifier, current_time)?;
-
-        // 2. Invariant #6: Client owns shell safety gate via AccessEpoch
-        if presented_epoch != active_client_epoch {
-            return Err(AuthorityError::AccessEpochInvalid);
-        }
-
-        Ok(())
     }
 
     /// Rejection guard for legacy static peer-id authorization.

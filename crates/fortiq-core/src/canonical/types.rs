@@ -158,11 +158,6 @@ define_id!(
     "Writer stream identifier within an entity/segment."
 );
 define_id!(TicketId, 16, "Support ticket identifier.");
-define_id!(
-    AccessEpoch,
-    16,
-    "Client-owned ticket access epoch for shell authorization."
-);
 
 /// Canonical storage class defining durability and replication strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
