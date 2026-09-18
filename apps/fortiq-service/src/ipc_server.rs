@@ -670,12 +670,10 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
         } => {
             let client_peer = state.peer_id.to_string();
 
-            match state.ticket_store.create_ticket(
-                &title,
-                &description,
-                priority,
-                &client_peer,
-            ) {
+            match state
+                .ticket_store
+                .create_ticket(&title, &description, priority, &client_peer)
+            {
                 Ok(record) => {
                     let target_str = state.config.network.bootstrap_peer.as_deref();
                     if let Some(target) = target_str {
@@ -760,7 +758,9 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     .send(fortiq_p2p::P2pCommand::SyncTickets {
                         peer,
                         dial: None,
-                        request: fortiq_p2p::TicketSyncRequest::UpdateStatusSigned(Box::new(mutation)),
+                        request: fortiq_p2p::TicketSyncRequest::UpdateStatusSigned(Box::new(
+                            mutation,
+                        )),
                         reply: reply_tx,
                     })
                     .await
@@ -793,19 +793,19 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     if let Some(ref ticket) = updated {
                         if let Some(target) = state.config.network.bootstrap_peer.as_deref() {
                             if let Ok(peer) = target.parse::<PeerId>() {
-                            if let Some(ref sender) = state.p2p_sender {
-                                let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
-                                let _ = sender
-                                    .send(fortiq_p2p::P2pCommand::SyncTickets {
-                                        peer,
-                                        dial: None,
-                                        request: fortiq_p2p::TicketSyncRequest::PushTicket(
-                                            Box::new(ticket.clone()),
-                                        ),
-                                        reply: reply_tx,
-                                    })
-                                    .await;
-                            }
+                                if let Some(ref sender) = state.p2p_sender {
+                                    let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+                                    let _ = sender
+                                        .send(fortiq_p2p::P2pCommand::SyncTickets {
+                                            peer,
+                                            dial: None,
+                                            request: fortiq_p2p::TicketSyncRequest::PushTicket(
+                                                Box::new(ticket.clone()),
+                                            ),
+                                            reply: reply_tx,
+                                        })
+                                        .await;
+                                }
                             }
                         }
                     }
@@ -856,11 +856,50 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     if let Ok(peer) = target_str.parse::<PeerId>() {
                         if let Some(ref sender) = state.p2p_sender {
                             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                            let authority = if ticket.client_peer_id != state.peer_id.to_string() {
+                                let session = state.operator_session.read().await;
+                                let Some(session) = session.as_ref() else {
+                                    return IpcResponse::Error(
+                                        "Session opérateur inactive".to_string(),
+                                    );
+                                };
+                                if !session.cert.capabilities.has(OperatorCapabilities::WRITE) {
+                                    return IpcResponse::Error(
+                                        "Capability WRITE requise".to_string(),
+                                    );
+                                }
+                                let mut proof = fortiq_p2p::OperatorSessionProof {
+                                    certificate: session.cert.clone(),
+                                    transport_peer_id: state.peer_id.to_string(),
+                                    capability: OperatorCapabilities::WRITE,
+                                    signature: Vec::new(),
+                                };
+                                proof.signature = match session.session_signer.sign(
+                                    &fortiq_p2p::OperatorSessionProof::signing_payload(
+                                        "chat",
+                                        &ticket_id,
+                                        body.as_bytes(),
+                                        &proof.transport_peer_id,
+                                        proof.capability,
+                                    ),
+                                ) {
+                                    Ok(signature) => signature,
+                                    Err(error) => {
+                                        return IpcResponse::Error(format!(
+                                            "Signature chat impossible: {error}"
+                                        ))
+                                    }
+                                };
+                                Some(proof)
+                            } else {
+                                None
+                            };
                             let wire_msg = fortiq_p2p::ChatMessageWire {
                                 id: msg_id,
                                 ticket_id: ticket_id.clone(),
                                 body,
                                 created_at: now,
+                                authority,
                             };
                             let _ = sender
                                 .send(fortiq_p2p::P2pCommand::SendChatMessage {
@@ -921,6 +960,29 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     Err(e) => return IpcResponse::Error(format!("PeerId distant invalide: {e}")),
                 };
                 if let Some(ref sender) = state.p2p_sender {
+                    let (certificate, session_signer) = if ticket.client_peer_id
+                        != state.peer_id.to_string()
+                    {
+                        let session = state.operator_session.read().await;
+                        let Some(session) = session.as_ref() else {
+                            return IpcResponse::Error("Session opérateur inactive".to_string());
+                        };
+                        if !session
+                            .cert
+                            .capabilities
+                            .has(OperatorCapabilities::FILE_TRANSFER)
+                        {
+                            return IpcResponse::Error(
+                                "Capability FILE_TRANSFER requise".to_string(),
+                            );
+                        }
+                        (
+                            Some(session.cert.clone()),
+                            Some(session.session_signer.clone()),
+                        )
+                    } else {
+                        (None, None)
+                    };
                     let file_path =
                         match import_staged_upload(&state.ticket_store, &staged_path).await {
                             Ok(path) => path,
@@ -933,6 +995,8 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                             dial: None,
                             ticket_id: ticket_id.clone(),
                             file_path,
+                            certificate,
+                            session_signer,
                             reply: reply_tx,
                         })
                         .await

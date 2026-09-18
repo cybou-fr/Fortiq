@@ -641,11 +641,10 @@ impl TicketDb {
 
     pub fn list_tickets(&self, state_filter: Option<TicketState>) -> Result<Vec<TicketRecord>> {
         let conn = self.conn.lock().unwrap();
-        let mut query =
-            "SELECT id, title, description, state, priority, client_peer_id,
+        let mut query = "SELECT id, title, description, state, priority, client_peer_id,
                                 revision, created_at, updated_at, closed_at
                          FROM tickets"
-                .to_string();
+            .to_string();
         if let Some(state) = state_filter {
             query.push_str(&format!(" WHERE state = '{}'", state.as_str()));
         }
@@ -1436,7 +1435,12 @@ mod v4_tests {
     fn shell_session_persistence_matches_schema() {
         let db = TicketDb::open_in_memory().unwrap();
         let ticket = db
-            .create_ticket("Support", "Shell persistence", TicketPriority::Normal, "client")
+            .create_ticket(
+                "Support",
+                "Shell persistence",
+                TicketPriority::Normal,
+                "client",
+            )
             .unwrap();
 
         db.record_shell_session_start("session-1", &ticket.id, "operator-peer", "QUIC")

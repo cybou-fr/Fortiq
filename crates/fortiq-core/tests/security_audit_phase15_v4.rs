@@ -71,4 +71,3 @@ fn ticket_manage_is_distinct_from_shell_execute() {
     )
     .is_err());
 }
-

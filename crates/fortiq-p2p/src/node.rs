@@ -11,9 +11,9 @@ use fortiq_core::{
     canonical::{
         codec::{from_canonical_cbor, DecoderLimits},
         control::Genesis,
-        portable::certificate::OperatorSessionCertificate,
+        portable::certificate::{OperatorCapabilities, OperatorSessionCertificate},
         retirement::authority::CanonicalAuthorityResolver,
-        signing::{derive_signing_key_id, Ed25519Signer, Ed25519Verifier, Verifier},
+        signing::{derive_signing_key_id, Ed25519Signer, Ed25519Verifier, Signer, Verifier},
     },
     Config, NodeInfo, TicketDb,
 };
@@ -57,9 +57,7 @@ pub const FILE_DENIED_TOO_LARGE: u8 = 0x04;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TicketSyncRequest {
     GetTickets,
-    GetTicket {
-        ticket_id: String,
-    },
+    GetTicket { ticket_id: String },
     PushTicket(Box<fortiq_core::TicketRecord>),
     UpdateStatusSigned(Box<TicketStateMutation>),
 }
@@ -118,6 +116,8 @@ pub struct ChatMessageWire {
     pub ticket_id: String,
     pub body: String,
     pub created_at: u64,
+    #[serde(default)]
+    pub authority: Option<OperatorSessionProof>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +134,42 @@ pub struct FileOfferWire {
     pub filename: String,
     pub file_size: u64,
     pub sha256: String,
+    #[serde(default)]
+    pub authority: Option<OperatorSessionProof>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorSessionProof {
+    pub certificate: OperatorSessionCertificate,
+    pub transport_peer_id: String,
+    pub capability: u32,
+    pub signature: Vec<u8>,
+}
+
+impl OperatorSessionProof {
+    pub const SIGNATURE_DOMAIN: &'static [u8] = b"FORTIQ-SESSION-AUTH-v1:";
+
+    pub fn signing_payload(
+        operation: &str,
+        ticket_id: &str,
+        content: &[u8],
+        transport_peer_id: &str,
+        capability: u32,
+    ) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(Self::SIGNATURE_DOMAIN);
+        for value in [
+            operation.as_bytes(),
+            ticket_id.as_bytes(),
+            content,
+            transport_peer_id.as_bytes(),
+        ] {
+            payload.extend_from_slice(&(value.len() as u32).to_be_bytes());
+            payload.extend_from_slice(value);
+        }
+        payload.extend_from_slice(&capability.to_be_bytes());
+        payload
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +189,68 @@ fn is_ticket_counterparty(
         return true;
     }
     ticket.client_peer_id == local && configured_route == Some(remote.as_str())
+}
+
+async fn verify_operator_session_proof(
+    config: &Config,
+    remote_peer: &PeerId,
+    proof: &OperatorSessionProof,
+    operation: &str,
+    ticket_id: &str,
+    content: &[u8],
+) -> bool {
+    let Some(genesis) = tokio::fs::read(config.genesis_path())
+        .await
+        .ok()
+        .and_then(|bytes| from_canonical_cbor::<Genesis>(&bytes, DecoderLimits::CONTROL).ok())
+        .filter(|genesis| genesis.verify().is_ok())
+    else {
+        return false;
+    };
+    let Ok(owner_verifier) =
+        Ed25519Verifier::from_public_key(&genesis.tbs.owner_root_signing_public_key)
+    else {
+        return false;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let expected_host = fortiq_core::canonical::types::EntityId::from_bytes(
+        *blake3::hash(&remote_peer.to_bytes()).as_bytes(),
+    );
+    if proof.transport_peer_id != remote_peer.to_string()
+        || proof.certificate.network_id != genesis.tbs.network_id
+        || proof.certificate.owner_id != genesis.tbs.owner_id
+        || proof.certificate.host_entity != expected_host
+        || proof.certificate.operator_key_id
+            != derive_signing_key_id(&proof.certificate.session_pubkey)
+        || !proof.certificate.capabilities.has(proof.capability)
+        || CanonicalAuthorityResolver::verify_operator_session(
+            &proof.certificate,
+            &owner_verifier,
+            now,
+        )
+        .is_err()
+    {
+        return false;
+    }
+    let Ok(session_verifier) = Ed25519Verifier::from_public_key(&proof.certificate.session_pubkey)
+    else {
+        return false;
+    };
+    session_verifier
+        .verify(
+            &OperatorSessionProof::signing_payload(
+                operation,
+                ticket_id,
+                content,
+                &proof.transport_peer_id,
+                proof.capability,
+            ),
+            &proof.signature,
+        )
+        .is_ok()
 }
 
 struct ShellSessionGuard(Arc<AtomicBool>);
@@ -221,6 +319,8 @@ pub enum P2pCommand {
         dial: Option<Multiaddr>,
         ticket_id: String,
         file_path: std::path::PathBuf,
+        certificate: Option<OperatorSessionCertificate>,
+        session_signer: Option<Arc<Ed25519Signer>>,
         reply: tokio::sync::oneshot::Sender<Result<fortiq_core::AttachmentRecord, String>>,
     },
 }
@@ -526,6 +626,7 @@ fn spawn_open_shell_next(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_send_file_stream(
     peer: PeerId,
     ticket_id: String,
@@ -533,6 +634,8 @@ fn spawn_send_file_stream(
     sender_peer_id: String,
     mut control: libp2p_stream::Control,
     ticket_db: TicketDb,
+    certificate: Option<OperatorSessionCertificate>,
+    session_signer: Option<Arc<Ed25519Signer>>,
     completion: (
         Option<String>,
         tokio::sync::oneshot::Sender<Result<fortiq_core::AttachmentRecord, String>>,
@@ -585,6 +688,28 @@ fn spawn_send_file_stream(
                 filename: file_name.clone(),
                 file_size,
                 sha256: sha256.clone(),
+                authority: match (certificate, session_signer) {
+                    (Some(certificate), Some(signer)) => {
+                        let content = format!("{}:{}:{}", file_name, file_size, sha256);
+                        let mut proof = OperatorSessionProof {
+                            certificate,
+                            transport_peer_id: sender_peer_id.clone(),
+                            capability: OperatorCapabilities::FILE_TRANSFER,
+                            signature: Vec::new(),
+                        };
+                        proof.signature = signer
+                            .sign(&OperatorSessionProof::signing_payload(
+                                "file",
+                                &ticket_id,
+                                content.as_bytes(),
+                                &proof.transport_peer_id,
+                                proof.capability,
+                            ))
+                            .map_err(|error| format!("Signature fichier impossible: {error}"))?;
+                        Some(proof)
+                    }
+                    _ => None,
+                },
             };
 
             let mut stream = control
@@ -939,6 +1064,8 @@ async fn event_loop(
         std::path::PathBuf,
         tokio::sync::oneshot::Sender<Result<fortiq_core::AttachmentRecord, String>>,
         Option<String>,
+        Option<OperatorSessionCertificate>,
+        Option<Arc<Ed25519Signer>>,
     );
 
     let mut pending_shell_next: std::collections::HashMap<PeerId, Vec<PendingShellNext>> =
@@ -1079,7 +1206,7 @@ async fn event_loop(
                             }
                         }
                     }
-                    P2pCommand::SendFile { peer, dial, ticket_id, file_path, reply } => {
+                    P2pCommand::SendFile { peer, dial, ticket_id, file_path, certificate, session_signer, reply } => {
                         let payload = FileSendOutboxPayload {
                             ticket_id: ticket_id.clone(),
                             file_path: file_path.clone(),
@@ -1105,10 +1232,12 @@ async fn event_loop(
                                 local_info.peer_id.clone(),
                                 stream_control.clone(),
                                 ticket_store.clone(),
+                                certificate,
+                                session_signer,
                                 (outbox_id, reply),
                             );
                         } else {
-                            pending_file_dials.entry(peer).or_default().push((ticket_id, file_path, reply, outbox_id));
+                            pending_file_dials.entry(peer).or_default().push((ticket_id, file_path, reply, outbox_id, certificate, session_signer));
                             if let Some(addr) = dial {
                                 let _ = swarm.dial(addr);
                             } else {
@@ -1133,6 +1262,7 @@ async fn event_loop(
                 let t_store = ticket_store.clone();
                 let local_peer_id = local_info.peer_id.clone();
                 let configured_route = config.network.bootstrap_peer.clone();
+                let file_config = config.clone();
                 let file_slot = incoming_file_slots.clone().try_acquire_owned().ok();
                 tokio::spawn(async move {
                     handle_incoming_file_stream(
@@ -1140,6 +1270,7 @@ async fn event_loop(
                         remote_peer,
                         &local_peer_id,
                         configured_route.as_deref(),
+                        &file_config,
                         t_store,
                         files_dir,
                         file_slot,
@@ -1252,6 +1383,7 @@ async fn event_loop(
                                     ticket_id: message.ticket_id,
                                     body: message.body,
                                     created_at: message.created_at,
+                                    authority: None,
                                 };
                                 let request_id =
                                     swarm.behaviour_mut().chat.send_request(&peer_id, wire);
@@ -1274,7 +1406,7 @@ async fn event_loop(
                     }
                     let mut active_file_outbox = std::collections::HashSet::new();
                     if let Some(pending) = pending_file_dials.remove(&peer_id) {
-                        for (tid, file_path, reply, outbox_id) in pending {
+                        for (tid, file_path, reply, outbox_id, certificate, session_signer) in pending {
                             if let Some(id) = outbox_id.as_ref() {
                                 active_file_outbox.insert(id.clone());
                             }
@@ -1285,6 +1417,8 @@ async fn event_loop(
                                 local_info.peer_id.clone(),
                                 stream_control.clone(),
                                 ticket_store.clone(),
+                                certificate,
+                                session_signer,
                                 (outbox_id, reply),
                             );
                         }
@@ -1305,6 +1439,8 @@ async fn event_loop(
                                             local_info.peer_id.clone(),
                                             stream_control.clone(),
                                             ticket_store.clone(),
+                                            None,
+                                            None,
                                             (Some(record.id), reply),
                                         );
                                     }
@@ -1346,6 +1482,7 @@ async fn event_loop(
                         swarm,
                         &local_info.peer_id,
                         config.network.bootstrap_peer.as_deref(),
+                        &config,
                         &ticket_store,
                         &mut pending_chat_messages,
                     ).await;
@@ -1467,7 +1604,7 @@ async fn event_loop(
                                 }
                             }
                             if let Some(pending) = pending_file_dials.remove(&peer) {
-                                for (_, _, reply, _) in pending {
+                                for (_, _, reply, _, _, _) in pending {
                                     let _ = reply.send(Err(format!(
                                         "Impossible d'établir la connexion avec le poste distant: {error}"
                                     )));
@@ -1617,18 +1754,19 @@ async fn handle_ticket_v2(
                         TicketSyncResponse::Tickets(tickets)
                     }
                     TicketSyncRequest::GetTicket { ticket_id } => {
-                        let ticket = ticket_store
-                            .get_ticket(&ticket_id)
-                            .ok()
-                            .flatten()
-                            .filter(|ticket| {
-                                is_ticket_counterparty(
-                                    ticket,
-                                    local_peer_id,
-                                    &peer,
-                                    config.network.bootstrap_peer.as_deref(),
-                                )
-                            });
+                        let ticket =
+                            ticket_store
+                                .get_ticket(&ticket_id)
+                                .ok()
+                                .flatten()
+                                .filter(|ticket| {
+                                    is_ticket_counterparty(
+                                        ticket,
+                                        local_peer_id,
+                                        &peer,
+                                        config.network.bootstrap_peer.as_deref(),
+                                    )
+                                });
                         TicketSyncResponse::Ticket(ticket)
                     }
                     TicketSyncRequest::PushTicket(ticket) => {
@@ -1660,7 +1798,9 @@ async fn handle_ticket_v2(
                         let genesis = tokio::fs::read(config.genesis_path())
                             .await
                             .ok()
-                            .and_then(|bytes| from_canonical_cbor::<Genesis>(&bytes, DecoderLimits::CONTROL).ok())
+                            .and_then(|bytes| {
+                                from_canonical_cbor::<Genesis>(&bytes, DecoderLimits::CONTROL).ok()
+                            })
                             .filter(|genesis| genesis.verify().is_ok());
                         let authorized = current.as_ref().is_some_and(|ticket| {
                             let Some(genesis) = genesis.as_ref() else { return false; };
@@ -1702,7 +1842,9 @@ async fn handle_ticket_v2(
                                 mutation.new_state,
                                 &peer.to_string(),
                             ) {
-                                Ok(Some(ticket)) => TicketSyncResponse::MutationApplied(Box::new(ticket)),
+                                Ok(Some(ticket)) => {
+                                    TicketSyncResponse::MutationApplied(Box::new(ticket))
+                                }
                                 Ok(None) => TicketSyncResponse::MutationRejected {
                                     kind: MutationRejectionKind::Permanent,
                                     message: "Ticket introuvable".to_string(),
@@ -1771,6 +1913,7 @@ async fn handle_chat(
     swarm: &mut Swarm<Behaviour>,
     local_peer_id: &str,
     configured_route: Option<&str>,
+    config: &Config,
     ticket_store: &TicketDb,
     pending_chat_messages: &mut std::collections::HashMap<
         request_response::OutboundRequestId,
@@ -1782,13 +1925,39 @@ async fn handle_chat(
             request_response::Message::Request {
                 request, channel, ..
             } => {
+                let authority_valid = match ticket_store.get_ticket(&request.ticket_id) {
+                    Ok(Some(ticket)) if ticket.client_peer_id == local_peer_id => {
+                        match request.authority.as_ref() {
+                            Some(proof) => {
+                                verify_operator_session_proof(
+                                    config,
+                                    &peer,
+                                    proof,
+                                    "chat",
+                                    &request.ticket_id,
+                                    request.body.as_bytes(),
+                                )
+                                .await
+                            }
+                            None => true,
+                        }
+                    }
+                    _ => true,
+                };
                 let ack = match ticket_store.get_ticket(&request.ticket_id) {
                     Ok(Some(ticket)) => {
-                        if !is_ticket_counterparty(&ticket, local_peer_id, &peer, configured_route) {
+                        if !is_ticket_counterparty(&ticket, local_peer_id, &peer, configured_route)
+                        {
                             ChatAckWire {
                                 message_id: request.id,
                                 success: false,
                                 error: Some("PeerId non autorisé pour ce ticket".to_string()),
+                            }
+                        } else if !authority_valid {
+                            ChatAckWire {
+                                message_id: request.id,
+                                success: false,
+                                error: Some("Authority WRITE invalide".to_string()),
                             }
                         } else if !ticket.state.permits_work() {
                             ChatAckWire {
@@ -1945,11 +2114,7 @@ async fn handle_incoming_shell_next(
         && session_verifier
             .and_then(|verifier| verifier.verify(&payload, &handshake.challenge_signature))
             .is_ok();
-    let ticket = match ticket_store
-        .get_ticket(&handshake.ticket_id)
-        .ok()
-        .flatten()
-    {
+    let ticket = match ticket_store.get_ticket(&handshake.ticket_id).ok().flatten() {
         Some(ticket) => ticket,
         None => {
             let _ =
@@ -2031,11 +2196,13 @@ async fn handle_incoming_shell_next(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_incoming_file_stream(
     mut stream: libp2p::Stream,
     remote_peer: PeerId,
     local_peer_id: &str,
     configured_route: Option<&str>,
+    config: &Config,
     ticket_store: TicketDb,
     files_base_dir: std::path::PathBuf,
     file_slot: Option<tokio::sync::OwnedSemaphorePermit>,
@@ -2089,6 +2256,29 @@ async fn handle_incoming_file_stream(
         warn!(remote_peer_id = %remote_peer, ticket_id = %offer.ticket_id, "denied file from non-counterparty");
         let _ = stream.write_all(&[FILE_DENIED]).await;
         return;
+    }
+
+    if ticket.client_peer_id == local_peer_id {
+        let content = format!("{}:{}:{}", offer.filename, offer.file_size, offer.sha256);
+        let valid = match offer.authority.as_ref() {
+            Some(proof) => {
+                verify_operator_session_proof(
+                    config,
+                    &remote_peer,
+                    proof,
+                    "file",
+                    &offer.ticket_id,
+                    content.as_bytes(),
+                )
+                .await
+            }
+            None => true,
+        };
+        if !valid {
+            warn!(remote_peer_id = %remote_peer, ticket_id = %offer.ticket_id, "denied file with invalid FILE_TRANSFER authority");
+            let _ = stream.write_all(&[FILE_DENIED]).await;
+            return;
+        }
     }
 
     if !ticket.state.permits_work() {
@@ -2377,6 +2567,38 @@ mod tests {
             &attacker,
             None,
         ));
+    }
+
+    #[test]
+    fn operator_session_proof_payload_binds_operation_ticket_content_and_capability() {
+        let payload = OperatorSessionProof::signing_payload(
+            "chat",
+            "FTQ-1",
+            b"hello",
+            "operator-peer",
+            OperatorCapabilities::WRITE,
+        );
+        assert!(payload.starts_with(OperatorSessionProof::SIGNATURE_DOMAIN));
+        assert_ne!(
+            payload,
+            OperatorSessionProof::signing_payload(
+                "file",
+                "FTQ-1",
+                b"hello",
+                "operator-peer",
+                OperatorCapabilities::WRITE,
+            )
+        );
+        assert_ne!(
+            payload,
+            OperatorSessionProof::signing_payload(
+                "chat",
+                "FTQ-1",
+                b"tampered",
+                "operator-peer",
+                OperatorCapabilities::WRITE,
+            )
+        );
     }
 
     #[test]

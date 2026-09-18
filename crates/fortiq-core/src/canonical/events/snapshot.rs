@@ -42,10 +42,7 @@ impl TicketSnapshot {
 }
 
 /// Fast cold-start reducer: begins with a verified snapshot and applies only tail events.
-pub fn reduce_ticket_from_snapshot(
-    snapshot: &TicketSnapshot,
-    graph: &EventGraph,
-) -> TicketView {
+pub fn reduce_ticket_from_snapshot(snapshot: &TicketSnapshot, graph: &EventGraph) -> TicketView {
     let mut view = snapshot.materialized_state.clone();
     let incorporated: HashSet<ObjectId> = snapshot.frontier_head_packs.iter().copied().collect();
 
@@ -103,8 +100,7 @@ pub fn reduce_ticket_from_snapshot(
                 }
                 LogicalEvent::TicketStateChanged { .. } => {
                     if let LogicalEvent::TicketStateChanged { state, .. } = event {
-                        if view.state.can_transition_to(*state)
-                        {
+                        if view.state.can_transition_to(*state) {
                             view.state = *state;
                         }
                     }

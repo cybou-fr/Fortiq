@@ -19,9 +19,7 @@ pub mod tombstone;
 
 pub use batcher::{BatchPolicy, EventPackBatcher, FlushDecision};
 pub use graph::{EventGraph, EventGraphError, VerifiedEventPack};
-pub use reducer::{
-    reduce_ticket, AttachmentView, ChatMessageView, TicketView,
-};
+pub use reducer::{reduce_ticket, AttachmentView, ChatMessageView, TicketView};
 pub use search::{LocalSearchIndex, MatchType, SearchResult};
 pub use snapshot::{reduce_ticket_from_snapshot, TicketSnapshot, TICKET_REDUCER_VERSION};
 pub use stream::{StreamAppendEntry, StreamCursor, StreamError};

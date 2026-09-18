@@ -131,8 +131,7 @@ pub fn reduce_ticket(ticket_id: TicketId, graph: &EventGraph) -> Option<TicketVi
                 LogicalEvent::TicketStateChanged { .. } => {
                     if let Some(v) = &mut view {
                         if let LogicalEvent::TicketStateChanged { state, .. } = event {
-                            if v.state.can_transition_to(*state)
-                            {
+                            if v.state.can_transition_to(*state) {
                                 v.state = *state;
                             }
                         }

@@ -203,6 +203,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
                 ticket_id: created_ticket.id.clone(),
                 body: "Bonjour, je prends en charge votre demande.".to_string(),
                 created_at: now_secs(),
+                authority: None,
             },
             reply: chat_tx,
         })
@@ -214,9 +215,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
     assert_eq!(ack1.message_id, op_msg_id);
 
     // Verify Managed DB recorded the incoming message
-    let managed_msgs = managed_store
-        .list_messages(&created_ticket.id)
-        .unwrap();
+    let managed_msgs = managed_store.list_messages(&created_ticket.id).unwrap();
     assert_eq!(managed_msgs.len(), 1);
     assert_eq!(
         managed_msgs[0].body,
@@ -236,6 +235,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
                 ticket_id: created_ticket.id.clone(),
                 body: "Merci, voici les logs d'erreur.".to_string(),
                 created_at: now_secs(),
+                authority: None,
             },
             reply: chat2_tx,
         })
@@ -249,9 +249,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
     assert!(ack2.success);
     assert_eq!(ack2.message_id, client_msg_id);
 
-    let op_msgs = operator_store
-        .list_messages(&created_ticket.id)
-        .unwrap();
+    let op_msgs = operator_store.list_messages(&created_ticket.id).unwrap();
     assert!(op_msgs
         .iter()
         .any(|m| m.body == "Merci, voici les logs d'erreur."));
@@ -271,6 +269,8 @@ async fn e2e_ticket_centric_full_lifecycle() {
             dial: Some(managed_dial_addr.clone()),
             ticket_id: created_ticket.id.clone(),
             file_path: test_file_path,
+            certificate: None,
+            session_signer: None,
             reply: file_tx,
         })
         .await
@@ -282,9 +282,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
 
     // Verify Managed DB received attachment and file saved to disk
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let managed_attachments = managed_store
-        .list_attachments(&created_ticket.id)
-        .unwrap();
+    let managed_attachments = managed_store.list_attachments(&created_ticket.id).unwrap();
     assert_eq!(managed_attachments.len(), 1);
     assert_eq!(managed_attachments[0].filename, "crash_report.log");
     assert_eq!(

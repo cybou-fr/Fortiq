@@ -152,7 +152,11 @@ async fn e2e_managed_operator_quic_interaction() {
 
     // Close the exact ticket remotely as the authorized counterparty.
     ticket_store
-        .update_ticket_state(&opened_ticket.id, TicketState::Closed, &operator_peer_id.to_string())
+        .update_ticket_state(
+            &opened_ticket.id,
+            TicketState::Closed,
+            &operator_peer_id.to_string(),
+        )
         .unwrap();
 
     // Verify ticket state is persisted as CLOSED on managed peer

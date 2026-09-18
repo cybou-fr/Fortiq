@@ -244,7 +244,11 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
 
     // Step D: Close the exact ticket through the ticket-aware protocol.
     ticket_store
-        .update_ticket_state(&opened_ticket.id, TicketState::Closed, &operator_peer_id.to_string())
+        .update_ticket_state(
+            &opened_ticket.id,
+            TicketState::Closed,
+            &operator_peer_id.to_string(),
+        )
         .unwrap();
 
     // Step E: Verify ticket state is persisted as CLOSED on managed peer
@@ -497,7 +501,11 @@ async fn e2e_relay_production_rate_limiting_smoke() {
 
     // Step C: Close the exact ticket through the ticket-aware protocol.
     ticket_store
-        .update_ticket_state(&opened_ticket.id, TicketState::Closed, &operator_peer_id.to_string())
+        .update_ticket_state(
+            &opened_ticket.id,
+            TicketState::Closed,
+            &operator_peer_id.to_string(),
+        )
         .unwrap();
 
     // Step D: Verify ticket state is persisted as CLOSED on managed peer
