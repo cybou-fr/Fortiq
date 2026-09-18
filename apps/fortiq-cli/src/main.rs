@@ -301,7 +301,6 @@ async fn cmd_ticket_show(pipe: Option<&str>, ticket_id: &str) -> Result<()> {
             println!("Statut:        {}", t.state.as_str());
             println!("Priorité:      {}", t.priority.as_str());
             println!("Client:        {}", t.client_peer_id);
-            println!("Opérateur:     {}", t.operator_peer_id);
             println!("Créé le:       {} (timestamp)", t.created_at);
             if let Some(closed) = t.closed_at {
                 println!("Fermé le:      {} (timestamp)", closed);

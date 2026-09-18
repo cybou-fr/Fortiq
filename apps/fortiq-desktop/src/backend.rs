@@ -274,7 +274,6 @@ impl BackendActor {
                     state: detail.ticket.state.as_str().to_string(),
                     created_at: detail.ticket.created_at,
                     client_peer_id: detail.ticket.client_peer_id,
-                    operator_peer_id: detail.ticket.operator_peer_id,
                     messages: msgs,
                     attachments,
                 };

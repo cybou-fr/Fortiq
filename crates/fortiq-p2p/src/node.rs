@@ -114,8 +114,7 @@ fn is_ticket_counterparty(
     remote: &PeerId,
 ) -> bool {
     let remote = remote.to_string();
-    (ticket.client_peer_id == local && ticket.operator_peer_id == remote)
-        || (ticket.operator_peer_id == local && ticket.client_peer_id == remote)
+    ticket.client_peer_id == local || ticket.client_peer_id == remote.to_string()
 }
 
 struct ShellSessionGuard(Arc<AtomicBool>);
@@ -1580,8 +1579,7 @@ async fn handle_ticket_v2(
                     }
                     TicketSyncRequest::PushTicket(ticket) => {
                         let remote = peer.to_string();
-                        let authorized = ticket.client_peer_id == remote
-                            && ticket.operator_peer_id == local_peer_id;
+                        let authorized = ticket.client_peer_id == remote;
                         if !authorized {
                             TicketSyncResponse::MutationRejected {
                                 kind: MutationRejectionKind::Permanent,
@@ -1606,10 +1604,9 @@ async fn handle_ticket_v2(
                     }
                     TicketSyncRequest::UpdateStatus { ticket_id, state } => {
                         let current = ticket_store.db().get_ticket(&ticket_id).ok().flatten();
-                        let authorized = current.as_ref().is_some_and(|ticket| {
-                            ticket.client_peer_id == local_peer_id
-                                && ticket.operator_peer_id == peer.to_string()
-                        });
+                        let authorized = current
+                            .as_ref()
+                            .is_some_and(|ticket| ticket.client_peer_id == local_peer_id);
                         if !authorized {
                             TicketSyncResponse::MutationRejected {
                                 kind: MutationRejectionKind::Permanent,

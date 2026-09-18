@@ -106,7 +106,6 @@ pub struct TicketRecord {
     pub state: TicketState,
     pub priority: TicketPriority,
     pub client_peer_id: String,
-    pub operator_peer_id: String,
     #[serde(default)]
     pub revision: u64,
     pub created_at: u64,
@@ -223,12 +222,10 @@ impl TicketDb {
 
             CREATE TABLE IF NOT EXISTS tickets (
                 id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
                 description TEXT NOT NULL,
                 state TEXT NOT NULL,
                 priority TEXT NOT NULL,
                 client_peer_id TEXT NOT NULL,
-                operator_peer_id TEXT NOT NULL,
                 revision INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
@@ -259,7 +256,6 @@ impl TicketDb {
             CREATE TABLE IF NOT EXISTS shell_sessions (
                 id TEXT PRIMARY KEY,
                 ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-                operator_peer_id TEXT NOT NULL,
                 started_at INTEGER NOT NULL,
                 ended_at INTEGER,
                 transport TEXT NOT NULL,
@@ -324,31 +320,38 @@ impl TicketDb {
             }
             found_epoch || found_remote
         };
-        if has_legacy_permission_columns {
+        let has_operator_binding = {
+            let mut stmt = conn.prepare("PRAGMA table_info(tickets)")?;
+            let mut columns = stmt
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter();
+            columns.any(|column| column == "operator_peer_id")
+        };
+        if has_legacy_permission_columns || has_operator_binding {
             conn.execute_batch(
                 "PRAGMA foreign_keys = OFF;
                  BEGIN;
-                 CREATE TABLE tickets_v4 (
+                 CREATE TABLE tickets_v5 (
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
                     description TEXT NOT NULL,
                     state TEXT NOT NULL,
                     priority TEXT NOT NULL,
                     client_peer_id TEXT NOT NULL,
-                    operator_peer_id TEXT NOT NULL,
                     revision INTEGER NOT NULL DEFAULT 1,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
                     closed_at INTEGER
                  );
-                 INSERT INTO tickets_v4
-                    (id, title, description, state, priority, client_peer_id,
-                     operator_peer_id, revision, created_at, updated_at, closed_at)
-                 SELECT id, title, description, state, priority, client_peer_id,
-                        operator_peer_id, revision, created_at, updated_at, closed_at
+                   INSERT INTO tickets_v5
+                      (id, title, description, state, priority, client_peer_id,
+                    revision, created_at, updated_at, closed_at)
+                   SELECT id, title, description, state, priority, client_peer_id,
+                       revision, created_at, updated_at, closed_at
                  FROM tickets;
                  DROP TABLE tickets;
-                 ALTER TABLE tickets_v4 RENAME TO tickets;
+                   ALTER TABLE tickets_v5 RENAME TO tickets;
                  COMMIT;
                  PRAGMA foreign_keys = ON;",
             )?;
@@ -362,7 +365,7 @@ impl TicketDb {
         description: &str,
         priority: TicketPriority,
         client_peer_id: &str,
-        operator_peer_id: &str,
+        _operator_peer_id: &str,
     ) -> Result<TicketRecord> {
         let now = current_timestamp();
         let id = format!("FTQ-{}", uuid::Uuid::new_v4().simple());
@@ -373,7 +376,6 @@ impl TicketDb {
             state: TicketState::Open,
             priority,
             client_peer_id: client_peer_id.to_string(),
-            operator_peer_id: operator_peer_id.to_string(),
             revision: 1,
             created_at: now,
             updated_at: now,
@@ -385,7 +387,7 @@ impl TicketDb {
             conn.execute(
                 "INSERT INTO tickets (
                     id, title, description, state, priority,
-                    client_peer_id, operator_peer_id, revision,
+                    client_peer_id, revision,
                     created_at, updated_at, closed_at
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
@@ -395,7 +397,6 @@ impl TicketDb {
                     record.state.as_str(),
                     record.priority.as_str(),
                     record.client_peer_id,
-                    record.operator_peer_id,
                     record.revision,
                     record.created_at,
                     record.updated_at,
@@ -441,7 +442,7 @@ impl TicketDb {
         conn.execute(
             "INSERT INTO tickets (
                 id, title, description, state, priority,
-                client_peer_id, operator_peer_id, revision,
+                client_peer_id, revision,
                 created_at, updated_at, closed_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT(id) DO UPDATE SET
@@ -459,7 +460,6 @@ impl TicketDb {
                 ticket.state.as_str(),
                 ticket.priority.as_str(),
                 ticket.client_peer_id,
-                ticket.operator_peer_id,
                 ticket.revision,
                 ticket.created_at,
                 ticket.updated_at,
@@ -478,16 +478,16 @@ impl TicketDb {
             anyhow::bail!("ticket revision must be greater than zero");
         }
         let conn = self.conn.lock().unwrap();
-        let local: Option<(String, String, u64)> = conn
+        let local: Option<(String, u64)> = conn
             .query_row(
-                "SELECT client_peer_id, operator_peer_id, revision
+                "SELECT client_peer_id, revision
                  FROM tickets WHERE id = ?1",
                 params![ticket.id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        if let Some((client, operator, local_revision)) = local {
-            if client != ticket.client_peer_id || operator != ticket.operator_peer_id {
+        if let Some((client, local_revision)) = local {
+            if client != ticket.client_peer_id {
                 anyhow::bail!("canonical ticket participants do not match local record");
             }
             if ticket.revision < local_revision {
@@ -501,7 +501,7 @@ impl TicketDb {
         conn.execute(
             "INSERT INTO tickets (
                 id, title, description, state, priority,
-                client_peer_id, operator_peer_id, revision,
+                client_peer_id, revision,
                 created_at, updated_at, closed_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT(id) DO UPDATE SET
@@ -519,7 +519,6 @@ impl TicketDb {
                 ticket.state.as_str(),
                 ticket.priority.as_str(),
                 ticket.client_peer_id,
-                ticket.operator_peer_id,
                 ticket.revision,
                 ticket.created_at,
                 ticket.updated_at,
@@ -533,7 +532,7 @@ impl TicketDb {
     pub fn get_ticket(&self, ticket_id: &str) -> Result<Option<TicketRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
+            "SELECT id, title, description, state, priority, client_peer_id,
                     revision, created_at, updated_at, closed_at
              FROM tickets WHERE id = ?1",
         )?;
@@ -548,11 +547,10 @@ impl TicketDb {
                     state: TicketState::parse_str(&state_str).unwrap_or(TicketState::Open),
                     priority: TicketPriority::parse_str(&priority_str),
                     client_peer_id: r.get(5)?,
-                    operator_peer_id: r.get(6)?,
-                    revision: r.get(7)?,
-                    created_at: r.get(8)?,
-                    updated_at: r.get(9)?,
-                    closed_at: r.get(10)?,
+                    revision: r.get(6)?,
+                    created_at: r.get(7)?,
+                    updated_at: r.get(8)?,
+                    closed_at: r.get(9)?,
                 })
             })
             .optional()?;
@@ -562,10 +560,10 @@ impl TicketDb {
     pub fn get_active_ticket(&self) -> Result<Option<TicketRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
+            "SELECT id, title, description, state, priority, client_peer_id,
                     revision, created_at, updated_at, closed_at
              FROM tickets WHERE state IN ('OPEN', 'IN_PROGRESS')
-             ORDER BY updated_at DESC LIMIT 1",
+               ",
         )?;
         let row = stmt
             .query_row([], |r| {
@@ -578,11 +576,10 @@ impl TicketDb {
                     state: TicketState::parse_str(&state_str).unwrap_or(TicketState::Open),
                     priority: TicketPriority::parse_str(&priority_str),
                     client_peer_id: r.get(5)?,
-                    operator_peer_id: r.get(6)?,
-                    revision: r.get(7)?,
-                    created_at: r.get(8)?,
-                    updated_at: r.get(9)?,
-                    closed_at: r.get(10)?,
+                    revision: r.get(6)?,
+                    created_at: r.get(7)?,
+                    updated_at: r.get(8)?,
+                    closed_at: r.get(9)?,
                 })
             })
             .optional()?;
@@ -592,7 +589,7 @@ impl TicketDb {
     pub fn list_tickets(&self, state_filter: Option<TicketState>) -> Result<Vec<TicketRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut query =
-            "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
+            "SELECT id, title, description, state, priority, client_peer_id,
                                 revision, created_at, updated_at, closed_at
                          FROM tickets"
                 .to_string();
@@ -612,11 +609,10 @@ impl TicketDb {
                 state: TicketState::parse_str(&state_str).unwrap_or(TicketState::Open),
                 priority: TicketPriority::parse_str(&priority_str),
                 client_peer_id: r.get(5)?,
-                operator_peer_id: r.get(6)?,
-                revision: r.get(7)?,
-                created_at: r.get(8)?,
-                updated_at: r.get(9)?,
-                closed_at: r.get(10)?,
+                revision: r.get(6)?,
+                created_at: r.get(7)?,
+                updated_at: r.get(8)?,
+                closed_at: r.get(9)?,
             })
         })?;
 
@@ -734,8 +730,7 @@ impl TicketDb {
              WHERE m.delivery_state = 'PENDING'
                AND m.sender_peer_id = ?1
                AND t.state IN ('OPEN', 'IN_PROGRESS')
-               AND ((t.client_peer_id = ?1 AND t.operator_peer_id = ?2)
-                 OR (t.operator_peer_id = ?1 AND t.client_peer_id = ?2))
+                             AND (t.client_peer_id = ?1 OR t.client_peer_id = ?2)
              ORDER BY m.created_at ASC",
         )?;
         let rows = stmt.query_map(params![local_peer_id, remote_peer_id], |r| {
@@ -959,7 +954,7 @@ impl TicketDb {
         &self,
         legacy_file: &Path,
         client_peer_id: &str,
-        operator_peer_id: &str,
+        _operator_peer_id: &str,
     ) -> Result<()> {
         if !legacy_file.exists() {
             return Ok(());
@@ -991,7 +986,6 @@ impl TicketDb {
                 state,
                 priority: TicketPriority::Normal,
                 client_peer_id: client_peer_id.to_string(),
-                operator_peer_id: operator_peer_id.to_string(),
                 revision: 1,
                 created_at: now,
                 updated_at: now,

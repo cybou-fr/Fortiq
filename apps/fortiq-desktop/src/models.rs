@@ -70,7 +70,6 @@ pub struct TicketDetailDto {
     pub state: String,
     pub created_at: u64,
     pub client_peer_id: String,
-    pub operator_peer_id: String,
     pub messages: Vec<ChatMessageDto>,
     pub attachments: Vec<AttachmentDto>,
 }

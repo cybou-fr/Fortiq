@@ -773,7 +773,8 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             {
                 Ok(updated) => {
                     if let Some(ref ticket) = updated {
-                        if let Ok(peer) = ticket.operator_peer_id.parse::<PeerId>() {
+                        if let Some(target) = state.config.network.bootstrap_peer.as_deref() {
+                            if let Ok(peer) = target.parse::<PeerId>() {
                             if let Some(ref sender) = state.p2p_sender {
                                 let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
                                 let _ = sender
@@ -786,6 +787,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                                         reply: reply_tx,
                                     })
                                     .await;
+                            }
                             }
                         }
                     }
@@ -829,7 +831,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     );
 
                     let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
-                        &ticket.operator_peer_id
+                        state.config.network.bootstrap_peer.as_deref().unwrap_or("")
                     } else {
                         &ticket.client_peer_id
                     };
@@ -893,7 +895,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                     );
                 }
                 let target_str = if ticket.client_peer_id == state.peer_id.to_string() {
-                    &ticket.operator_peer_id
+                    state.config.network.bootstrap_peer.as_deref().unwrap_or("")
                 } else {
                     &ticket.client_peer_id
                 };
