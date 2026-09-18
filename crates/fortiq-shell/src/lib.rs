@@ -5,11 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use fortiq_core::{
-    canonical::{
-        portable::certificate::OperatorSessionCertificate,
-        signing::{Signer, SigningError},
-        types::NetworkId,
-    },
+    authority::OperatorSessionCertificate,
+    object::{NetworkId, Signer, SigningError},
     NodeInfo,
 };
 use futures::{
@@ -904,7 +901,7 @@ mod tests {
 
     #[test]
     fn shell_next_challenge_binds_authority_context() {
-        use fortiq_core::canonical::signing::{Ed25519Signer, Ed25519Verifier, Verifier};
+        use fortiq_core::object::{Ed25519Signer, Ed25519Verifier, Signer, Verifier};
 
         let signer = Ed25519Signer::from_seed([0x42; 32]);
         let network = NetworkId::from_bytes([0x11; 32]);

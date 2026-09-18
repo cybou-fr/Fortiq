@@ -8,13 +8,9 @@ use std::{
 
 use anyhow::{Context, Result};
 use fortiq_core::{
-    canonical::{
-        codec::{from_canonical_cbor, to_canonical_cbor, DecoderLimits},
-        control::Genesis,
-        portable::certificate::{OperatorCapabilities, OperatorSessionCertificate},
-        signing::{derive_signing_key_id, Ed25519Signer, Ed25519Verifier, Signer, Verifier},
-    },
-    Config, NodeInfo, TicketDb,
+    derive_signing_key_id, from_canonical_cbor, to_canonical_cbor, Config, DecoderLimits,
+    Ed25519Signer, Ed25519Verifier, EntityId, Genesis, NetworkId, NodeInfo, OperatorCapabilities,
+    OperatorSessionCertificate, OwnerId, Signer, TicketDb, Verifier,
 };
 use futures::StreamExt;
 use libp2p::{
@@ -28,8 +24,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 struct AuthorityContext {
-    network_id: fortiq_core::canonical::types::NetworkId,
-    owner_id: fortiq_core::canonical::types::OwnerId,
+    network_id: NetworkId,
+    owner_id: OwnerId,
     owner_verifier: Arc<Ed25519Verifier>,
 }
 
@@ -52,7 +48,7 @@ impl AuthorityContext {
         required_capability: u32,
         now: u64,
     ) -> bool {
-        let expected_host = fortiq_core::canonical::types::EntityId::from_bytes(
+        let expected_host = EntityId::from_bytes(
             *blake3::hash(&remote_peer.to_bytes()).as_bytes(),
         );
         certificate.network_id == self.network_id
@@ -107,7 +103,7 @@ pub enum TicketSyncRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TicketStateMutation {
-    pub network_id: fortiq_core::canonical::types::NetworkId,
+    pub network_id: NetworkId,
     pub ticket_id: String,
     pub expected_revision: u64,
     pub new_state: fortiq_core::TicketState,
@@ -1873,13 +1869,13 @@ async fn handle_ticket_v2(
                                     && authority.verify_certificate(
                                         &peer,
                                         &mutation.certificate,
-                                        fortiq_core::canonical::portable::certificate::OperatorCapabilities::TICKET_MANAGE,
+                                        OperatorCapabilities::TICKET_MANAGE,
                                         now_secs(),
                                     )
                             })
                                 && Ed25519Verifier::from_public_key(&mutation.certificate.session_pubkey)
                                     .and_then(|verifier| {
-                                        verifier.verify(&mutation.signing_payload(), &mutation.signature)
+                                        Ok(verifier.verify(&mutation.signing_payload(), &mutation.signature)?)
                                     })
                                     .is_ok()
                                 && ticket.client_peer_id == local_peer_id
@@ -1897,14 +1893,9 @@ async fn handle_ticket_v2(
                                     mutation.new_state,
                                     &peer.to_string(),
                                 ) {
-                                    Ok(Some(ticket)) => {
+                                    Ok(ticket) => {
                                         TicketSyncResponse::MutationApplied(Box::new(ticket))
                                     }
-                                    Ok(None) => TicketSyncResponse::MutationRejected {
-                                        kind: MutationRejectionKind::Permanent,
-                                        message: "Ticket introuvable".to_string(),
-                                        canonical: None,
-                                    },
                                     Err(error) => TicketSyncResponse::MutationRejected {
                                         kind: MutationRejectionKind::Conflict,
                                         message: error.to_string(),
@@ -2133,11 +2124,11 @@ async fn handle_incoming_shell_next(
             && authority.verify_certificate(
                 &remote_peer,
                 &handshake.session_certificate,
-                fortiq_core::canonical::portable::certificate::OperatorCapabilities::SHELL_EXEC,
+                OperatorCapabilities::SHELL_EXEC,
                 now,
             )
     }) && session_verifier
-        .and_then(|verifier| verifier.verify(&payload, &handshake.challenge_signature))
+        .and_then(|verifier| Ok(verifier.verify(&payload, &handshake.challenge_signature)?))
         .is_ok();
     let ticket = match ticket_store.get_ticket(&handshake.ticket_id).ok().flatten() {
         Some(ticket) => ticket,

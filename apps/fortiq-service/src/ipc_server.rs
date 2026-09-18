@@ -2,18 +2,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use fortiq_core::{
-    canonical::{
-        control::{derive_owner_id, Genesis},
-        portable::{
-            certificate::{OperatorCapabilities, OperatorSessionCertificate},
-            mnemonic::{parse_mnemonic_phrase, MnemonicDeriver},
-            workspace::MemoryWorkspace,
-        },
-        signing::{Ed25519Signer, Signer},
-        types::{EntityId, OwnerId},
-    },
+    derive_owner_id, parse_mnemonic_phrase, Config, Ed25519Signer, EntityId, Genesis,
+    MemoryWorkspace, MnemonicDeriver, OperatorCapabilities, OperatorSessionCertificate, OwnerId,
+    Signer, TicketDb,
     ipc::{DaemonStatus, IpcRequest, IpcResponse, OperatorSessionStatus},
-    Config, TicketDb,
 };
 use libp2p::PeerId;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -789,27 +781,25 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 .ticket_store
                 .update_ticket_state(&ticket_id, new_state, &local_peer_id)
             {
-                Ok(updated) => {
-                    if let Some(ref ticket) = updated {
-                        if let Some(target) = state.config.network.bootstrap_peer.as_deref() {
-                            if let Ok(peer) = target.parse::<PeerId>() {
-                                if let Some(ref sender) = state.p2p_sender {
-                                    let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
-                                    let _ = sender
-                                        .send(fortiq_p2p::P2pCommand::SyncTickets {
-                                            peer,
-                                            dial: None,
-                                            request: fortiq_p2p::TicketSyncRequest::PushTicket(
-                                                Box::new(ticket.clone()),
-                                            ),
-                                            reply: reply_tx,
-                                        })
-                                        .await;
-                                }
+                Ok(ticket) => {
+                    if let Some(target) = state.config.network.bootstrap_peer.as_deref() {
+                        if let Ok(peer) = target.parse::<PeerId>() {
+                            if let Some(ref sender) = state.p2p_sender {
+                                let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+                                let _ = sender
+                                    .send(fortiq_p2p::P2pCommand::SyncTickets {
+                                        peer,
+                                        dial: None,
+                                        request: fortiq_p2p::TicketSyncRequest::PushTicket(
+                                            Box::new(ticket.clone()),
+                                        ),
+                                        reply: reply_tx,
+                                    })
+                                    .await;
                             }
                         }
                     }
-                    IpcResponse::TicketUpdated(updated)
+                    IpcResponse::TicketUpdated(Some(ticket))
                 }
                 Err(e) => IpcResponse::Error(format!("Échec de mise à jour du statut: {e}")),
             }
@@ -1417,12 +1407,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fortiq_core::canonical::{
-        codec::to_canonical_cbor,
-        control::{GenesisTbs, GENESIS_SIG_DOMAIN},
-        crypto::keys::MnemonicEntropy,
-        portable::mnemonic::entropy_to_mnemonic,
-        types::{CryptoProfileId, NetworkId},
+    use fortiq_core::{
+        entropy_to_mnemonic, GenesisTbs, MnemonicEntropy, NetworkId,
     };
 
     fn valid_test_mnemonic() -> &'static str {
@@ -1437,19 +1423,12 @@ mod tests {
         let signer = Ed25519Signer::from_seed(*root_seed.as_bytes());
         let public_key = signer.public_key();
         let tbs = GenesisTbs {
-            version: 1,
             network_id: NetworkId::from_bytes([0x77; 32]),
             owner_id: derive_owner_id(&public_key),
-            owner_root_signing_public_key: public_key.to_vec(),
-            recovery_public_key: None,
-            initial_crypto_profile: CryptoProfileId::FortiqClassicalDev1,
-            initial_policy_hash: [0x88; 32],
+            owner_root_signing_public_key: public_key,
             created_at: 1,
         };
-        let mut payload = GENESIS_SIG_DOMAIN.to_vec();
-        payload.extend_from_slice(&to_canonical_cbor(&tbs).unwrap());
-        let signature = signer.sign(&payload).unwrap();
-        Genesis { tbs, signature }
+        Genesis::create(tbs, &signer).unwrap()
     }
 
     #[tokio::test]

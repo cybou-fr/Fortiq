@@ -3,8 +3,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tracing::warn;
 
-use fortiq_core::canonical::self_support::{LoopbackEndpoint, SelfSupportEngine, ThisDevice};
-use fortiq_core::canonical::types::EntityId;
+use fortiq_core::self_support::{LoopbackEndpoint, SelfSupportEngine, ThisDevice};
+use fortiq_core::EntityId;
 use fortiq_core::ipc::{IpcRequest, IpcResponse};
 
 use crate::command::DesktopCommand;

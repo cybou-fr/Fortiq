@@ -9,8 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use fortiq_core::canonical::{from_canonical_cbor, ControlStore, DecoderLimits, Genesis};
-use fortiq_core::{Config, NodeInfo, TicketDb};
+use fortiq_core::{from_canonical_cbor, Config, DecoderLimits, Genesis, NodeInfo, TicketDb};
 use fortiq_p2p::{load_or_create_identity, IdentityStatus, RunOptions};
 use fs2::FileExt;
 use libp2p::{multiaddr::Protocol, Multiaddr};
@@ -249,7 +248,8 @@ async fn load_canonical_genesis(config: &Config) -> Result<Option<Genesis>> {
     };
     let genesis: Genesis = from_canonical_cbor(&bytes, DecoderLimits::CONTROL)
         .with_context(|| format!("Failed to decode Genesis {}", path.display()))?;
-    ControlStore::new(genesis.clone())
+    genesis
+        .verify()
         .with_context(|| format!("Failed to verify Genesis {}", path.display()))?;
     Ok(Some(genesis))
 }

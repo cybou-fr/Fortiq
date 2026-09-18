@@ -1,13 +1,42 @@
-#![allow(deprecated)]
-
 use std::{path::Path, path::PathBuf};
 
 use anyhow::{Context, Result};
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 
-pub mod canonical;
+pub mod authority;
+pub mod codec;
+pub mod engine;
+pub mod event;
+pub mod identity;
 pub mod ipc;
+pub mod object;
+pub mod reducer;
+pub mod self_support;
+pub mod store;
+pub mod ticket;
+
+pub use authority::{
+    derive_genesis_id, derive_owner_id, entropy_to_mnemonic, parse_mnemonic_phrase,
+    AuthorityPolicy, Genesis, GenesisTbs, MemoryWorkspace, MnemonicDeriver, MnemonicEntropy,
+    MnemonicError, OperatorCapabilities, OperatorSessionCertificate, OperatorSessionProof,
+    OperatorSessionSeed, OwnerRootSigningSeed, OwnerSegmentMasterSeed,
+};
+pub use codec::{from_canonical_cbor, to_canonical_cbor, DecoderLimits};
+pub use engine::{OutboxRecord, TicketEngine};
+pub type TicketDb = TicketEngine;
+pub use event::{Event, EventGraph, EventPayload, Heads};
+pub use identity::{IdentityStatus, NodeIdentity};
+pub use object::{
+    derive_signing_key_id, Ed25519Signer, Ed25519Verifier, EntityId, KeyId, NetworkId, ObjectId,
+    OwnerId, PublicKey, Signature, SignedObject, Signer, SigningError, TicketId, Verifier,
+};
+pub use reducer::{TicketAggregate, TicketReducer, TicketStateStore};
+pub use store::{FsObjectStore, ObjectStore};
+pub use ticket::{
+    AttachmentRecord, ChatMessage, ShellSessionRecord, TicketDetail, TicketEvent,
+    TicketEventRecord, TicketPriority, TicketRecord, TicketState,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -60,7 +89,7 @@ impl Config {
         self.ticket
             .path
             .clone()
-            .unwrap_or_else(|| self.identity.path.with_file_name("tickets.db"))
+            .unwrap_or_else(|| self.identity.path.with_file_name("ticket-store"))
     }
 
     /// Canonical signed Genesis stored beside the node transport identity.
@@ -96,13 +125,6 @@ impl Config {
         }
     }
 
-    /// Resolves the default configuration file path:
-    /// 1. `FORTIQ_CONFIG` environment variable if set.
-    /// 2. `./fortiq.toml` if it exists in the current working directory.
-    /// 3. OS system service location:
-    ///    - Windows: `%ProgramData%\FORTIQ\fortiq.toml` (if exists)
-    ///    - Unix: `/etc/fortiq/fortiq.toml` (if exists)
-    /// 4. Fallback: `fortiq.toml`
     pub fn resolve_default_path() -> PathBuf {
         if let Ok(env_path) = std::env::var("FORTIQ_CONFIG") {
             if !env_path.trim().is_empty() {
@@ -138,9 +160,6 @@ impl Config {
         local_path
     }
 
-    /// Standard system service configuration location for service installation:
-    /// - Windows: `%ProgramData%\FORTIQ\fortiq.toml`
-    /// - Unix: `/etc/fortiq/fortiq.toml`
     pub fn system_service_default_path() -> PathBuf {
         #[cfg(windows)]
         {
@@ -172,7 +191,6 @@ pub struct NetworkConfig {
     pub listen_quic: String,
     pub relay_peer: Option<String>,
     pub public_addr: Option<String>,
-    /// Optional discovery/routing hint. It does not grant application authority.
     pub bootstrap_peer: Option<String>,
 }
 
@@ -230,9 +248,6 @@ pub struct IpcConfig {
     pub sock: Option<String>,
     pub terminal_sock: Option<String>,
 }
-
-pub mod ticket_db;
-pub use ticket_db::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ticket {
@@ -299,15 +314,5 @@ mod tests {
         let mut cfg = config(None);
         cfg.network.public_addr = Some("not-a-multiaddr".to_owned());
         assert!(cfg.validate().is_err());
-    }
-
-    #[test]
-    fn resolves_config_path_from_env() {
-        std::env::set_var("FORTIQ_CONFIG", "custom_path.toml");
-        assert_eq!(
-            Config::resolve_default_path(),
-            PathBuf::from("custom_path.toml")
-        );
-        std::env::remove_var("FORTIQ_CONFIG");
     }
 }

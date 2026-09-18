@@ -1,13 +1,11 @@
 #![allow(deprecated)]
 
 use fortiq_core::{
-    canonical::{
-        codec::to_canonical_cbor,
-        control::{derive_owner_id, Genesis, GenesisTbs, GENESIS_SIG_DOMAIN},
-        portable::certificate::{OperatorCapabilities, OperatorSessionCertificate},
-        signing::{Ed25519Signer, Signer},
-        types::{CryptoProfileId, EntityId, NetworkId},
+    authority::{
+        derive_owner_id, Genesis, GenesisTbs, OperatorCapabilities, OperatorSessionCertificate,
     },
+    codec::to_canonical_cbor,
+    object::{Ed25519Signer, EntityId, NetworkId, Signer},
     CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig, NodeInfo, TicketConfig,
     TicketDb, TicketPriority, TicketState,
 };
@@ -28,21 +26,16 @@ fn now_secs() -> u64 {
 
 fn test_genesis() -> (Genesis, Ed25519Signer) {
     let owner_signer = Ed25519Signer::from_seed([0x42; 32]);
-    let owner_public_key = owner_signer.public_key().to_vec();
+    let owner_public_key = owner_signer.public_key();
+    let owner_id = derive_owner_id(&owner_public_key);
     let tbs = GenesisTbs {
-        version: 1,
         network_id: NetworkId::from_bytes([0x77; 32]),
-        owner_id: derive_owner_id(&owner_public_key),
+        owner_id,
         owner_root_signing_public_key: owner_public_key,
-        recovery_public_key: None,
-        initial_crypto_profile: CryptoProfileId::FortiqClassicalDev1,
-        initial_policy_hash: [0x88; 32],
         created_at: now_secs(),
     };
-    let mut payload = GENESIS_SIG_DOMAIN.to_vec();
-    payload.extend_from_slice(&to_canonical_cbor(&tbs).unwrap());
-    let signature = owner_signer.sign(&payload).unwrap();
-    (Genesis { tbs, signature }, owner_signer)
+    let genesis = Genesis::create(tbs, &owner_signer).unwrap();
+    (genesis, owner_signer)
 }
 
 #[tokio::test]
