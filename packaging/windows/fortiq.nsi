@@ -1,15 +1,12 @@
 !ifndef VERSION
   !define VERSION "0.1.0"
 !endif
-!ifndef ROLE
-  !define ROLE "operator"
-!endif
 !ifndef STAGE
-  !define STAGE "target\windows-dist\operator"
+  !define STAGE "target\dist\windows-payload"
 !endif
 
-Name "FORTIQ ${ROLE} ${VERSION}"
-OutFile "target\FORTIQ-${ROLE}-Setup-${VERSION}-x64.exe"
+Name "FORTIQ Node ${VERSION}"
+OutFile "target\FORTIQ-Setup-${VERSION}-x64.exe"
 InstallDir "$PROGRAMFILES64\FORTIQ"
 RequestExecutionLevel admin
 Unicode True
@@ -17,7 +14,7 @@ Unicode True
 Page directory
 Page instfiles
 
-Section "FORTIQ ${ROLE}"
+Section "FORTIQ Node"
   SetOutPath "$INSTDIR"
   File "${STAGE}\fortiq-service.exe"
   File "${STAGE}\fortiq.exe"
@@ -26,7 +23,7 @@ Section "FORTIQ ${ROLE}"
   File "${STAGE}\install.ps1"
   File "${STAGE}\uninstall.ps1"
 
-  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\install.ps1" -Role "${ROLE}"'
+  nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\install.ps1"'
   Pop $0
   ${If} $0 != 0
     MessageBox MB_ICONSTOP "FORTIQ installation failed (code $0)."

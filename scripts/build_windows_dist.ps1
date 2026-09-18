@@ -4,10 +4,7 @@ param(
     [string]$Target = "",
     [switch]$SkipBuild,
     [switch]$SkipNsis,
-    [string]$MakeNsisPath,
-    [ValidateSet("operator", "client")]
-    [string]$Role = "operator",
-    [string]$OperatorPeerId = ""
+    [string]$MakeNsisPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,10 +20,6 @@ $release = if ([string]::IsNullOrWhiteSpace($Target)) {
 $distRoot = Join-Path $root "target\dist"
 $stage = Join-Path $distRoot "windows-payload"
 $installerDir = Join-Path $distRoot "installers"
-
-if ($Role -eq "client" -and [string]::IsNullOrWhiteSpace($OperatorPeerId)) {
-    throw "-OperatorPeerId is required for the client package."
-}
 
 function Invoke-NativeCommand([string]$FailureMessage, [scriptblock]$Command) {
     $previous = $ErrorActionPreference
@@ -61,17 +54,12 @@ try {
     Copy-Item (Join-Path $root "packaging\windows\install.ps1") $stage -Force
     Copy-Item (Join-Path $root "packaging\windows\uninstall.ps1") $stage -Force
 
-    $operatorLine = if ($Role -eq "client") { "operator_peer_id = `"$OperatorPeerId`"" } else { "# operator_peer_id intentionally absent" }
-
     @"
 [node]
-name = "FORTIQ $Role"
+name = "FORTIQ Node"
 
 [identity]
 path = "C:/ProgramData/FORTIQ/identity.key"
-
-[authorization]
-$operatorLine
 
 [network]
 listen_quic = "0.0.0.0:4001"
@@ -92,7 +80,7 @@ pipe = "\\\\.\\pipe\\fortiq-ipc"
 terminal_pipe = "\\\\.\\pipe\\fortiq-terminal"
 "@ | Set-Content (Join-Path $stage "fortiq.toml") -Encoding ascii
 
-    $zipPath = Join-Path $distRoot "FORTIQ-$Role-$Version-Windows-x64.zip"
+    $zipPath = Join-Path $distRoot "FORTIQ-$Version-Windows-x64.zip"
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
     Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zipPath -Force
 
@@ -112,9 +100,8 @@ terminal_pipe = "\\\\.\\pipe\\fortiq-terminal"
         if (-not $MakeNsisPath -or -not (Test-Path $MakeNsisPath)) {
             Write-Warning "makensis.exe not found; ZIP distributions were created. Install NSIS to build Setup EXE files."
         } else {
-            $nsisRole = $Role.Substring(0, 1).ToUpperInvariant() + $Role.Substring(1)
-            Invoke-NativeCommand "NSIS build failed for $nsisRole" {
-                & $MakeNsisPath "/DVERSION=$Version" "/DROLE=$nsisRole" "/DSTAGE=$stage" "/DOUTDIR=$installerDir" (Join-Path $root "packaging\windows\fortiq.nsi")
+            Invoke-NativeCommand "NSIS build failed" {
+                & $MakeNsisPath "/DVERSION=$Version" "/DSTAGE=$stage" "/DOUTDIR=$installerDir" (Join-Path $root "packaging\windows\fortiq.nsi")
             }
         }
     }

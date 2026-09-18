@@ -49,28 +49,27 @@ journalctl -u fortiq -n 20 --no-pager
 
 ---
 
-## 2. Managed Machine Setup (Windows)
+## 2. FORTIQ Node Setup (Windows)
 
 On the managed client machine (where remote support is requested):
 
-### Install the complete Client product
+### Install the complete Node product
 
 Download and run:
 
 ```text
-FORTIQ-Client-Setup-<version>-x64.exe
+FORTIQ-Setup-<version>-x64.exe
 ```
 
-The wizard may request the compatibility Operator PeerId for discovery and
-ticket routing. This value is not a shell authorization grant. The current
-runtime authorizes shell access through `/fortiq/shell/3.0`, an Owner-signed
-operator session certificate, and an active ticket lifecycle.
+Configure `bootstrap_peer` only when the node needs a known first routing or
+discovery target. It is not a shell authorization grant. The current runtime
+authorizes shell access through `/fortiq/shell/3.0`, an Owner-signed operator
+session certificate, and an active ticket lifecycle.
 
 The complete installer:
 - Copies binaries to `C:\Program Files\FORTIQ\`
 - Adds `C:\Program Files\FORTIQ` to system `PATH`
-- Writes the compatibility Client configuration with the supplied
-    `operator_peer_id` for discovery and ticket routing
+- Writes the neutral Node configuration
 - Installs and starts the background Windows Service (`FortiqService`)
 - Creates Start Menu shortcuts
 - Registers `fortiq-desktop.exe` for automatic start at interactive user logon
@@ -95,16 +94,11 @@ The same ticket and consent controls are available in the managed Desktop applic
 
 ---
 
-## 3. Operator Machine Setup & Remote Administration
+## 3. Operator Session & Remote Administration
 
-On Windows, first install:
-
-```text
-FORTIQ-Operator-Setup-<version>-x64.exe
-```
-
-The Operator package does not need an `operator_peer_id` for shell authority.
-After installation:
+Use the same neutral Node installer on every machine. A mnemonic-backed
+OperatorSession grants temporary capabilities; the installed node itself has
+no permanent operator or client role. After installation:
 
 ```powershell
 # 9. Verify operator daemon is running and check its status

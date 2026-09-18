@@ -1,8 +1,5 @@
 [CmdletBinding()]
-param(
-    [ValidateSet("operator", "client")]
-    [string]$Role = "operator"
-)
+param()
 
 $ErrorActionPreference = "Stop"
 $InstallDir = "C:\Program Files\FORTIQ"
@@ -73,4 +70,4 @@ $link.TargetPath = Join-Path $InstallDir "fortiq-desktop.exe"
 $link.WorkingDirectory = $InstallDir
 $link.Save()
 
-Write-Host "FORTIQ $Role installation completed." -ForegroundColor Green
+Write-Host "FORTIQ Node installation completed." -ForegroundColor Green

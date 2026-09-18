@@ -274,29 +274,25 @@ sudo systemctl status fortiq
 
 ### Windows Product Installers
 
-The Windows release produces two complete, role-specific products. Both contain
-the service, IPC CLI, and desktop/tray application:
+The Windows release produces one neutral FORTIQ Node package containing the
+service, IPC CLI, and desktop/tray application:
 
 ```text
-FORTIQ-Operator-Setup-<version>-x64.exe
-FORTIQ-Client-Setup-<version>-x64.exe
+FORTIQ-Setup-<version>-x64.exe
 ```
 
-Client Setup uses the compatibility Operator PeerId for discovery and ticket
-routing. It does not grant shell authority. Both installers use the Windows
-computer name, install the service for boot startup, and register the Slint
-desktop application for user logon.
+The node uses `bootstrap_peer` only as an optional routing/discovery hint. It
+does not grant application authority. Operator authority comes from a valid
+Owner-signed OperatorSession certificate and its capabilities.
 
-Build both installers locally with NSIS installed:
+Build the installer locally with NSIS installed:
 
 ```powershell
-./scripts/build_windows_dist.ps1 -Version 0.1.0-beta -Role operator
-./scripts/build_windows_dist.ps1 -Version 0.1.0-beta -Role client -OperatorPeerId <PEER_ID>
+./scripts/build_windows_dist.ps1 -Version 0.1.0-beta
 ```
 
-Use `-Role client -OperatorPeerId <PEER_ID>` for a managed client package. Use
-`-StageOnly` when NSIS is not installed and you only need the release staging
-directory and ZIP archive.
+Use `-SkipNsis` when NSIS is not installed and you only need the release
+staging directory and ZIP archive.
 
 ### Multi-Platform Desktop Bundles
 
