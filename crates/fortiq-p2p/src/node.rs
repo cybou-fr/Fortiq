@@ -195,8 +195,6 @@ pub struct DiscoveredPeer {
     pub os: Option<String>,
     pub arch: Option<String>,
     pub version: Option<String>,
-    pub mode: Option<fortiq_core::NodeMode>,
-    pub authorized_operator: Option<String>,
     pub relay: bool,
     pub rendezvous: bool,
     pub addresses: Vec<Multiaddr>,
@@ -237,8 +235,6 @@ impl PeerRegistry {
             os: None,
             arch: None,
             version: None,
-            mode: None,
-            authorized_operator: None,
             relay: false,
             rendezvous: false,
             addresses: Vec::new(),
@@ -270,8 +266,6 @@ impl PeerRegistry {
             os: Some(info.os.clone()),
             arch: Some(info.arch.clone()),
             version: Some(info.version.clone()),
-            mode: Some(info.mode),
-            authorized_operator: info.authorized_operator.clone(),
             relay: info.relay,
             rendezvous: info.rendezvous,
             addresses: Vec::new(),
@@ -283,8 +277,6 @@ impl PeerRegistry {
         entry.os = Some(info.os.clone());
         entry.arch = Some(info.arch.clone());
         entry.version = Some(info.version.clone());
-        entry.mode = Some(info.mode);
-        entry.authorized_operator = info.authorized_operator.clone();
         entry.relay = info.relay;
         entry.rendezvous = info.rendezvous;
         entry.last_seen = std::time::Instant::now();
@@ -297,8 +289,6 @@ impl PeerRegistry {
             os: None,
             arch: None,
             version: Some(info.protocol_version.clone()),
-            mode: None,
-            authorized_operator: None,
             relay: false,
             rendezvous: false,
             addresses: Vec::new(),
@@ -320,8 +310,6 @@ impl PeerRegistry {
             os: None,
             arch: None,
             version: None,
-            mode: None,
-            authorized_operator: None,
             relay: false,
             rendezvous: false,
             addresses: Vec::new(),
@@ -358,8 +346,6 @@ impl PeerRegistry {
                     os,
                     transport: p.transport.clone(),
                     status,
-                    mode: p.mode,
-                    authorized_operator: p.authorized_operator.clone(),
                     relay: p.relay,
                     rendezvous: p.rendezvous,
                 }
@@ -1497,14 +1483,9 @@ fn handle_rendezvous_client(
                             warn!(address = %dial_address, %error, "failed to dial discovered address");
                         }
                     }
-                } else if config.mode() == fortiq_core::NodeMode::Operator
-                    && !swarm.is_connected(&peer_id)
-                {
-                    // An operator console lists the peers it supervises, so a
-                    // peer that is merely discovered is not yet usable: without
-                    // a connection there is no HELLO metadata and no shell.
-                    // Connecting costs nothing beyond a QUIC session and grants
-                    // no authority by itself.
+                } else if !swarm.is_connected(&peer_id) {
+                    // Connecting completes peer inventory; transport never
+                    // grants application authority.
                     info!(%peer_id, "discovered peer; connecting to complete the inventory");
                     dial_peer_candidates(
                         swarm,
@@ -2249,7 +2230,6 @@ fn print_remote_hello(peer: &PeerId, info: &NodeInfo) {
     println!("\nHELLO received");
     println!("remote_peer_id = {peer}");
     println!("remote_name = {}", info.name);
-    println!("remote_mode = {}", info.mode);
     println!("remote_os = {}", info.os);
     println!("remote_arch = {}", info.arch);
     println!("remote_version = {}", info.version);
@@ -2257,14 +2237,12 @@ fn print_remote_hello(peer: &PeerId, info: &NodeInfo) {
 
 #[cfg(test)]
 mod tests {
-    use fortiq_core::NodeMode;
-
     use super::*;
 
     #[test]
     fn validate_hello_accepts_matching_peer_id() {
         let peer_id = PeerId::random();
-        let info = NodeInfo::local(peer_id, "node".to_owned(), NodeMode::Operator);
+        let info = NodeInfo::local(peer_id, "node".to_owned());
         assert!(validate_hello(&peer_id, &info).is_ok());
     }
 
@@ -2272,7 +2250,7 @@ mod tests {
     fn validate_hello_rejects_mismatched_peer_id() {
         let auth_peer = PeerId::random();
         let claimed_peer = PeerId::random();
-        let info = NodeInfo::local(claimed_peer, "node".to_owned(), NodeMode::Operator);
+        let info = NodeInfo::local(claimed_peer, "node".to_owned());
         let error = validate_hello(&auth_peer, &info).unwrap_err();
         assert!(error.to_string().contains("HELLO PeerId mismatch"));
     }
@@ -2362,7 +2340,7 @@ mod tests {
     fn peer_registry_tracks_peers_and_summaries() {
         let mut registry = PeerRegistry::new();
         let peer_id = PeerId::random();
-        let info = NodeInfo::local(peer_id, "OFFICE-PC".to_owned(), NodeMode::Managed);
+        let info = NodeInfo::local(peer_id, "OFFICE-PC".to_owned());
 
         registry.record_hello(peer_id, &info);
         let summaries = registry.to_summaries();

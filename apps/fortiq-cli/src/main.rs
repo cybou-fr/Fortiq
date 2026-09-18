@@ -187,13 +187,8 @@ async fn cmd_status(pipe: Option<&str>) -> Result<()> {
     let status = get_daemon_status(pipe).await?;
 
     println!("{} {}\n", status.product, status.version);
-    println!("Mode:       {}", status.mode);
     println!("PeerId:     {}", status.peer_id);
     println!("State:      {}", status.agent_state.to_uppercase());
-
-    if let Some(op) = &status.authorized_operator {
-        println!("Authorized: {op}");
-    }
 
     match &status.active_ticket {
         Some(t) => println!("Ticket:     {:?} ({})", t.state, t.id),
@@ -215,7 +210,6 @@ async fn cmd_status(pipe: Option<&str>) -> Result<()> {
 async fn cmd_id(pipe: Option<&str>) -> Result<()> {
     let status = get_daemon_status(pipe).await?;
     println!("PeerId: {}", status.peer_id);
-    println!("Mode:   {}", status.mode);
     Ok(())
 }
 

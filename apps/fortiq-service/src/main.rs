@@ -10,7 +10,7 @@ use std::{
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use fortiq_core::canonical::{from_canonical_cbor, ControlStore, DecoderLimits, Genesis};
-use fortiq_core::{Config, NodeInfo, NodeMode, TicketStore};
+use fortiq_core::{Config, NodeInfo, TicketStore};
 use fortiq_p2p::{load_or_create_identity, IdentityStatus, RunOptions};
 use fs2::FileExt;
 use libp2p::{multiaddr::Protocol, Multiaddr};
@@ -196,18 +196,16 @@ fn main() -> Result<()> {
 pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
     let config = Config::load(&config_path).await?;
     let _instance_lock = acquire_instance_lock(&config_path)?;
-    let mode = config.mode();
     let ticket_store = TicketStore::try_new(config.ticket_path())
         .context("Failed to open persistent ticket database")?;
     let (keypair, _) = load_or_create_identity(&config.identity.path).await?;
     let peer_id = keypair.public().to_peer_id();
     let genesis = load_canonical_genesis(&config).await?;
 
-    tracing::info!("FORTIQ Service starting: mode={mode}, peer_id={peer_id}");
+    tracing::info!("FORTIQ Service starting: peer_id={peer_id}");
 
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
-    let mut local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
-    local_info.authorized_operator = config.authorization.operator_peer_id.clone();
+    let mut local_info = NodeInfo::local(peer_id, config.node.name.clone());
     local_info.relay = config.capabilities.relay;
     local_info.rendezvous = config.capabilities.rendezvous;
 
@@ -258,7 +256,6 @@ async fn load_canonical_genesis(config: &Config) -> Result<Option<Genesis>> {
 async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
     let config = Config::load(&config_path).await?;
     let genesis = load_canonical_genesis(&config).await?;
-    let mode = config.mode();
     let ticket_store = TicketStore::try_new(config.ticket_path())
         .context("Failed to open persistent ticket database")?;
     let dial = args.dial;
@@ -274,29 +271,12 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
             }
         }
     }
-    if args.shell.is_some() && mode != NodeMode::Operator {
-        anyhow::bail!("Administrative shell initiation is available only on the operator peer.");
-    }
     let _instance_lock = acquire_instance_lock(&config_path)?;
     let (keypair, identity_status) = load_or_create_identity(&config.identity.path).await?;
     let peer_id = keypair.public().to_peer_id();
 
     println!("FORTIQ {}\n", env!("CARGO_PKG_VERSION"));
-    println!("MODE: {mode}\n");
-    match mode {
-        NodeMode::Operator => {
-            println!("No operator_peer_id configured.");
-            println!("This node may initiate remote administration sessions.\n");
-            println!("Local operator PeerId:\n{peer_id}\n");
-        }
-        NodeMode::Managed => {
-            println!(
-                "Authorized operator:\n{}\n",
-                config.authorization.operator_peer_id.as_deref().unwrap()
-            );
-            println!("Local PeerId:\n{peer_id}\n");
-        }
-    }
+    println!("Local PeerId:\n{peer_id}\n");
     println!(
         "Identity: {} ({})\n",
         match identity_status {
@@ -314,8 +294,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
     }
 
     let listen_address = listen_multiaddr(&config.network.listen_quic)?;
-    let mut local_info = NodeInfo::local(peer_id, config.node.name.clone(), mode);
-    local_info.authorized_operator = config.authorization.operator_peer_id.clone();
+    let mut local_info = NodeInfo::local(peer_id, config.node.name.clone());
     local_info.relay = config.capabilities.relay;
     local_info.rendezvous = config.capabilities.rendezvous;
 

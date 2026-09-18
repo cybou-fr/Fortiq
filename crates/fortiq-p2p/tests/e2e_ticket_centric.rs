@@ -2,7 +2,7 @@
 
 use fortiq_core::{
     AuthorizationConfig, CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig,
-    NodeInfo, NodeMode, TicketConfig, TicketPriority, TicketState, TicketStore,
+    NodeInfo, TicketConfig, TicketPriority, TicketState, TicketStore,
 };
 use fortiq_p2p::{ChatMessageWire, P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
 use libp2p::{identity::Keypair, Multiaddr};
@@ -90,13 +90,8 @@ async fn e2e_ticket_centric_full_lifecycle() {
         .unwrap();
     let operator_listen_addr: Multiaddr = "/ip4/127.0.0.1/udp/0/quic-v1".parse().unwrap();
 
-    let managed_info =
-        NodeInfo::local(managed_peer_id, "managed-pc".to_string(), NodeMode::Managed);
-    let operator_info = NodeInfo::local(
-        operator_peer_id,
-        "operator-console".to_string(),
-        NodeMode::Operator,
-    );
+    let managed_info = NodeInfo::local(managed_peer_id, "managed-pc".to_string());
+    let operator_info = NodeInfo::local(operator_peer_id, "operator-console".to_string());
 
     let (managed_cmd_tx, managed_cmd_rx) = tokio::sync::mpsc::channel(32);
     let (operator_cmd_tx, operator_cmd_rx) = tokio::sync::mpsc::channel(32);

@@ -129,14 +129,12 @@ impl BackendActor {
                     product: status.product,
                     version: status.version,
                     agent_state: status.agent_state,
-                    mode: format!("{:?}", status.mode).to_lowercase(),
                     peer_id: status.peer_id,
                     active_ticket_id: status.active_ticket.as_ref().map(|t| t.id.clone()),
                     active_ticket_state: status
                         .active_ticket
                         .as_ref()
                         .map(|t| format!("{:?}", t.state)),
-                    authorized_operator: status.authorized_operator,
                     is_operator_unlocked: is_unlocked,
                 };
                 self.current_status = status_dto.clone();
@@ -186,8 +184,6 @@ impl BackendActor {
                     os: p.os,
                     transport: p.transport,
                     status: p.status,
-                    mode: p.mode.map(|m| format!("{m:?}").to_lowercase()),
-                    authorized_operator: p.authorized_operator,
                     relay: p.relay,
                     rendezvous: p.rendezvous,
                 })

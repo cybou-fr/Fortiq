@@ -813,7 +813,6 @@ mod tests {
                 .parse()
                 .unwrap(),
             "test-node".to_string(),
-            fortiq_core::NodeMode::Managed,
         );
 
         let server_task = tokio::spawn(async move {
@@ -856,7 +855,6 @@ mod tests {
                 .parse()
                 .unwrap(),
             "abandoned-test-node".to_string(),
-            fortiq_core::NodeMode::Managed,
         );
 
         let active_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));

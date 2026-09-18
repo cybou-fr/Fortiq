@@ -1,6 +1,6 @@
 #![allow(deprecated)]
 
-use std::{fmt, path::Path, path::PathBuf};
+use std::{path::Path, path::PathBuf};
 
 use anyhow::{Context, Result};
 use libp2p::PeerId;
@@ -34,21 +34,6 @@ impl Config {
             .with_context(|| format!("failed to parse config {}", path.display()))?;
         config.validate()?;
         Ok(config)
-    }
-
-    /// Deprecated: Static node mode is deprecated in Canonical Architecture v3.
-    /// Nodes are sovereign participants whose capabilities are determined dynamically
-    /// by Segment Descriptors and Owner-signed Session Certificates.
-    #[deprecated(
-        since = "0.3.0",
-        note = "Canonical Architecture v3 replaces static node roles with sovereign cryptographic capability profiles and dynamic Owner-signed Session Certificates."
-    )]
-    pub fn mode(&self) -> NodeMode {
-        if self.authorization.operator_peer_id.is_some() {
-            NodeMode::Managed
-        } else {
-            NodeMode::Operator
-        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -350,38 +335,13 @@ impl TicketStore {
     }
 }
 
-/// Deprecated: Static node roles (OPERATOR / MANAGED) are formally retired in Canonical Architecture v3.
-/// Sovereign authority is governed dynamically by Owner-signed Session Certificates and Segment capabilities.
-#[deprecated(
-    since = "0.3.0",
-    note = "NodeMode (OPERATOR/MANAGED) is deprecated. FORTIQ Canonical Architecture v3 replaces static node roles with sovereign cryptographic capability profiles and dynamic Owner-signed Session Certificates."
-)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum NodeMode {
-    Operator,
-    Managed,
-}
-
-impl fmt::Display for NodeMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Operator => f.write_str("OPERATOR"),
-            Self::Managed => f.write_str("MANAGED"),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInfo {
     pub peer_id: String,
     pub name: String,
-    pub mode: NodeMode,
     pub os: String,
     pub arch: String,
     pub version: String,
-    #[serde(default)]
-    pub authorized_operator: Option<String>,
     #[serde(default)]
     pub relay: bool,
     #[serde(default)]
@@ -389,15 +349,13 @@ pub struct NodeInfo {
 }
 
 impl NodeInfo {
-    pub fn local(peer_id: PeerId, name: String, mode: NodeMode) -> Self {
+    pub fn local(peer_id: PeerId, name: String) -> Self {
         Self {
             peer_id: peer_id.to_string(),
             name,
-            mode,
             os: std::env::consts::OS.to_owned(),
             arch: std::env::consts::ARCH.to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
-            authorized_operator: None,
             relay: false,
             rendezvous: false,
         }
@@ -420,17 +378,6 @@ mod tests {
             ticket: TicketConfig::default(),
             ipc: IpcConfig::default(),
         }
-    }
-
-    #[test]
-    fn absent_operator_id_means_operator() {
-        assert_eq!(config(None).mode(), NodeMode::Operator);
-    }
-
-    #[test]
-    fn present_operator_id_means_managed() {
-        let peer_id = peer_id().to_string();
-        assert_eq!(config(Some(peer_id)).mode(), NodeMode::Managed);
     }
 
     #[test]

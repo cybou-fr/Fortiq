@@ -2,7 +2,7 @@
 
 use fortiq_core::{
     AuthorizationConfig, CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig,
-    NodeInfo, NodeMode, TicketConfig, TicketPriority, TicketState, TicketStore,
+    NodeInfo, TicketConfig, TicketPriority, TicketState, TicketStore,
 };
 use fortiq_p2p::{P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
 use libp2p::{identity::Keypair, Multiaddr};
@@ -89,16 +89,8 @@ async fn e2e_managed_operator_quic_interaction() {
         .unwrap();
     let operator_listen_addr: Multiaddr = "/ip4/127.0.0.1/udp/0/quic-v1".parse().unwrap();
 
-    let managed_info = NodeInfo::local(
-        managed_peer_id,
-        "managed-node".to_string(),
-        NodeMode::Managed,
-    );
-    let operator_info = NodeInfo::local(
-        operator_peer_id,
-        "operator-node".to_string(),
-        NodeMode::Operator,
-    );
+    let managed_info = NodeInfo::local(managed_peer_id, "managed-node".to_string());
+    let operator_info = NodeInfo::local(operator_peer_id, "operator-node".to_string());
 
     let managed_options = RunOptions {
         config: managed_config,
@@ -281,16 +273,8 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
         .unwrap();
     let intruder_listen_addr: Multiaddr = "/ip4/127.0.0.1/udp/0/quic-v1".parse().unwrap();
 
-    let managed_info = NodeInfo::local(
-        managed_peer_id,
-        "managed-node".to_string(),
-        NodeMode::Managed,
-    );
-    let intruder_info = NodeInfo::local(
-        intruder_peer_id,
-        "intruder-node".to_string(),
-        NodeMode::Operator,
-    );
+    let managed_info = NodeInfo::local(managed_peer_id, "managed-node".to_string());
+    let intruder_info = NodeInfo::local(intruder_peer_id, "intruder-node".to_string());
 
     let managed_options = RunOptions {
         config: managed_config,

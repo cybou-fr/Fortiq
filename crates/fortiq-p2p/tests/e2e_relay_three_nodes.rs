@@ -2,7 +2,7 @@
 
 use fortiq_core::{
     AuthorizationConfig, CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig,
-    NodeInfo, NodeMode, TicketConfig, TicketPriority, TicketState, TicketStore,
+    NodeInfo, TicketConfig, TicketPriority, TicketState, TicketStore,
 };
 use fortiq_p2p::{P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
 use libp2p::{identity::Keypair, Multiaddr};
@@ -67,7 +67,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     let relay_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{relay_port}/quic-v1")
         .parse()
         .unwrap();
-    let relay_info = NodeInfo::local(relay_peer_id, "relay-node".to_string(), NodeMode::Managed);
+    let relay_info = NodeInfo::local(relay_peer_id, "relay-node".to_string());
     let relay_options = RunOptions {
         config: relay_config,
         listen_address: relay_listen_addr,
@@ -120,11 +120,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     let managed_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{managed_port}/quic-v1")
         .parse()
         .unwrap();
-    let managed_info = NodeInfo::local(
-        managed_peer_id,
-        "managed-node".to_string(),
-        NodeMode::Managed,
-    );
+    let managed_info = NodeInfo::local(managed_peer_id, "managed-node".to_string());
     let managed_options = RunOptions {
         config: managed_config,
         listen_address: managed_listen_addr,
@@ -159,11 +155,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
     let operator_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{operator_port}/quic-v1")
         .parse()
         .unwrap();
-    let operator_info = NodeInfo::local(
-        operator_peer_id,
-        "operator-node".to_string(),
-        NodeMode::Operator,
-    );
+    let operator_info = NodeInfo::local(operator_peer_id, "operator-node".to_string());
 
     let (op_cmd_tx, op_cmd_rx) = tokio::sync::mpsc::channel(32);
     let operator_options = RunOptions {
@@ -348,11 +340,7 @@ async fn e2e_relay_production_rate_limiting_smoke() {
     let relay_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{relay_port}/quic-v1")
         .parse()
         .unwrap();
-    let relay_info = NodeInfo::local(
-        relay_peer_id,
-        "relay-prod-smoke".to_string(),
-        NodeMode::Managed,
-    );
+    let relay_info = NodeInfo::local(relay_peer_id, "relay-prod-smoke".to_string());
     let relay_options = RunOptions {
         config: relay_config,
         listen_address: relay_listen_addr,
@@ -405,11 +393,7 @@ async fn e2e_relay_production_rate_limiting_smoke() {
     let managed_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{managed_port}/quic-v1")
         .parse()
         .unwrap();
-    let managed_info = NodeInfo::local(
-        managed_peer_id,
-        "managed-prod-smoke".to_string(),
-        NodeMode::Managed,
-    );
+    let managed_info = NodeInfo::local(managed_peer_id, "managed-prod-smoke".to_string());
     let managed_options = RunOptions {
         config: managed_config,
         listen_address: managed_listen_addr,
@@ -444,11 +428,7 @@ async fn e2e_relay_production_rate_limiting_smoke() {
     let operator_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{operator_port}/quic-v1")
         .parse()
         .unwrap();
-    let operator_info = NodeInfo::local(
-        operator_peer_id,
-        "operator-prod-smoke".to_string(),
-        NodeMode::Operator,
-    );
+    let operator_info = NodeInfo::local(operator_peer_id, "operator-prod-smoke".to_string());
 
     let (op_cmd_tx, op_cmd_rx) = tokio::sync::mpsc::channel(32);
     let operator_options = RunOptions {

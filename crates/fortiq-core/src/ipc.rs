@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::{NodeMode, Ticket};
+use crate::Ticket;
 
 pub const DEFAULT_WINDOWS_PIPE_NAME: &str = r"\\.\pipe\fortiq-ipc";
 pub const DEFAULT_UNIX_SOCKET_PATH: &str = "/run/fortiq.sock";
@@ -167,11 +167,9 @@ pub struct OperatorSessionStatus {
 pub struct DaemonStatus {
     pub product: String,
     pub version: String,
-    pub mode: NodeMode,
     pub peer_id: String,
     pub agent_state: String,
     pub active_ticket: Option<Ticket>,
-    pub authorized_operator: Option<String>,
     pub listen_addresses: Vec<String>,
     #[serde(default)]
     pub is_operator_unlocked: bool,
@@ -184,8 +182,6 @@ pub struct PeerSummary {
     pub os: String,
     pub transport: String,
     pub status: String,
-    pub mode: Option<NodeMode>,
-    pub authorized_operator: Option<String>,
     pub relay: bool,
     pub rendezvous: bool,
 }

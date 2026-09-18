@@ -13,7 +13,7 @@ use fortiq_core::{
         types::{EntityId, OwnerId},
     },
     ipc::{DaemonStatus, IpcRequest, IpcResponse, OperatorSessionStatus},
-    Config, NodeMode, TicketStore,
+    Config, TicketStore,
 };
 use libp2p::PeerId;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -275,20 +275,19 @@ async fn run_terminal_ipc(state: Arc<IpcState>) -> Result<()> {
 #[cfg(windows)]
 async fn run_windows_pipe(state: Arc<IpcState>) -> Result<()> {
     let pipe_name = state.config.ipc_endpoint();
-    let mode = state.config.mode();
     tracing::info!("Starting Windows Named Pipe IPC server at {}", pipe_name);
 
-    let mut server = create_windows_pipe(&pipe_name, true, false, mode)?;
+    let mut server = create_windows_pipe(&pipe_name, true, false)?;
 
     loop {
         if let Err(err) = server.connect().await {
             tracing::warn!("Named pipe connection failed: {err}");
-            server = create_windows_pipe(&pipe_name, false, false, mode)?;
+            server = create_windows_pipe(&pipe_name, false, false)?;
             continue;
         }
 
         let client = server;
-        server = create_windows_pipe(&pipe_name, false, false, mode)?;
+        server = create_windows_pipe(&pipe_name, false, false)?;
 
         let state_clone = Arc::clone(&state);
         tokio::spawn(async move {
@@ -302,20 +301,19 @@ async fn run_windows_pipe(state: Arc<IpcState>) -> Result<()> {
 #[cfg(windows)]
 async fn run_windows_terminal_pipe(state: Arc<IpcState>) -> Result<()> {
     let pipe_name = state.config.terminal_ipc_endpoint();
-    let mode = state.config.mode();
     tracing::info!("Starting Windows Terminal Named Pipe at {}", pipe_name);
 
-    let mut server = create_windows_pipe(&pipe_name, true, true, mode)?;
+    let mut server = create_windows_pipe(&pipe_name, true, true)?;
 
     loop {
         if let Err(err) = server.connect().await {
             tracing::warn!("Terminal named pipe connection failed: {err}");
-            server = create_windows_pipe(&pipe_name, false, true, mode)?;
+            server = create_windows_pipe(&pipe_name, false, true)?;
             continue;
         }
 
         let client = server;
-        server = create_windows_pipe(&pipe_name, false, true, mode)?;
+        server = create_windows_pipe(&pipe_name, false, true)?;
 
         let state_clone = Arc::clone(&state);
         tokio::spawn(async move {
@@ -408,8 +406,7 @@ fn lookup_group_sid(name: &str) -> Option<String> {
 fn create_windows_pipe(
     pipe_name: &str,
     first_instance: bool,
-    is_terminal: bool,
-    mode: NodeMode,
+    _is_terminal: bool,
 ) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
     use std::{ffi::c_void, iter, ptr};
     use tokio::net::windows::named_pipe::ServerOptions;
@@ -423,7 +420,7 @@ fn create_windows_pipe(
         },
     };
 
-    let sddl_str = if is_terminal || mode == NodeMode::Operator {
+    let sddl_str = {
         if let Some(op_sid) =
             lookup_group_sid("FORTIQ Operators").or_else(|| lookup_group_sid("FORTIQ-Operators"))
         {
@@ -434,8 +431,6 @@ fn create_windows_pipe(
             );
             "D:P(A;;GA;;;SY)(A;;GA;;;BA)".to_string()
         }
-    } else {
-        "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)".to_string()
     };
 
     let sddl: Vec<u16> = sddl_str.encode_utf16().chain(iter::once(0)).collect();
@@ -508,23 +503,13 @@ async fn run_unix_socket(state: Arc<IpcState>) -> Result<()> {
         let _ = tokio::fs::create_dir_all(parent).await;
         #[cfg(unix)]
         if let Some(p_str) = parent.to_str() {
-            let parent_mode = if state.config.mode() == NodeMode::Operator {
-                0o770
-            } else {
-                0o755
-            };
-            setup_unix_socket_permissions_and_group(p_str, parent_mode);
+            setup_unix_socket_permissions_and_group(p_str, 0o770);
         }
     }
     let listener = UnixListener::bind(&path)?;
     #[cfg(unix)]
     {
-        let socket_mode = if state.config.mode() == NodeMode::Operator {
-            0o660
-        } else {
-            0o666
-        };
-        setup_unix_socket_permissions_and_group(&path, socket_mode);
+        setup_unix_socket_permissions_and_group(&path, 0o660);
     }
     tracing::info!("Starting Unix Domain Socket IPC server at {}", path);
 
@@ -635,11 +620,9 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             let status = DaemonStatus {
                 product: "FORTIQ".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
-                mode: state.config.mode(),
                 peer_id: state.peer_id.to_string(),
                 agent_state: "online".to_string(),
                 active_ticket,
-                authorized_operator: state.config.authorization.operator_peer_id.clone(),
                 listen_addresses: state.listen_addresses.clone(),
                 is_operator_unlocked: is_unlocked,
             };
@@ -686,26 +669,13 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             description,
             priority,
         } => {
-            if state.config.mode() != NodeMode::Managed {
-                return IpcResponse::Error(
-                    "Seul le client managed peut créer un ticket".to_string(),
-                );
-            }
-            let client_peer = if state.config.mode() == NodeMode::Managed {
-                state.peer_id.to_string()
-            } else {
-                "local".to_string()
-            };
-            let operator_peer = if state.config.mode() == NodeMode::Managed {
-                state
-                    .config
-                    .authorization
-                    .operator_peer_id
-                    .clone()
-                    .unwrap_or_else(|| "unassigned".to_string())
-            } else {
-                state.peer_id.to_string()
-            };
+            let client_peer = state.peer_id.to_string();
+            let operator_peer = state
+                .config
+                .authorization
+                .operator_peer_id
+                .clone()
+                .unwrap_or_else(|| "unassigned".to_string());
 
             match state.ticket_store.db().create_ticket(
                 &title,
@@ -715,11 +685,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 &operator_peer,
             ) {
                 Ok(record) => {
-                    let target_str = if state.config.mode() == NodeMode::Managed {
-                        state.config.authorization.operator_peer_id.as_deref()
-                    } else {
-                        None
-                    };
+                    let target_str = state.config.authorization.operator_peer_id.as_deref();
                     if let Some(target) = target_str {
                         if let Ok(peer) = target.parse::<PeerId>() {
                             if let Some(ref sender) = state.p2p_sender {
@@ -1460,7 +1426,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_terminal_client_rejected_on_managed_mode() {
+    async fn test_terminal_client_rejected_without_operator_session() {
         let dir = tempfile::tempdir().unwrap();
         let config = Config {
             node: fortiq_core::NodeConfig {
@@ -1479,7 +1445,6 @@ mod tests {
             ticket: fortiq_core::TicketConfig::default(),
             ipc: fortiq_core::IpcConfig::default(),
         };
-        assert_eq!(config.mode(), NodeMode::Managed);
         let ticket_path = dir.path().join("ticket.json");
         let state = Arc::new(IpcState {
             config,
