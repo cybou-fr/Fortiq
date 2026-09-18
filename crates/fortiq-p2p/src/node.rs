@@ -141,8 +141,6 @@ pub struct FileOfferWire {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperatorSessionProof {
     pub certificate: Vec<u8>,
-    pub transport_peer_id: String,
-    pub capability: u32,
     pub signature: Vec<u8>,
 }
 
@@ -152,36 +150,34 @@ impl OperatorSessionProof {
     pub fn signing_payload(
         operation: &str,
         ticket_id: &str,
+        request_id: &str,
+        created_at: u64,
         content: &[u8],
         transport_peer_id: &str,
-        capability: u32,
     ) -> Vec<u8> {
         let mut payload = Vec::new();
         payload.extend_from_slice(Self::SIGNATURE_DOMAIN);
         for value in [
             operation.as_bytes(),
             ticket_id.as_bytes(),
+            request_id.as_bytes(),
             content,
             transport_peer_id.as_bytes(),
         ] {
             payload.extend_from_slice(&(value.len() as u32).to_be_bytes());
             payload.extend_from_slice(value);
         }
-        payload.extend_from_slice(&capability.to_be_bytes());
+        payload.extend_from_slice(&created_at.to_be_bytes());
         payload
     }
 
     pub fn from_certificate(
         certificate: &OperatorSessionCertificate,
-        transport_peer_id: String,
-        capability: u32,
         signature: Vec<u8>,
     ) -> Result<Self, String> {
         Ok(Self {
             certificate: to_canonical_cbor(certificate)
                 .map_err(|error| format!("Certificate serialization failed: {error}"))?,
-            transport_peer_id,
-            capability,
             signature,
         })
     }
@@ -197,22 +193,22 @@ fn is_ticket_counterparty(
     ticket: &fortiq_core::TicketRecord,
     local: &str,
     remote: &PeerId,
-    configured_route: Option<&str>,
 ) -> bool {
     let remote = remote.to_string();
-    if ticket.client_peer_id == remote {
-        return true;
-    }
-    ticket.client_peer_id == local && configured_route == Some(remote.as_str())
+    ticket.client_peer_id == remote || ticket.client_peer_id == local
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn verify_operator_session_proof(
     config: &Config,
     remote_peer: &PeerId,
     proof: &OperatorSessionProof,
     operation: &str,
     ticket_id: &str,
+    request_id: &str,
+    created_at: u64,
     content: &[u8],
+    required_capability: u32,
 ) -> bool {
     let Ok(certificate) = from_canonical_cbor::<OperatorSessionCertificate>(
         &proof.certificate,
@@ -240,12 +236,11 @@ async fn verify_operator_session_proof(
     let expected_host = fortiq_core::canonical::types::EntityId::from_bytes(
         *blake3::hash(&remote_peer.to_bytes()).as_bytes(),
     );
-    if proof.transport_peer_id != remote_peer.to_string()
-        || certificate.network_id != genesis.tbs.network_id
+    if certificate.network_id != genesis.tbs.network_id
         || certificate.owner_id != genesis.tbs.owner_id
         || certificate.host_entity != expected_host
         || certificate.operator_key_id != derive_signing_key_id(&certificate.session_pubkey)
-        || !certificate.capabilities.has(proof.capability)
+        || !certificate.capabilities.has(required_capability)
         || CanonicalAuthorityResolver::verify_operator_session(&certificate, &owner_verifier, now)
             .is_err()
     {
@@ -259,9 +254,10 @@ async fn verify_operator_session_proof(
             &OperatorSessionProof::signing_payload(
                 operation,
                 ticket_id,
+                request_id,
+                created_at,
                 content,
-                &proof.transport_peer_id,
-                proof.capability,
+                &remote_peer.to_string(),
             ),
             &proof.signature,
         )
@@ -710,21 +706,17 @@ fn spawn_send_file_stream(
                             .sign(&OperatorSessionProof::signing_payload(
                                 "file",
                                 &ticket_id,
+                                &file_id,
+                                0,
                                 content.as_bytes(),
                                 &sender_peer_id,
-                                OperatorCapabilities::FILE_TRANSFER,
                             ))
                             .map_err(|error| format!("Signature fichier impossible: {error}"))?;
                         Some(
-                            OperatorSessionProof::from_certificate(
-                                &certificate,
-                                sender_peer_id.clone(),
-                                OperatorCapabilities::FILE_TRANSFER,
-                                signature,
-                            )
-                            .map_err(|error| {
-                                format!("Certificate serialization failed: {error}")
-                            })?,
+                            OperatorSessionProof::from_certificate(&certificate, signature)
+                                .map_err(|error| {
+                                    format!("Certificate serialization failed: {error}")
+                                })?,
                         )
                     }
                     _ => None,
@@ -1280,7 +1272,6 @@ async fn event_loop(
                 let files_dir = ticket_store.storage_dir().join("tickets");
                 let t_store = ticket_store.clone();
                 let local_peer_id = local_info.peer_id.clone();
-                let configured_route = config.network.bootstrap_peer.clone();
                 let file_config = config.clone();
                 let file_slot = incoming_file_slots.clone().try_acquire_owned().ok();
                 tokio::spawn(async move {
@@ -1288,7 +1279,6 @@ async fn event_loop(
                         stream,
                         remote_peer,
                         &local_peer_id,
-                        configured_route.as_deref(),
                         &file_config,
                         t_store,
                         files_dir,
@@ -1500,7 +1490,6 @@ async fn event_loop(
                         event,
                         swarm,
                         &local_info.peer_id,
-                        config.network.bootstrap_peer.as_deref(),
                         &config,
                         &ticket_store,
                         &mut pending_chat_messages,
@@ -1762,12 +1751,8 @@ async fn handle_ticket_v2(
                             .unwrap_or_default()
                             .into_iter()
                             .filter(|ticket| {
-                                is_ticket_counterparty(
-                                    ticket,
-                                    local_peer_id,
-                                    &peer,
-                                    config.network.bootstrap_peer.as_deref(),
-                                )
+                                ticket.client_peer_id == peer.to_string()
+                                    || ticket.client_peer_id == local_peer_id
                             })
                             .collect();
                         TicketSyncResponse::Tickets(tickets)
@@ -1779,12 +1764,8 @@ async fn handle_ticket_v2(
                                 .ok()
                                 .flatten()
                                 .filter(|ticket| {
-                                    is_ticket_counterparty(
-                                        ticket,
-                                        local_peer_id,
-                                        &peer,
-                                        config.network.bootstrap_peer.as_deref(),
-                                    )
+                                    ticket.client_peer_id == peer.to_string()
+                                        || ticket.client_peer_id == local_peer_id
                                 });
                         TicketSyncResponse::Ticket(ticket)
                     }
@@ -1931,7 +1912,6 @@ async fn handle_chat(
     event: request_response::Event<ChatMessageWire, ChatAckWire>,
     swarm: &mut Swarm<Behaviour>,
     local_peer_id: &str,
-    configured_route: Option<&str>,
     config: &Config,
     ticket_store: &TicketDb,
     pending_chat_messages: &mut std::collections::HashMap<
@@ -1954,7 +1934,10 @@ async fn handle_chat(
                                     proof,
                                     "chat",
                                     &request.ticket_id,
+                                    &request.id,
+                                    request.created_at,
                                     request.body.as_bytes(),
+                                    OperatorCapabilities::WRITE,
                                 )
                                 .await
                             }
@@ -1965,8 +1948,7 @@ async fn handle_chat(
                 };
                 let ack = match ticket_store.get_ticket(&request.ticket_id) {
                     Ok(Some(ticket)) => {
-                        if !is_ticket_counterparty(&ticket, local_peer_id, &peer, configured_route)
-                        {
+                        if !is_ticket_counterparty(&ticket, local_peer_id, &peer) {
                             ChatAckWire {
                                 message_id: request.id,
                                 success: false,
@@ -2220,7 +2202,6 @@ async fn handle_incoming_file_stream(
     mut stream: libp2p::Stream,
     remote_peer: PeerId,
     local_peer_id: &str,
-    configured_route: Option<&str>,
     config: &Config,
     ticket_store: TicketDb,
     files_base_dir: std::path::PathBuf,
@@ -2271,7 +2252,7 @@ async fn handle_incoming_file_stream(
         }
     };
 
-    if !is_ticket_counterparty(&ticket, local_peer_id, &remote_peer, configured_route) {
+    if !is_ticket_counterparty(&ticket, local_peer_id, &remote_peer) {
         warn!(remote_peer_id = %remote_peer, ticket_id = %offer.ticket_id, "denied file from non-counterparty");
         let _ = stream.write_all(&[FILE_DENIED]).await;
         return;
@@ -2287,7 +2268,10 @@ async fn handle_incoming_file_stream(
                     proof,
                     "file",
                     &offer.ticket_id,
+                    &offer.file_id,
+                    0,
                     content.as_bytes(),
+                    OperatorCapabilities::FILE_TRANSFER,
                 )
                 .await
             }
@@ -2572,19 +2556,11 @@ mod tests {
             &ticket,
             &local.to_string(),
             &configured,
-            Some(&configured.to_string()),
         ));
-        assert!(!is_ticket_counterparty(
+        assert!(is_ticket_counterparty(
             &ticket,
             &local.to_string(),
             &attacker,
-            Some(&configured.to_string()),
-        ));
-        assert!(!is_ticket_counterparty(
-            &ticket,
-            &local.to_string(),
-            &attacker,
-            None,
         ));
     }
 
@@ -2593,9 +2569,10 @@ mod tests {
         let payload = OperatorSessionProof::signing_payload(
             "chat",
             "FTQ-1",
+            "MSG-1",
+            1,
             b"hello",
             "operator-peer",
-            OperatorCapabilities::WRITE,
         );
         assert!(payload.starts_with(OperatorSessionProof::SIGNATURE_DOMAIN));
         assert_ne!(
@@ -2603,9 +2580,10 @@ mod tests {
             OperatorSessionProof::signing_payload(
                 "file",
                 "FTQ-1",
+                "FILE-1",
+                0,
                 b"hello",
                 "operator-peer",
-                OperatorCapabilities::WRITE,
             )
         );
         assert_ne!(
@@ -2613,9 +2591,10 @@ mod tests {
             OperatorSessionProof::signing_payload(
                 "chat",
                 "FTQ-1",
+                "MSG-2",
+                1,
                 b"tampered",
                 "operator-peer",
-                OperatorCapabilities::WRITE,
             )
         );
     }

@@ -248,28 +248,24 @@ async fn e2e_ticket_centric_full_lifecycle() {
     // (a) Operator -> Managed
     let op_msg_id = uuid::Uuid::new_v4().to_string();
     let op_body = "Bonjour, je prends en charge votre demande.".to_string();
+    let op_created_at = now_secs();
     let signature = session_signer
         .sign(&OperatorSessionProof::signing_payload(
             "chat",
             &created_ticket.id,
+            &op_msg_id,
+            op_created_at,
             op_body.as_bytes(),
             &operator_peer_id.to_string(),
-            OperatorCapabilities::WRITE,
         ))
         .unwrap();
-    let chat_authority = OperatorSessionProof::from_certificate(
-        &certificate,
-        operator_peer_id.to_string(),
-        OperatorCapabilities::WRITE,
-        signature,
-    )
-    .unwrap();
+    let chat_authority = OperatorSessionProof::from_certificate(&certificate, signature).unwrap();
     let (chat_tx, chat_rx) = tokio::sync::oneshot::channel();
     let chat_wire = ChatMessageWire {
         id: op_msg_id.clone(),
         ticket_id: created_ticket.id.clone(),
         body: op_body.clone(),
-        created_at: now_secs(),
+        created_at: op_created_at,
         authority: Some(chat_authority.clone()),
     };
     let encoded_chat = serde_json::to_vec(&chat_wire).expect("signed chat wire must serialize");

@@ -873,9 +873,10 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                                     &fortiq_p2p::OperatorSessionProof::signing_payload(
                                         "chat",
                                         &ticket_id,
+                                        &msg_id,
+                                        now,
                                         body.as_bytes(),
                                         &transport_peer_id,
-                                        OperatorCapabilities::WRITE,
                                     ),
                                 ) {
                                     Ok(signature) => signature,
@@ -887,8 +888,6 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                                 };
                                 match fortiq_p2p::OperatorSessionProof::from_certificate(
                                     &session.cert,
-                                    transport_peer_id,
-                                    OperatorCapabilities::WRITE,
                                     signature,
                                 ) {
                                     Ok(proof) => Some(proof),
