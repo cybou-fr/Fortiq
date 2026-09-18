@@ -672,8 +672,8 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             let client_peer = state.peer_id.to_string();
             let operator_peer = state
                 .config
-                .authorization
-                .operator_peer_id
+                .network
+                .bootstrap_peer
                 .clone()
                 .unwrap_or_else(|| "unassigned".to_string());
 
@@ -685,7 +685,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 &operator_peer,
             ) {
                 Ok(record) => {
-                    let target_str = state.config.authorization.operator_peer_id.as_deref();
+                    let target_str = state.config.network.bootstrap_peer.as_deref();
                     if let Some(target) = target_str {
                         if let Ok(peer) = target.parse::<PeerId>() {
                             if let Some(ref sender) = state.p2p_sender {
@@ -1435,11 +1435,6 @@ mod tests {
             identity: fortiq_core::IdentityConfig {
                 path: dir.path().join("id.key"),
             },
-            authorization: fortiq_core::AuthorizationConfig {
-                operator_peer_id: Some(
-                    "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN".to_string(),
-                ),
-            },
             network: fortiq_core::NetworkConfig::default(),
             capabilities: fortiq_core::CapabilitiesConfig::default(),
             ticket: fortiq_core::TicketConfig::default(),
@@ -1477,11 +1472,6 @@ mod tests {
             },
             identity: fortiq_core::IdentityConfig {
                 path: dir.path().join("id.key"),
-            },
-            authorization: fortiq_core::AuthorizationConfig {
-                operator_peer_id: Some(
-                    "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN".to_string(),
-                ),
             },
             network: fortiq_core::NetworkConfig::default(),
             capabilities: fortiq_core::CapabilitiesConfig::default(),

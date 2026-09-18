@@ -1,8 +1,8 @@
 #![allow(deprecated)]
 
 use fortiq_core::{
-    AuthorizationConfig, CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig,
-    NodeInfo, TicketConfig, TicketPriority, TicketState, TicketStore,
+    CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig, NodeInfo, TicketConfig,
+    TicketPriority, TicketState, TicketStore,
 };
 use fortiq_p2p::{P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
 use libp2p::{identity::Keypair, Multiaddr};
@@ -49,13 +49,11 @@ async fn e2e_managed_operator_quic_interaction() {
         identity: IdentityConfig {
             path: dir_managed.path().join("id.key"),
         },
-        authorization: AuthorizationConfig {
-            operator_peer_id: Some(operator_peer_id.to_string()),
-        },
         network: NetworkConfig {
             listen_quic: format!("127.0.0.1:{managed_port}"),
             public_addr: None,
             relay_peer: None,
+            bootstrap_peer: Some(operator_peer_id.to_string()),
         },
         capabilities: CapabilitiesConfig::default(),
         ticket: TicketConfig {
@@ -71,13 +69,11 @@ async fn e2e_managed_operator_quic_interaction() {
         identity: IdentityConfig {
             path: dir_operator.path().join("id.key"),
         },
-        authorization: AuthorizationConfig {
-            operator_peer_id: None,
-        },
         network: NetworkConfig {
             listen_quic: format!("127.0.0.1:{operator_port}"),
             public_addr: None,
             relay_peer: None,
+            bootstrap_peer: None,
         },
         capabilities: CapabilitiesConfig::default(),
         ticket: TicketConfig::default(),
@@ -233,13 +229,11 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
         identity: IdentityConfig {
             path: dir_managed.path().join("id.key"),
         },
-        authorization: AuthorizationConfig {
-            operator_peer_id: Some(legit_operator_peer_id.to_string()),
-        },
         network: NetworkConfig {
             listen_quic: format!("127.0.0.1:{managed_port}"),
             public_addr: None,
             relay_peer: None,
+            bootstrap_peer: Some(legit_operator_peer_id.to_string()),
         },
         capabilities: CapabilitiesConfig::default(),
         ticket: TicketConfig {
@@ -255,13 +249,11 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
         identity: IdentityConfig {
             path: dir_intruder.path().join("id.key"),
         },
-        authorization: AuthorizationConfig {
-            operator_peer_id: None,
-        },
         network: NetworkConfig {
             listen_quic: format!("127.0.0.1:{intruder_port}"),
             public_addr: None,
             relay_peer: None,
+            bootstrap_peer: None,
         },
         capabilities: CapabilitiesConfig::default(),
         ticket: TicketConfig::default(),

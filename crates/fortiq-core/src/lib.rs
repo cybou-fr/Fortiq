@@ -14,8 +14,6 @@ pub struct Config {
     pub node: NodeConfig,
     pub identity: IdentityConfig,
     #[serde(default)]
-    pub authorization: AuthorizationConfig,
-    #[serde(default)]
     pub network: NetworkConfig,
     #[serde(default)]
     pub capabilities: CapabilitiesConfig,
@@ -40,10 +38,10 @@ impl Config {
         if self.node.name.trim().is_empty() {
             anyhow::bail!("node.name must not be empty");
         }
-        if let Some(peer_id) = &self.authorization.operator_peer_id {
+        if let Some(peer_id) = &self.network.bootstrap_peer {
             peer_id
                 .parse::<PeerId>()
-                .context("authorization.operator_peer_id is not a valid libp2p PeerId")?;
+                .context("network.bootstrap_peer is not a valid libp2p PeerId")?;
         }
         if let Some(address) = &self.network.relay_peer {
             address
@@ -168,22 +166,14 @@ pub struct IdentityConfig {
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct AuthorizationConfig {
-    /// Deprecated: Static operator_peer_id is formally retired in Canonical Architecture v3.
-    #[deprecated(
-        since = "0.3.0",
-        note = "operator_peer_id is deprecated. FORTIQ Canonical Architecture v3 replaces static peer ID authorization with cryptographic Segment capabilities, Session Certificates, and client-owned AccessEpochs."
-    )]
-    pub operator_peer_id: Option<String>,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct NetworkConfig {
     #[serde(default = "default_listen_quic")]
     pub listen_quic: String,
     pub relay_peer: Option<String>,
     pub public_addr: Option<String>,
+    /// Optional discovery/routing hint. It does not grant application authority.
+    pub bootstrap_peer: Option<String>,
 }
 
 impl Default for NetworkConfig {
@@ -192,6 +182,7 @@ impl Default for NetworkConfig {
             listen_quic: default_listen_quic(),
             relay_peer: None,
             public_addr: None,
+            bootstrap_peer: None,
         }
     }
 }
@@ -345,14 +336,16 @@ impl NodeInfo {
 mod tests {
     use super::*;
 
-    fn config(operator_peer_id: Option<String>) -> Config {
+    fn config(bootstrap_peer: Option<String>) -> Config {
         Config {
             node: NodeConfig {
                 name: "test".into(),
             },
             identity: IdentityConfig { path: "id".into() },
-            authorization: AuthorizationConfig { operator_peer_id },
-            network: NetworkConfig::default(),
+            network: NetworkConfig {
+                bootstrap_peer,
+                ..NetworkConfig::default()
+            },
             capabilities: CapabilitiesConfig::default(),
             ticket: TicketConfig::default(),
             ipc: IpcConfig::default(),
