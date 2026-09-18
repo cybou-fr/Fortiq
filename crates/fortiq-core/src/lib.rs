@@ -158,27 +158,6 @@ impl Config {
     }
 }
 
-/// Returns true only when `remote_peer` is the operator explicitly configured
-/// by this managed peer.
-///
-/// The caller must pass the authenticated PeerId supplied by libp2p, never a
-/// PeerId claimed inside application payload data. Operator-mode nodes have no
-/// configured remote operator and therefore return false.
-/// Deprecated: Static operator authorization via `operator_peer_id` is deprecated in favor of
-/// `CanonicalAuthorityResolver` and cryptographic `OperatorSessionCertificate`s.
-#[deprecated(
-    since = "0.3.0",
-    note = "is_authorized_operator based on config.authorization.operator_peer_id is deprecated. Use CanonicalAuthorityResolver with Owner-signed Session Certificates."
-)]
-pub fn is_authorized_operator(remote_peer: PeerId, config: &Config) -> bool {
-    config
-        .authorization
-        .operator_peer_id
-        .as_deref()
-        .and_then(|configured| configured.parse::<PeerId>().ok())
-        .is_some_and(|configured| configured == remote_peer)
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct NodeConfig {
     pub name: String,
@@ -378,34 +357,6 @@ mod tests {
             ticket: TicketConfig::default(),
             ipc: IpcConfig::default(),
         }
-    }
-
-    #[test]
-    fn configured_operator_is_authorized() {
-        let operator = peer_id();
-        let managed = config(Some(operator.to_string()));
-
-        assert!(is_authorized_operator(operator, &managed));
-    }
-
-    #[test]
-    fn different_peer_is_not_authorized() {
-        let operator = peer_id();
-        let other = peer_id();
-        let managed = config(Some(operator.to_string()));
-
-        assert!(!is_authorized_operator(other, &managed));
-    }
-
-    #[test]
-    fn operator_mode_does_not_authorize_a_remote_operator() {
-        assert!(!is_authorized_operator(peer_id(), &config(None)));
-    }
-
-    fn peer_id() -> PeerId {
-        libp2p::identity::Keypair::generate_ed25519()
-            .public()
-            .to_peer_id()
     }
 
     #[test]
