@@ -30,12 +30,19 @@ use tracing::{info, warn};
 
 pub const HELLO_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/hello/1.0");
 pub const SHELL_PROTOCOL_V3: StreamProtocol = StreamProtocol::new("/fortiq/shell/3.0");
-pub const TICKET_PROTOCOL_V3: StreamProtocol = StreamProtocol::new("/fortiq/ticket/3.0");
+pub const TICKET_PROTOCOL_V4: StreamProtocol = StreamProtocol::new("/fortiq/ticket/4.0");
 pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/2.0");
 pub const FILE_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/file/2.0");
 const MAX_HELLO_BYTES: usize = 16 * 1024;
 /// How often a node re-queries the rendezvous points it knows.
 const REDISCOVERY_INTERVAL: Duration = Duration::from_secs(10);
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
 
 pub const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
 pub const MAX_TICKET_STORAGE: u64 = 500 * 1024 * 1024; // 500 MB
@@ -58,6 +65,37 @@ pub enum TicketSyncRequest {
         ticket_id: String,
         state: fortiq_core::TicketState,
     },
+    UpdateStatusSigned(Box<TicketStateMutation>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TicketStateMutation {
+    pub network_id: fortiq_core::canonical::types::NetworkId,
+    pub ticket_id: String,
+    pub expected_revision: u64,
+    pub new_state: fortiq_core::TicketState,
+    pub request_id: [u8; 16],
+    pub operator_transport_peer_id: String,
+    pub certificate: OperatorSessionCertificate,
+    pub signature: Vec<u8>,
+}
+
+impl TicketStateMutation {
+    pub const SIGNATURE_DOMAIN: &'static [u8] = b"FORTIQ-TICKET-STATE-v1:";
+
+    pub fn signing_payload(&self) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(Self::SIGNATURE_DOMAIN);
+        payload.extend_from_slice(self.network_id.as_bytes());
+        payload.extend_from_slice(&(self.ticket_id.len() as u32).to_be_bytes());
+        payload.extend_from_slice(self.ticket_id.as_bytes());
+        payload.extend_from_slice(&self.expected_revision.to_be_bytes());
+        payload.push(self.new_state as u8);
+        payload.extend_from_slice(&self.request_id);
+        payload.extend_from_slice(&(self.operator_transport_peer_id.len() as u32).to_be_bytes());
+        payload.extend_from_slice(self.operator_transport_peer_id.as_bytes());
+        payload
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,7 +152,7 @@ fn is_ticket_counterparty(
     remote: &PeerId,
 ) -> bool {
     let remote = remote.to_string();
-    ticket.client_peer_id == local || ticket.client_peer_id == remote.to_string()
+    ticket.client_peer_id == local || ticket.client_peer_id == remote
 }
 
 struct ShellSessionGuard(Arc<AtomicBool>);
@@ -741,7 +779,7 @@ pub async fn run(
                 request_response::json::codec::Codec::default()
                     .set_request_size_maximum(64 * 1024)
                     .set_response_size_maximum(256 * 1024),
-                [(TICKET_PROTOCOL_V3, ProtocolSupport::Full)],
+                [(TICKET_PROTOCOL_V4, ProtocolSupport::Full)],
                 request_response::Config::default().with_request_timeout(Duration::from_secs(10)),
             );
             let chat = request_response::Behaviour::with_codec(
@@ -1296,6 +1334,7 @@ async fn event_loop(
                         event,
                         swarm,
                         &local_info.peer_id,
+                        &config,
                         &ticket_store,
                         &mut pending_sync_tickets,
                     ).await;
@@ -1546,6 +1585,7 @@ async fn handle_ticket_v2(
     event: request_response::Event<TicketSyncRequest, TicketSyncResponse>,
     swarm: &mut Swarm<Behaviour>,
     local_peer_id: &str,
+    config: &Config,
     ticket_store: &TicketStore,
     pending_sync_tickets: &mut std::collections::HashMap<
         request_response::OutboundRequestId,
@@ -1630,6 +1670,67 @@ async fn handle_ticket_v2(
                                 Err(e) => TicketSyncResponse::MutationRejected {
                                     kind: MutationRejectionKind::Permanent,
                                     message: format!("Erreur: {e}"),
+                                    canonical: current.map(Box::new),
+                                },
+                            }
+                        }
+                    }
+                    TicketSyncRequest::UpdateStatusSigned(mutation) => {
+                        let current = ticket_store.db().get_ticket(&mutation.ticket_id).ok().flatten();
+                        let genesis = tokio::fs::read(config.genesis_path())
+                            .await
+                            .ok()
+                            .and_then(|bytes| from_canonical_cbor::<Genesis>(&bytes, DecoderLimits::CONTROL).ok())
+                            .filter(|genesis| genesis.verify().is_ok());
+                        let authorized = current.as_ref().is_some_and(|ticket| {
+                            let Some(genesis) = genesis.as_ref() else { return false; };
+                            let Ok(owner_verifier) = Ed25519Verifier::from_public_key(
+                                &genesis.tbs.owner_root_signing_public_key,
+                            ) else { return false; };
+                            mutation.network_id == genesis.tbs.network_id
+                                && mutation.operator_transport_peer_id == peer.to_string()
+                                && mutation.certificate.network_id == genesis.tbs.network_id
+                                && mutation.certificate.owner_id == genesis.tbs.owner_id
+                                && mutation.certificate.operator_key_id
+                                    == derive_signing_key_id(&mutation.certificate.session_pubkey)
+                                && mutation.certificate.capabilities.has(
+                                    fortiq_core::canonical::portable::certificate::OperatorCapabilities::TICKET_MANAGE,
+                                )
+                                && CanonicalAuthorityResolver::verify_operator_session(
+                                    &mutation.certificate,
+                                    &owner_verifier,
+                                    now_secs(),
+                                )
+                                .is_ok()
+                                && Ed25519Verifier::from_public_key(&mutation.certificate.session_pubkey)
+                                    .and_then(|verifier| {
+                                        verifier.verify(&mutation.signing_payload(), &mutation.signature)
+                                    })
+                                    .is_ok()
+                                && ticket.client_peer_id == local_peer_id
+                                && ticket.revision == mutation.expected_revision
+                        });
+                        if !authorized {
+                            TicketSyncResponse::MutationRejected {
+                                kind: MutationRejectionKind::Permanent,
+                                message: "Signed lifecycle mutation rejected".to_string(),
+                                canonical: current.map(Box::new),
+                            }
+                        } else {
+                            match ticket_store.db().update_ticket_state(
+                                &mutation.ticket_id,
+                                mutation.new_state,
+                                &peer.to_string(),
+                            ) {
+                                Ok(Some(ticket)) => TicketSyncResponse::MutationApplied(Box::new(ticket)),
+                                Ok(None) => TicketSyncResponse::MutationRejected {
+                                    kind: MutationRejectionKind::Permanent,
+                                    message: "Ticket introuvable".to_string(),
+                                    canonical: None,
+                                },
+                                Err(error) => TicketSyncResponse::MutationRejected {
+                                    kind: MutationRejectionKind::Conflict,
+                                    message: error.to_string(),
                                     canonical: current.map(Box::new),
                                 },
                             }

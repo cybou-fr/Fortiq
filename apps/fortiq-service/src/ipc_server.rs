@@ -733,15 +733,41 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 let Some(sender) = state.p2p_sender.as_ref() else {
                     return IpcResponse::Error("Sous-système P2P indisponible".to_string());
                 };
+                let (certificate, session_signer) = {
+                    let session = state.operator_session.read().await;
+                    let Some(session) = session.as_ref() else {
+                        return IpcResponse::Error("Session opérateur inactive".to_string());
+                    };
+                    (session.cert.clone(), session.session_signer.clone())
+                };
+                let network_id = match state.genesis.as_ref() {
+                    Some(genesis) => genesis.tbs.network_id,
+                    None => return IpcResponse::Error("Genesis indisponible".to_string()),
+                };
+                let mut mutation = fortiq_p2p::TicketStateMutation {
+                    network_id,
+                    ticket_id: ticket_id.clone(),
+                    expected_revision: current.revision,
+                    new_state,
+                    request_id: *uuid::Uuid::new_v4().as_bytes(),
+                    operator_transport_peer_id: local_peer_id.clone(),
+                    certificate,
+                    signature: Vec::new(),
+                };
+                mutation.signature = match session_signer.sign(&mutation.signing_payload()) {
+                    Ok(signature) => signature,
+                    Err(error) => {
+                        return IpcResponse::Error(format!(
+                            "Signature lifecycle impossible: {error}"
+                        ));
+                    }
+                };
                 let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
                 if sender
                     .send(fortiq_p2p::P2pCommand::SyncTickets {
                         peer,
                         dial: None,
-                        request: fortiq_p2p::TicketSyncRequest::UpdateStatus {
-                            ticket_id,
-                            state: new_state,
-                        },
+                        request: fortiq_p2p::TicketSyncRequest::UpdateStatusSigned(Box::new(mutation)),
                         reply: reply_tx,
                     })
                     .await
