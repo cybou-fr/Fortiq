@@ -94,8 +94,13 @@ pub const FILE_DENIED_TOO_LARGE: u8 = 0x04;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TicketSyncRequest {
-    GetTickets,
-    GetTicket { ticket_id: String },
+    GetTickets {
+        authority: Option<OperatorSessionProof>,
+    },
+    GetTicket {
+        ticket_id: String,
+        authority: Option<OperatorSessionProof>,
+    },
     PushTicket(Box<fortiq_core::TicketRecord>),
     UpdateStatusSigned(Box<TicketStateMutation>),
 }
@@ -237,7 +242,7 @@ fn is_ticket_counterparty(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn verify_operator_session_proof(
+fn verify_operator_session_proof(
     authority: &AuthorityContext,
     remote_peer: &PeerId,
     proof: &OperatorSessionProof,
@@ -1772,30 +1777,71 @@ async fn handle_ticket_v2(
                     request, channel, ..
                 } => {
                     let response = match request {
-                        TicketSyncRequest::GetTickets => {
+                        TicketSyncRequest::GetTickets {
+                            authority: request_authority,
+                        } => {
+                            let can_read = authority
+                                .as_ref()
+                                .zip(request_authority.as_ref())
+                                .is_some_and(|(context, proof)| {
+                                    verify_operator_session_proof(
+                                        context,
+                                        &peer,
+                                        proof,
+                                        "ticket-read",
+                                        "*",
+                                        "*",
+                                        0,
+                                        b"",
+                                        OperatorCapabilities::READ,
+                                    )
+                                });
                             let tickets = ticket_store
                                 .list_tickets(None)
                                 .unwrap_or_default()
                                 .into_iter()
                                 .filter(|ticket| {
                                     ticket.client_peer_id == peer.to_string()
-                                        || ticket.client_peer_id == local_peer_id
+                                        || (ticket.client_peer_id == local_peer_id && can_read)
                                 })
                                 .collect();
                             TicketSyncResponse::Tickets(tickets)
                         }
-                        TicketSyncRequest::GetTicket { ticket_id } => {
+                        TicketSyncRequest::GetTicket {
+                            ticket_id,
+                            authority: request_authority,
+                        } => {
+                            let can_read = authority
+                                .as_ref()
+                                .zip(request_authority.as_ref())
+                                .is_some_and(|(context, proof)| {
+                                    verify_operator_session_proof(
+                                        context,
+                                        &peer,
+                                        proof,
+                                        "ticket-read",
+                                        &ticket_id,
+                                        &ticket_id,
+                                        0,
+                                        b"",
+                                        OperatorCapabilities::READ,
+                                    )
+                                });
                             let ticket = ticket_store.get_ticket(&ticket_id).ok().flatten().filter(
                                 |ticket| {
                                     ticket.client_peer_id == peer.to_string()
-                                        || ticket.client_peer_id == local_peer_id
+                                        || (ticket.client_peer_id == local_peer_id && can_read)
                                 },
                             );
                             TicketSyncResponse::Ticket(ticket)
                         }
                         TicketSyncRequest::PushTicket(ticket) => {
                             let remote = peer.to_string();
-                            let authorized = ticket.client_peer_id == remote;
+                            let authorized = ticket.client_peer_id == remote
+                                && ticket.state == fortiq_core::TicketState::Open
+                                && ticket.revision == 1
+                                && ticket.closed_at.is_none()
+                                && ticket_store.get_ticket(&ticket.id).ok().flatten().is_none();
                             if !authorized {
                                 TicketSyncResponse::MutationRejected {
                                     kind: MutationRejectionKind::Permanent,
@@ -1938,20 +1984,17 @@ async fn handle_chat(
                     Ok(Some(ticket)) if ticket.client_peer_id == local_peer_id => {
                         match request.authority.as_ref() {
                             Some(proof) => match authority {
-                                Some(authority) => {
-                                    verify_operator_session_proof(
-                                        authority,
-                                        &peer,
-                                        proof,
-                                        "chat",
-                                        &request.ticket_id,
-                                        &request.id,
-                                        request.created_at,
-                                        request.body.as_bytes(),
-                                        OperatorCapabilities::WRITE,
-                                    )
-                                    .await
-                                }
+                                Some(authority) => verify_operator_session_proof(
+                                    authority,
+                                    &peer,
+                                    proof,
+                                    "chat",
+                                    &request.ticket_id,
+                                    &request.id,
+                                    request.created_at,
+                                    request.body.as_bytes(),
+                                    OperatorCapabilities::WRITE,
+                                ),
                                 None => false,
                             },
                             None => false,
@@ -2243,20 +2286,17 @@ async fn handle_incoming_file_stream(
         let content = format!("{}:{}:{}", offer.filename, offer.file_size, offer.sha256);
         let valid = match offer.authority.as_ref() {
             Some(proof) => match authority {
-                Some(authority) => {
-                    verify_operator_session_proof(
-                        authority,
-                        &remote_peer,
-                        proof,
-                        "file",
-                        &offer.ticket_id,
-                        &offer.file_id,
-                        0,
-                        content.as_bytes(),
-                        OperatorCapabilities::FILE_TRANSFER,
-                    )
-                    .await
-                }
+                Some(authority) => verify_operator_session_proof(
+                    authority,
+                    &remote_peer,
+                    proof,
+                    "file",
+                    &offer.ticket_id,
+                    &offer.file_id,
+                    0,
+                    content.as_bytes(),
+                    OperatorCapabilities::FILE_TRANSFER,
+                ),
                 None => false,
             },
             None => false,

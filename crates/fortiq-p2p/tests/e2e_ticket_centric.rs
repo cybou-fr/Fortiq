@@ -218,6 +218,18 @@ async fn e2e_ticket_centric_full_lifecycle() {
     assert_eq!(created_ticket.state, TicketState::Open);
 
     // 3. Operator syncs active ticket via /fortiq/ticket/2.0
+    let read_signature = session_signer
+        .sign(&OperatorSessionProof::signing_payload(
+            "ticket-read",
+            &created_ticket.id,
+            &created_ticket.id,
+            0,
+            b"",
+            &operator_peer_id.to_string(),
+        ))
+        .unwrap();
+    let read_authority =
+        OperatorSessionProof::from_certificate(&certificate, read_signature).unwrap();
     let (sync_tx, sync_rx) = tokio::sync::oneshot::channel();
     operator_cmd_tx
         .send(P2pCommand::SyncTickets {
@@ -225,6 +237,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
             dial: Some(managed_dial_addr.clone()),
             request: TicketSyncRequest::GetTicket {
                 ticket_id: created_ticket.id.clone(),
+                authority: Some(read_authority),
             },
             reply: sync_tx,
         })
