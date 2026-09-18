@@ -8,8 +8,7 @@ pub mod inventory;
 pub mod snapshot;
 pub mod tail;
 
-#[cfg(any())]
-mod tests;
+// v3 epoch-oriented tests were superseded by security_audit_phase15_v4.
 
 pub use head::{
     HeadAdvertisement, HeadError, HeadTracker, SegmentHeadIndex, HEAD_ADV_SIG_DOMAIN,

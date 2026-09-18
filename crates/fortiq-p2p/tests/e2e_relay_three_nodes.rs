@@ -87,7 +87,6 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
             "Ticket-scoped shell test",
             TicketPriority::Normal,
             &managed_peer_id.to_string(),
-            &operator_peer_id.to_string(),
         )
         .unwrap();
     assert_eq!(opened_ticket.state, TicketState::Open);
@@ -340,7 +339,6 @@ async fn e2e_relay_production_rate_limiting_smoke() {
             "Ticket-scoped shell test",
             TicketPriority::Normal,
             &managed_peer_id.to_string(),
-            &operator_peer_id.to_string(),
         )
         .unwrap();
     assert_eq!(opened_ticket.state, TicketState::Open);

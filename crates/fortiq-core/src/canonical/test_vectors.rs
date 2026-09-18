@@ -1,5 +1,5 @@
-#[cfg(any())]
-mod tests {
+// Legacy v3 test vectors are superseded by security_audit_phase15_v4.
+/*
     use crate::canonical::codec::{
         from_canonical_cbor, to_canonical_cbor, CodecError, DecoderLimits,
     };
@@ -239,3 +239,4 @@ mod tests {
         assert_eq!(format!("{}", net_id), hex_str);
     }
 }
+*/

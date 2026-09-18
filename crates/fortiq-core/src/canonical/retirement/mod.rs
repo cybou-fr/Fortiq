@@ -8,8 +8,7 @@
 pub mod authority;
 pub mod migration;
 
-#[cfg(any())]
-mod tests;
+// v3 epoch-oriented tests were superseded by security_audit_phase15_v4.
 
 pub use authority::{AuthorityError, CanonicalAuthorityResolver};
 pub use migration::{

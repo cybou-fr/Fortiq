@@ -37,7 +37,6 @@ async fn e2e_managed_operator_quic_interaction() {
             "Ticket-scoped close test",
             TicketPriority::Normal,
             &managed_peer_id.to_string(),
-            &operator_peer_id.to_string(),
         )
         .unwrap();
     assert_eq!(opened_ticket.state, TicketState::Open);
@@ -201,7 +200,6 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
             "must remain open",
             TicketPriority::Normal,
             &managed_peer_id.to_string(),
-            &legit_operator_peer_id.to_string(),
         )
         .unwrap();
     assert_eq!(opened_ticket.state, TicketState::Open);

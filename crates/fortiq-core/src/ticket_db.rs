@@ -222,6 +222,7 @@ impl TicketDb {
 
             CREATE TABLE IF NOT EXISTS tickets (
                 id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
                 description TEXT NOT NULL,
                 state TEXT NOT NULL,
                 priority TEXT NOT NULL,
@@ -365,7 +366,6 @@ impl TicketDb {
         description: &str,
         priority: TicketPriority,
         client_peer_id: &str,
-        _operator_peer_id: &str,
     ) -> Result<TicketRecord> {
         let now = current_timestamp();
         let id = format!("FTQ-{}", uuid::Uuid::new_v4().simple());
@@ -389,7 +389,7 @@ impl TicketDb {
                     id, title, description, state, priority,
                     client_peer_id, revision,
                     created_at, updated_at, closed_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     record.id,
                     record.title,
@@ -444,7 +444,7 @@ impl TicketDb {
                 id, title, description, state, priority,
                 client_peer_id, revision,
                 created_at, updated_at, closed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 description = excluded.description,
@@ -503,7 +503,7 @@ impl TicketDb {
                 id, title, description, state, priority,
                 client_peer_id, revision,
                 created_at, updated_at, closed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 description = excluded.description,
@@ -1001,8 +1001,8 @@ impl TicketDb {
     }
 }
 
-#[cfg(any())]
-mod tests {
+/* Legacy v3 TicketDb tests are superseded by the active v4 tests below.
+mod legacy_v3_tests {
     use super::*;
 
     #[test]
@@ -1332,6 +1332,7 @@ mod tests {
         );
     }
 }
+*/
 
 #[cfg(test)]
 mod v4_tests {
@@ -1346,7 +1347,6 @@ mod v4_tests {
                 "Lifecycle test",
                 TicketPriority::Normal,
                 "client",
-                "operator",
             )
             .unwrap();
         assert_eq!(ticket.state, TicketState::Open);
@@ -1361,7 +1361,6 @@ mod v4_tests {
                 "Lifecycle test",
                 TicketPriority::Normal,
                 "client",
-                "operator",
             )
             .unwrap();
         db.update_ticket_state(&ticket.id, TicketState::Resolved, "operator")

@@ -6,8 +6,7 @@
 pub mod challenge;
 pub mod session;
 
-#[cfg(any())]
-mod tests;
+// v3 epoch-oriented tests were superseded by security_audit_phase15_v4.
 
 pub use challenge::{ShellAuthError, ShellAuthResponse, ShellChallenge, SHELL_CHALLENGE_DOMAIN};
 pub use session::{SessionRevocationGuard, SessionSafetyGate};

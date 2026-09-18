@@ -9,8 +9,7 @@ pub mod ipc;
 pub mod session;
 pub mod this_device;
 
-#[cfg(any())]
-mod tests;
+// v3 epoch-oriented tests were superseded by security_audit_phase15_v4.
 
 pub use ipc::{LocalIpcError, LocalIpcFramed, LocalIpcMessage, MAX_LOCAL_IPC_FRAME_SIZE};
 pub use session::{SelfSupportEngine, SelfSupportError, SelfSupportTicket};

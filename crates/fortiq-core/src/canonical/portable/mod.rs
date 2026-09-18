@@ -7,8 +7,7 @@ pub mod certificate;
 pub mod mnemonic;
 pub mod workspace;
 
-#[cfg(any())]
-mod tests;
+// v3 epoch-oriented tests were superseded by security_audit_phase15_v4.
 
 pub use certificate::{
     CertificateError, OperatorCapabilities, OperatorSessionCertificate, MAX_SESSION_TTL_SECS,

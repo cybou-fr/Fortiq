@@ -16,8 +16,7 @@ pub mod snapshot;
 pub mod stream;
 pub mod tombstone;
 
-#[cfg(any())]
-mod tests;
+// v3 epoch-oriented tests were superseded by security_audit_phase15_v4.
 
 pub use batcher::{BatchPolicy, EventPackBatcher, FlushDecision};
 pub use graph::{EventGraph, EventGraphError, VerifiedEventPack};

@@ -158,7 +158,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
             "L'application métier plante au démarrage",
             TicketPriority::Urgent,
             &managed_peer_id.to_string(),
-            &operator_peer_id.to_string(),
         )
         .expect("failed to create ticket on managed node");
     assert_eq!(created_ticket.state, TicketState::Open);

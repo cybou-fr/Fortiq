@@ -669,19 +669,12 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             priority,
         } => {
             let client_peer = state.peer_id.to_string();
-            let operator_peer = state
-                .config
-                .network
-                .bootstrap_peer
-                .clone()
-                .unwrap_or_else(|| "unassigned".to_string());
 
             match state.ticket_store.db().create_ticket(
                 &title,
                 &description,
                 priority,
                 &client_peer,
-                &operator_peer,
             ) {
                 Ok(record) => {
                     let target_str = state.config.network.bootstrap_peer.as_deref();
