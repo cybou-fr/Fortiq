@@ -12,7 +12,6 @@ use fortiq_core::{
         codec::{from_canonical_cbor, to_canonical_cbor, DecoderLimits},
         control::Genesis,
         portable::certificate::{OperatorCapabilities, OperatorSessionCertificate},
-        retirement::authority::CanonicalAuthorityResolver,
         signing::{derive_signing_key_id, Ed25519Signer, Ed25519Verifier, Signer, Verifier},
     },
     Config, NodeInfo, TicketDb,
@@ -61,12 +60,9 @@ impl AuthorityContext {
             && certificate.host_entity == expected_host
             && certificate.operator_key_id == derive_signing_key_id(&certificate.session_pubkey)
             && certificate.capabilities.has(required_capability)
-            && CanonicalAuthorityResolver::verify_operator_session(
-                certificate,
-                self.owner_verifier.as_ref(),
-                now,
-            )
-            .is_ok()
+            && certificate
+                .verify(self.owner_verifier.as_ref(), now)
+                .is_ok()
     }
 }
 

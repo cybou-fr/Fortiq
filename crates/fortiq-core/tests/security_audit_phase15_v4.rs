@@ -4,7 +4,6 @@
 //! v3 AccessEpoch suite is superseded and must not silently define authority.
 
 use fortiq_core::canonical::portable::certificate::OperatorCapabilities;
-use fortiq_core::canonical::retirement::authority::CanonicalAuthorityResolver;
 use fortiq_core::{TicketDb, TicketPriority, TicketState};
 
 #[test]
@@ -60,14 +59,7 @@ fn stale_ticket_revision_is_rejected_even_with_different_history() {
 
 #[test]
 fn ticket_manage_is_distinct_from_shell_execute() {
-    assert!(CanonicalAuthorityResolver::verify_segment_capability(
-        OperatorCapabilities::SHELL_EXEC,
-        OperatorCapabilities::SHELL_EXEC,
-    )
-    .is_ok());
-    assert!(CanonicalAuthorityResolver::verify_segment_capability(
-        OperatorCapabilities::SHELL_EXEC,
-        OperatorCapabilities::TICKET_MANAGE,
-    )
-    .is_err());
+    let shell = OperatorCapabilities::from_bits(OperatorCapabilities::SHELL_EXEC);
+    assert!(shell.has(OperatorCapabilities::SHELL_EXEC));
+    assert!(!shell.has(OperatorCapabilities::TICKET_MANAGE));
 }

@@ -65,28 +65,6 @@ impl VerifiedEventPack {
             object_id,
         })
     }
-
-    /// For internal migration and trusted testing builders within fortiq-core.
-    pub(crate) fn new_unchecked(
-        signed_obj: SignedObject,
-        plaintext: EventPackPlaintext,
-    ) -> Result<Self, EventGraphError> {
-        let tbs_bytes = compute_tbs_bytes(&signed_obj.tbs)
-            .map_err(|e| EventGraphError::Serialization(e.to_string()))?;
-        let object_id = derive_object_id(&tbs_bytes, &signed_obj.signature);
-        let stream_id = signed_obj.tbs.writer_stream_id;
-        let seq = signed_obj.tbs.writer_seq;
-        let prev_pack_id = signed_obj.tbs.prev_pack_id;
-
-        Ok(Self {
-            signed_obj,
-            plaintext,
-            stream_id,
-            seq,
-            prev_pack_id,
-            object_id,
-        })
-    }
 }
 
 /// In-memory append-only Event Graph.
