@@ -41,7 +41,7 @@ pub struct IpcState {
     pub genesis: Option<Genesis>,
 }
 
-pub async fn is_operator_authorized(state: &IpcState) -> bool {
+pub async fn is_operator_authorized_for(state: &IpcState, required: u32) -> bool {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -52,7 +52,7 @@ pub async fn is_operator_authorized(state: &IpcState) -> bool {
             && session
                 .cert
                 .capabilities
-                .has(OperatorCapabilities::SHELL_EXEC)
+                .has(required)
         {
             return true;
         }
@@ -64,6 +64,10 @@ pub async fn is_operator_authorized(state: &IpcState) -> bool {
         }
     }
     false
+}
+
+pub async fn is_operator_authorized(state: &IpcState) -> bool {
+    is_operator_authorized_for(state, OperatorCapabilities::SHELL_EXEC).await
 }
 
 fn staged_components<'a>(
@@ -712,7 +716,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             ticket_id,
             state: new_state,
         } => {
-            if !is_operator_authorized(state).await {
+            if !is_operator_authorized_for(state, OperatorCapabilities::TICKET_MANAGE).await {
                 return IpcResponse::Error(
                     "Seule une session Operator/Admin active peut modifier le cycle de vie du ticket"
                         .to_string(),
