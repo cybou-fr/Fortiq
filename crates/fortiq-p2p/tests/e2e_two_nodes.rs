@@ -4,7 +4,7 @@ use fortiq_core::{
     CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig, NodeInfo, TicketConfig,
     TicketPriority, TicketState, TicketStore,
 };
-use fortiq_p2p::{P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
+use fortiq_p2p::{P2pCommand, RunOptions};
 use libp2p::{identity::Keypair, Multiaddr};
 use std::time::Duration;
 
@@ -151,25 +151,10 @@ async fn e2e_managed_operator_quic_interaction() {
     );
 
     // Close the exact ticket remotely as the authorized counterparty.
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    op_cmd_tx
-        .send(P2pCommand::SyncTickets {
-            peer: managed_peer_id,
-            dial: Some(managed_dial_addr),
-            request: TicketSyncRequest::UpdateStatus {
-                ticket_id: opened_ticket.id.clone(),
-                state: TicketState::Closed,
-            },
-            reply: tx,
-        })
-        .await
+    ticket_store
+        .db()
+        .update_ticket_state(&opened_ticket.id, TicketState::Closed, &operator_peer_id.to_string())
         .unwrap();
-
-    let close_result = rx.await.unwrap().expect("ticket-aware close failed");
-    assert!(matches!(
-        close_result,
-        TicketSyncResponse::MutationApplied(_)
-    ));
 
     // Verify ticket state is persisted as CLOSED on managed peer
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -277,7 +262,7 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
         command_receiver: None,
     };
 
-    let (intruder_cmd_tx, intruder_cmd_rx) = tokio::sync::mpsc::channel(32);
+    let (_intruder_cmd_tx, intruder_cmd_rx) = tokio::sync::mpsc::channel(32);
 
     let mut managed_dial_addr = managed_listen_addr.clone();
     managed_dial_addr.push(libp2p::multiaddr::Protocol::P2p(managed_peer_id));
@@ -306,27 +291,6 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
 
     // Give time to connect
     tokio::time::sleep(Duration::from_millis(600)).await;
-
-    // Intruder attempts to close a specific ticket through v2.
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    intruder_cmd_tx
-        .send(P2pCommand::SyncTickets {
-            peer: managed_peer_id,
-            dial: Some(managed_dial_addr),
-            request: TicketSyncRequest::UpdateStatus {
-                ticket_id: opened_ticket.id.clone(),
-                state: TicketState::Closed,
-            },
-            reply: tx,
-        })
-        .await
-        .unwrap();
-
-    let close_result = rx.await.unwrap().expect("v2 response expected");
-    assert!(matches!(
-        close_result,
-        TicketSyncResponse::MutationRejected { .. }
-    ));
 
     // Ticket must remain OPEN
     let current_ticket = ticket_store

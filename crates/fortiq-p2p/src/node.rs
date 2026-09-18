@@ -61,10 +61,6 @@ pub enum TicketSyncRequest {
         ticket_id: String,
     },
     PushTicket(Box<fortiq_core::TicketRecord>),
-    UpdateStatus {
-        ticket_id: String,
-        state: fortiq_core::TicketState,
-    },
     UpdateStatusSigned(Box<TicketStateMutation>),
 }
 
@@ -182,7 +178,7 @@ pub struct OpenShellNextCommand {
 fn is_ticket_mutation(request: &TicketSyncRequest) -> bool {
     matches!(
         request,
-        TicketSyncRequest::PushTicket(_) | TicketSyncRequest::UpdateStatus { .. }
+        TicketSyncRequest::PushTicket(_) | TicketSyncRequest::UpdateStatusSigned(_)
     )
 }
 
@@ -1638,39 +1634,6 @@ async fn handle_ticket_v2(
                                         .ok()
                                         .flatten()
                                         .map(Box::new),
-                                },
-                            }
-                        }
-                    }
-                    TicketSyncRequest::UpdateStatus { ticket_id, state } => {
-                        let current = ticket_store.db().get_ticket(&ticket_id).ok().flatten();
-                        let authorized = current
-                            .as_ref()
-                            .is_some_and(|ticket| ticket.client_peer_id == local_peer_id);
-                        if !authorized {
-                            TicketSyncResponse::MutationRejected {
-                                kind: MutationRejectionKind::Permanent,
-                                message: "PeerId non autorisé pour ce ticket".to_string(),
-                                canonical: current.map(Box::new),
-                            }
-                        } else {
-                            match ticket_store.db().update_ticket_state(
-                                &ticket_id,
-                                state,
-                                &peer.to_string(),
-                            ) {
-                                Ok(Some(ticket)) => {
-                                    TicketSyncResponse::MutationApplied(Box::new(ticket))
-                                }
-                                Ok(None) => TicketSyncResponse::MutationRejected {
-                                    kind: MutationRejectionKind::Permanent,
-                                    message: "Ticket introuvable".to_string(),
-                                    canonical: None,
-                                },
-                                Err(e) => TicketSyncResponse::MutationRejected {
-                                    kind: MutationRejectionKind::Permanent,
-                                    message: format!("Erreur: {e}"),
-                                    canonical: current.map(Box::new),
                                 },
                             }
                         }
