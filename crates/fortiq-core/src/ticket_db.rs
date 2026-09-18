@@ -182,6 +182,44 @@ pub struct TicketDb {
 }
 
 impl TicketDb {
+    pub fn try_new(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open(path)
+    }
+
+    pub fn new(path: impl AsRef<Path>) -> Self {
+        Self::open(path).expect("persistent ticket database must open")
+    }
+
+    pub fn db(&self) -> &Self {
+        self
+    }
+
+    pub fn storage_dir(&self) -> PathBuf {
+        if let Some(path) = self.path() {
+            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                return parent.to_path_buf();
+            }
+        }
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    }
+
+    pub async fn get(&self) -> Result<Option<crate::Ticket>> {
+        let tickets = self.list_tickets(None)?;
+        if let Some(active) = tickets.iter().find(|ticket| ticket.state.permits_work()) {
+            return Ok(Some(crate::Ticket {
+                id: active.id.clone(),
+                state: active.state,
+            }));
+        }
+        if let Some(first) = tickets.first() {
+            return Ok(Some(crate::Ticket {
+                id: first.id.clone(),
+                state: first.state,
+            }));
+        }
+        Ok(None)
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
