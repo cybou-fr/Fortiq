@@ -6,19 +6,10 @@
 
 use crate::canonical::events::graph::EventGraph;
 use crate::canonical::records::LogicalEvent;
-use crate::canonical::types::{BlobId, KeyId, ObjectId, TicketId};
+use crate::canonical::types::{BlobId, ObjectId, TicketId};
 use crate::TicketState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-
-/// Author classification used by the legacy canonical reducer boundary.
-/// Authorization is expected to happen before event ingestion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AuthorRole {
-    Client,
-    Operator,
-    Admin,
-}
 
 /// View of a chat message in the ticket timeline.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,70 +41,8 @@ pub struct TicketView {
     pub incorporated_packs: Vec<ObjectId>,
 }
 
-/// Trait to resolve an author role from the writer key id.
-pub trait RoleResolver {
-    fn resolve_role(&self, writer_key_id: &KeyId) -> Option<AuthorRole>;
-}
-
-/// Role resolver mapping specific client, operator, and admin keys.
-/// Unknown keys resolve to None (fail-closed, never escalate).
-#[derive(Debug, Clone, Default)]
-pub struct SimpleRoleResolver {
-    pub client_keys: HashSet<KeyId>,
-    pub operator_keys: HashSet<KeyId>,
-    pub admin_keys: HashSet<KeyId>,
-}
-
-impl SimpleRoleResolver {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_client(mut self, key_id: KeyId) -> Self {
-        self.client_keys.insert(key_id);
-        self
-    }
-
-    pub fn with_operator(mut self, key_id: KeyId) -> Self {
-        self.operator_keys.insert(key_id);
-        self
-    }
-
-    pub fn with_admin(mut self, key_id: KeyId) -> Self {
-        self.admin_keys.insert(key_id);
-        self
-    }
-}
-
-impl RoleResolver for SimpleRoleResolver {
-    fn resolve_role(&self, writer_key_id: &KeyId) -> Option<AuthorRole> {
-        if self.client_keys.contains(writer_key_id) {
-            Some(AuthorRole::Client)
-        } else if self.operator_keys.contains(writer_key_id) {
-            Some(AuthorRole::Operator)
-        } else if self.admin_keys.contains(writer_key_id) {
-            Some(AuthorRole::Admin)
-        } else {
-            None
-        }
-    }
-}
-
-/// Deterministically reduces all valid events for `ticket_id` from the `EventGraph` using a resolver.
-pub fn reduce_ticket(
-    ticket_id: TicketId,
-    graph: &EventGraph,
-    resolver: &impl RoleResolver,
-) -> Option<TicketView> {
-    reduce_ticket_with_resolver(ticket_id, graph, resolver)
-}
-
-/// Deterministically reduces events using an explicit author role resolver.
-pub fn reduce_ticket_with_resolver(
-    ticket_id: TicketId,
-    graph: &EventGraph,
-    resolver: &impl RoleResolver,
-) -> Option<TicketView> {
+/// Deterministically reduces all accepted events for `ticket_id` from the `EventGraph`.
+pub fn reduce_ticket(ticket_id: TicketId, graph: &EventGraph) -> Option<TicketView> {
     let all_pack_ids = graph.get_ticket_packs(&ticket_id);
     if all_pack_ids.is_empty() {
         return None;
@@ -147,15 +76,6 @@ pub fn reduce_ticket_with_resolver(
         let plaintext = match graph.get_plaintext(&pack_id) {
             Some(p) => p,
             None => continue,
-        };
-
-        // Determine author role from the writer key id (fail-closed)
-        let role = match graph
-            .get_object(&pack_id)
-            .and_then(|obj| resolver.resolve_role(&obj.tbs.writer_key_id))
-        {
-            Some(r) => r,
-            None => continue, // Drop unauthorized/unknown writer pack completely
         };
 
         for event in &plaintext.events {
@@ -211,8 +131,7 @@ pub fn reduce_ticket_with_resolver(
                 LogicalEvent::TicketStateChanged { .. } => {
                     if let Some(v) = &mut view {
                         if let LogicalEvent::TicketStateChanged { state, .. } = event {
-                            if matches!(role, AuthorRole::Operator | AuthorRole::Admin)
-                                && v.state.can_transition_to(*state)
+                            if v.state.can_transition_to(*state)
                             {
                                 v.state = *state;
                             }

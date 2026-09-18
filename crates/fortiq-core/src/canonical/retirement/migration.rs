@@ -9,7 +9,7 @@
 use thiserror::Error;
 
 use crate::canonical::events::graph::{EventGraph, EventGraphError, VerifiedEventPack};
-use crate::canonical::events::reducer::{reduce_ticket, SimpleRoleResolver};
+use crate::canonical::events::reducer::reduce_ticket;
 use crate::canonical::events::snapshot::TicketSnapshot;
 use crate::canonical::records::{EventPackPlaintext, LogicalEvent, ObjectTbs, SignedObject};
 use crate::canonical::types::{
@@ -152,9 +152,7 @@ impl LegacyTicketMigrator {
         let verified_pack = VerifiedEventPack::new_unchecked(signed_obj, plaintext)?;
         let _pack_id = graph.append_pack(verified_pack)?;
 
-        let resolver = SimpleRoleResolver::new().with_client(writer_key_id);
-        let view =
-            reduce_ticket(ticket_id, graph, &resolver).ok_or(MigrationError::ReductionFailed)?;
+        let view = reduce_ticket(ticket_id, graph).ok_or(MigrationError::ReductionFailed)?;
 
         let snapshot = TicketSnapshot::create(&view, ticket.created_at);
         Ok(snapshot)

@@ -7,10 +7,9 @@
 //! - Tail events always win according to reducer rules.
 
 use crate::canonical::events::graph::EventGraph;
-use crate::canonical::events::reducer::{AttachmentView, ChatMessageView, RoleResolver, TicketView};
+use crate::canonical::events::reducer::{AttachmentView, ChatMessageView, TicketView};
 use crate::canonical::records::LogicalEvent;
 use crate::canonical::types::{ObjectId, TicketId};
-use crate::canonical::events::reducer::AuthorRole;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -46,7 +45,6 @@ impl TicketSnapshot {
 pub fn reduce_ticket_from_snapshot(
     snapshot: &TicketSnapshot,
     graph: &EventGraph,
-    resolver: &impl RoleResolver,
 ) -> TicketView {
     let mut view = snapshot.materialized_state.clone();
     let incorporated: HashSet<ObjectId> = snapshot.frontier_head_packs.iter().copied().collect();
@@ -66,15 +64,6 @@ pub fn reduce_ticket_from_snapshot(
 
         let plaintext = match graph.get_plaintext(&pack_id) {
             Some(p) => p,
-            None => continue,
-        };
-
-        // Determine author role from the writer key id (fail-closed)
-        let role = match graph
-            .get_object(&pack_id)
-            .and_then(|obj| resolver.resolve_role(&obj.tbs.writer_key_id))
-        {
-            Some(r) => r,
             None => continue,
         };
 
@@ -114,8 +103,7 @@ pub fn reduce_ticket_from_snapshot(
                 }
                 LogicalEvent::TicketStateChanged { .. } => {
                     if let LogicalEvent::TicketStateChanged { state, .. } = event {
-                        if matches!(role, AuthorRole::Operator | AuthorRole::Admin)
-                            && view.state.can_transition_to(*state)
+                        if view.state.can_transition_to(*state)
                         {
                             view.state = *state;
                         }
