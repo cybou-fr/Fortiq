@@ -229,8 +229,6 @@ impl TicketDb {
                 priority TEXT NOT NULL,
                 client_peer_id TEXT NOT NULL,
                 operator_peer_id TEXT NOT NULL,
-                remote_access_enabled INTEGER NOT NULL DEFAULT 1,
-                access_epoch TEXT NOT NULL DEFAULT '',
                 revision INTEGER NOT NULL DEFAULT 1,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
@@ -312,22 +310,47 @@ impl TicketDb {
                 [],
             )?;
         }
-        let has_access_epoch = {
+        let has_legacy_permission_columns = {
             let mut stmt = conn.prepare("PRAGMA table_info(tickets)")?;
             let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
-            let mut found = false;
+            let mut found_epoch = false;
+            let mut found_remote = false;
             for column in columns {
-                if column? == "access_epoch" {
-                    found = true;
-                    break;
+                match column?.as_str() {
+                    "access_epoch" => found_epoch = true,
+                    "remote_access_enabled" => found_remote = true,
+                    _ => {}
                 }
             }
-            found
+            found_epoch || found_remote
         };
-        if !has_access_epoch {
-            conn.execute(
-                "ALTER TABLE tickets ADD COLUMN access_epoch TEXT NOT NULL DEFAULT ''",
-                [],
+        if has_legacy_permission_columns {
+            conn.execute_batch(
+                "PRAGMA foreign_keys = OFF;
+                 BEGIN;
+                 CREATE TABLE tickets_v4 (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    priority TEXT NOT NULL,
+                    client_peer_id TEXT NOT NULL,
+                    operator_peer_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    closed_at INTEGER
+                 );
+                 INSERT INTO tickets_v4
+                    (id, title, description, state, priority, client_peer_id,
+                     operator_peer_id, revision, created_at, updated_at, closed_at)
+                 SELECT id, title, description, state, priority, client_peer_id,
+                        operator_peer_id, revision, created_at, updated_at, closed_at
+                 FROM tickets;
+                 DROP TABLE tickets;
+                 ALTER TABLE tickets_v4 RENAME TO tickets;
+                 COMMIT;
+                 PRAGMA foreign_keys = ON;",
             )?;
         }
         Ok(())
@@ -362,7 +385,7 @@ impl TicketDb {
             conn.execute(
                 "INSERT INTO tickets (
                     id, title, description, state, priority,
-                    client_peer_id, operator_peer_id, remote_access_enabled, access_epoch, revision,
+                    client_peer_id, operator_peer_id, revision,
                     created_at, updated_at, closed_at
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 params![
@@ -373,8 +396,6 @@ impl TicketDb {
                     record.priority.as_str(),
                     record.client_peer_id,
                     record.operator_peer_id,
-                    1,
-                    "",
                     record.revision,
                     record.created_at,
                     record.updated_at,
@@ -420,9 +441,9 @@ impl TicketDb {
         conn.execute(
             "INSERT INTO tickets (
                 id, title, description, state, priority,
-                client_peer_id, operator_peer_id, remote_access_enabled, access_epoch, revision,
+                client_peer_id, operator_peer_id, revision,
                 created_at, updated_at, closed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 description = excluded.description,
@@ -439,8 +460,6 @@ impl TicketDb {
                 ticket.priority.as_str(),
                 ticket.client_peer_id,
                 ticket.operator_peer_id,
-                1,
-                "",
                 ticket.revision,
                 ticket.created_at,
                 ticket.updated_at,
@@ -482,9 +501,9 @@ impl TicketDb {
         conn.execute(
             "INSERT INTO tickets (
                 id, title, description, state, priority,
-                client_peer_id, operator_peer_id, remote_access_enabled, access_epoch, revision,
+                client_peer_id, operator_peer_id, revision,
                 created_at, updated_at, closed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 description = excluded.description,
@@ -501,8 +520,6 @@ impl TicketDb {
                 ticket.priority.as_str(),
                 ticket.client_peer_id,
                 ticket.operator_peer_id,
-                1,
-                "",
                 ticket.revision,
                 ticket.created_at,
                 ticket.updated_at,
@@ -517,7 +534,7 @@ impl TicketDb {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
-                    remote_access_enabled, access_epoch, revision, created_at, updated_at, closed_at
+                    revision, created_at, updated_at, closed_at
              FROM tickets WHERE id = ?1",
         )?;
         let row = stmt
@@ -532,10 +549,10 @@ impl TicketDb {
                     priority: TicketPriority::parse_str(&priority_str),
                     client_peer_id: r.get(5)?,
                     operator_peer_id: r.get(6)?,
-                    revision: r.get(9)?,
-                    created_at: r.get(10)?,
-                    updated_at: r.get(11)?,
-                    closed_at: r.get(12)?,
+                    revision: r.get(7)?,
+                    created_at: r.get(8)?,
+                    updated_at: r.get(9)?,
+                    closed_at: r.get(10)?,
                 })
             })
             .optional()?;
@@ -546,7 +563,7 @@ impl TicketDb {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
-                    remote_access_enabled, access_epoch, revision, created_at, updated_at, closed_at
+                    revision, created_at, updated_at, closed_at
              FROM tickets WHERE state IN ('OPEN', 'IN_PROGRESS')
              ORDER BY updated_at DESC LIMIT 1",
         )?;
@@ -562,10 +579,10 @@ impl TicketDb {
                     priority: TicketPriority::parse_str(&priority_str),
                     client_peer_id: r.get(5)?,
                     operator_peer_id: r.get(6)?,
-                    revision: r.get(9)?,
-                    created_at: r.get(10)?,
-                    updated_at: r.get(11)?,
-                    closed_at: r.get(12)?,
+                    revision: r.get(7)?,
+                    created_at: r.get(8)?,
+                    updated_at: r.get(9)?,
+                    closed_at: r.get(10)?,
                 })
             })
             .optional()?;
@@ -576,7 +593,7 @@ impl TicketDb {
         let conn = self.conn.lock().unwrap();
         let mut query =
             "SELECT id, title, description, state, priority, client_peer_id, operator_peer_id,
-                                remote_access_enabled, access_epoch, revision, created_at, updated_at, closed_at
+                                revision, created_at, updated_at, closed_at
                          FROM tickets"
                 .to_string();
         if let Some(state) = state_filter {
@@ -596,10 +613,10 @@ impl TicketDb {
                 priority: TicketPriority::parse_str(&priority_str),
                 client_peer_id: r.get(5)?,
                 operator_peer_id: r.get(6)?,
-                revision: r.get(9)?,
-                created_at: r.get(10)?,
-                updated_at: r.get(11)?,
-                closed_at: r.get(12)?,
+                revision: r.get(7)?,
+                created_at: r.get(8)?,
+                updated_at: r.get(9)?,
+                closed_at: r.get(10)?,
             })
         })?;
 
