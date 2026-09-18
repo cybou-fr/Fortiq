@@ -22,6 +22,8 @@ pub enum MigrationError {
     Graph(#[from] EventGraphError),
     #[error("Invalid UUID / Ticket ID format: {0}")]
     InvalidId(String),
+    #[error("Invalid legacy ticket state: {0}")]
+    InvalidState(u8),
     #[error("Ticket reduction failed after migration")]
     ReductionFailed,
 }
@@ -95,8 +97,13 @@ impl LegacyTicketMigrator {
         if ticket.state_u8 != 0 {
             events.push(LogicalEvent::TicketStateChanged {
                 ticket_id,
-                new_state: ticket.state_u8,
-                epoch: ticket.created_at + 1,
+                state: match ticket.state_u8 {
+                    1 => crate::TicketState::Open,
+                    2 => crate::TicketState::InProgress,
+                    3 => crate::TicketState::Resolved,
+                    4 => crate::TicketState::Closed,
+                    _ => return Err(MigrationError::InvalidState(ticket.state_u8)),
+                },
             });
         }
 

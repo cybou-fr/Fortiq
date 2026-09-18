@@ -5,11 +5,20 @@
 //! Respects Tombstones (logical deletion) and CanonicalHeadSets (admin conflict resolution).
 
 use crate::canonical::events::graph::EventGraph;
-use crate::canonical::events::safety::{AuthorRole, TicketSafetyState};
 use crate::canonical::records::LogicalEvent;
 use crate::canonical::types::{BlobId, KeyId, ObjectId, TicketId};
+use crate::TicketState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+
+/// Author classification used by the legacy canonical reducer boundary.
+/// Authorization is expected to happen before event ingestion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuthorRole {
+    Client,
+    Operator,
+    Admin,
+}
 
 /// View of a chat message in the ticket timeline.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +44,7 @@ pub struct AttachmentView {
 pub struct TicketView {
     pub ticket_id: TicketId,
     pub title: String,
-    pub safety: TicketSafetyState,
+    pub state: TicketState,
     pub messages: Vec<ChatMessageView>,
     pub attachments: Vec<AttachmentView>,
     pub incorporated_packs: Vec<ObjectId>,
@@ -152,11 +161,10 @@ pub fn reduce_ticket_with_resolver(
         for event in &plaintext.events {
             match event {
                 LogicalEvent::TicketCreated { title, .. } => {
-                    let safety = TicketSafetyState::new_client_open(ticket_id);
                     view = Some(TicketView {
                         ticket_id,
                         title: title.clone(),
-                        safety,
+                        state: TicketState::Open,
                         messages: Vec::new(),
                         attachments: Vec::new(),
                         incorporated_packs: Vec::new(),
@@ -202,7 +210,13 @@ pub fn reduce_ticket_with_resolver(
                 }
                 LogicalEvent::TicketStateChanged { .. } => {
                     if let Some(v) = &mut view {
-                        v.safety.apply_transition(role, event);
+                        if let LogicalEvent::TicketStateChanged { state, .. } = event {
+                            if matches!(role, AuthorRole::Operator | AuthorRole::Admin)
+                                && v.state.can_transition_to(*state)
+                            {
+                                v.state = *state;
+                            }
+                        }
                     }
                 }
             }

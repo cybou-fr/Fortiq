@@ -13,8 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-use crate::canonical::events::safety::TicketSafetyState;
 use crate::canonical::shell::challenge::ShellAuthError;
+use crate::canonical::types::TicketId;
+use crate::TicketState;
 
 /// Thread-safe guard holding immediate revocation capability for an active shell session.
 #[derive(Debug, Clone)]
@@ -62,10 +63,11 @@ pub struct SessionSafetyGate;
 impl SessionSafetyGate {
     /// Authorizes a shell request against ticket lifecycle state.
     pub fn authorize_session(
-        ticket_safety: &TicketSafetyState,
+        ticket_id: TicketId,
+        ticket_state: TicketState,
     ) -> Result<SessionRevocationGuard, ShellAuthError> {
-        if !ticket_safety.lifecycle.permits_work() {
-            return Err(ShellAuthError::TicketStateClosed(ticket_safety.ticket_id));
+        if !ticket_state.permits_work() {
+            return Err(ShellAuthError::TicketStateClosed(ticket_id));
         }
 
         Ok(SessionRevocationGuard::new())

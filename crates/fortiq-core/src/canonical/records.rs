@@ -123,8 +123,7 @@ pub enum LogicalEvent {
     },
     TicketStateChanged {
         ticket_id: TicketId,
-        new_state: u8,
-        epoch: u64,
+        state: crate::TicketState,
     },
     ChatMessage {
         ticket_id: TicketId,

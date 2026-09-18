@@ -7,11 +7,10 @@
 //! - Tail events always win according to reducer rules.
 
 use crate::canonical::events::graph::EventGraph;
-use crate::canonical::events::reducer::{
-    AttachmentView, ChatMessageView, RoleResolver, TicketView,
-};
+use crate::canonical::events::reducer::{AttachmentView, ChatMessageView, RoleResolver, TicketView};
 use crate::canonical::records::LogicalEvent;
 use crate::canonical::types::{ObjectId, TicketId};
+use crate::canonical::events::reducer::AuthorRole;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -114,7 +113,13 @@ pub fn reduce_ticket_from_snapshot(
                     });
                 }
                 LogicalEvent::TicketStateChanged { .. } => {
-                    view.safety.apply_transition(role, event);
+                    if let LogicalEvent::TicketStateChanged { state, .. } = event {
+                        if matches!(role, AuthorRole::Operator | AuthorRole::Admin)
+                            && view.state.can_transition_to(*state)
+                        {
+                            view.state = *state;
+                        }
+                    }
                 }
                 LogicalEvent::TicketCreated { .. } => {}
             }

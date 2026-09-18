@@ -71,7 +71,8 @@ impl EventPackBatcher {
     pub fn is_immediate_safety_event(event: &LogicalEvent) -> bool {
         matches!(
             event,
-            LogicalEvent::TicketStateChanged { new_state, .. } if *new_state == 3 || *new_state == 4
+            LogicalEvent::TicketStateChanged { state, .. }
+                if matches!(state, crate::TicketState::Resolved | crate::TicketState::Closed)
         )
     }
 

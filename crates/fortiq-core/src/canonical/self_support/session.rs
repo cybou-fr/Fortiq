@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 use thiserror::Error;
 
-use crate::canonical::events::safety::{TicketLifecycle, TicketSafetyState};
 use crate::canonical::self_support::this_device::{
     LocalDiagnostics, StorageDiagnostics, ThisDevice,
 };
@@ -17,6 +16,7 @@ use crate::canonical::shell::challenge::{ShellAuthError, ShellAuthResponse, Shel
 use crate::canonical::shell::session::{SessionRevocationGuard, SessionSafetyGate};
 use crate::canonical::signing::Verifier;
 use crate::canonical::types::{EntityId, TicketId};
+use crate::TicketState;
 
 #[derive(Debug, Error)]
 pub enum SelfSupportError {
@@ -135,13 +135,8 @@ impl SelfSupportEngine {
         // Cryptographically verify the challenge signature.
         auth_response.verify(verifier, challenge)?;
 
-        let safety_state = TicketSafetyState {
-            ticket_id: challenge.ticket_id,
-            lifecycle: TicketLifecycle::Open,
-        };
-
-        let guard =
-            SessionSafetyGate::authorize_session(&safety_state).map_err(SelfSupportError::Auth)?;
+        let guard = SessionSafetyGate::authorize_session(challenge.ticket_id, TicketState::Open)
+            .map_err(SelfSupportError::Auth)?;
 
         self.active_guards
             .insert(challenge.ticket_id, guard.clone());
