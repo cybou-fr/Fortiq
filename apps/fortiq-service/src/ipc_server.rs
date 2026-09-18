@@ -13,7 +13,7 @@ use fortiq_core::{
         types::{EntityId, OwnerId},
     },
     ipc::{DaemonStatus, IpcRequest, IpcResponse, OperatorSessionStatus},
-    Config, TicketStore,
+    Config, TicketDb,
 };
 use libp2p::PeerId;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -35,7 +35,7 @@ pub struct IpcState {
     pub config: Config,
     pub peer_id: PeerId,
     pub listen_addresses: Vec<String>,
-    pub ticket_store: TicketStore,
+    pub ticket_store: TicketDb,
     pub p2p_sender: Option<tokio::sync::mpsc::Sender<fortiq_p2p::P2pCommand>>,
     pub operator_session: Arc<tokio::sync::RwLock<Option<ActiveOperatorSession>>>,
     pub genesis: Option<Genesis>,
@@ -165,7 +165,7 @@ fn open_staged_file(
 }
 
 async fn import_staged_upload(
-    ticket_store: &TicketStore,
+    ticket_store: &TicketDb,
     staged_path: &str,
 ) -> std::result::Result<std::path::PathBuf, String> {
     let spool = fortiq_core::ipc::upload_spool_dir();
@@ -173,7 +173,7 @@ async fn import_staged_upload(
 }
 
 async fn import_staged_upload_from(
-    ticket_store: &TicketStore,
+    ticket_store: &TicketDb,
     staged_path: &str,
     spool: &std::path::Path,
 ) -> std::result::Result<std::path::PathBuf, String> {
@@ -652,13 +652,13 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             }
         }
         IpcRequest::ListTickets { state_filter } => {
-            match state.ticket_store.db().list_tickets(state_filter) {
+            match state.ticket_store.list_tickets(state_filter) {
                 Ok(tickets) => IpcResponse::Tickets(tickets),
                 Err(e) => IpcResponse::Error(format!("Échec de listage des tickets: {e}")),
             }
         }
         IpcRequest::GetTicket { ticket_id } => {
-            match state.ticket_store.db().get_ticket_detail(&ticket_id) {
+            match state.ticket_store.get_ticket_detail(&ticket_id) {
                 Ok(detail) => IpcResponse::TicketDetail(detail),
                 Err(e) => IpcResponse::Error(format!("Échec de consultation du ticket: {e}")),
             }
@@ -670,7 +670,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
         } => {
             let client_peer = state.peer_id.to_string();
 
-            match state.ticket_store.db().create_ticket(
+            match state.ticket_store.create_ticket(
                 &title,
                 &description,
                 priority,
@@ -711,7 +711,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                 );
             }
             let local_peer_id = state.peer_id.to_string();
-            let current = match state.ticket_store.db().get_ticket(&ticket_id) {
+            let current = match state.ticket_store.get_ticket(&ticket_id) {
                 Ok(Some(ticket)) => ticket,
                 Ok(None) => return IpcResponse::Error("Ticket introuvable".to_string()),
                 Err(error) => return IpcResponse::Error(format!("Erreur: {error}")),
@@ -787,7 +787,6 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
 
             match state
                 .ticket_store
-                .db()
                 .update_ticket_state(&ticket_id, new_state, &local_peer_id)
             {
                 Ok(updated) => {
@@ -816,7 +815,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             }
         }
         IpcRequest::SendChatMessage { ticket_id, body } => {
-            match state.ticket_store.db().get_ticket(&ticket_id) {
+            match state.ticket_store.get_ticket(&ticket_id) {
                 Ok(Some(ticket)) => {
                     if !ticket.state.permits_work() {
                         return IpcResponse::Error(
@@ -836,13 +835,13 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                         created_at: now,
                         delivery_state: "PENDING".to_string(),
                     };
-                    if let Err(error) = state.ticket_store.db().add_chat_message(&chat_msg) {
+                    if let Err(error) = state.ticket_store.add_chat_message(&chat_msg) {
                         return IpcResponse::Error(format!(
                             "Échec de persistance du message local: {error}"
                         ));
                     }
                     let preview: String = body.chars().take(40).collect();
-                    let _ = state.ticket_store.db().record_event(
+                    let _ = state.ticket_store.record_event(
                         &ticket_id,
                         "CHAT_MESSAGE_SENT",
                         &state.peer_id.to_string(),
@@ -878,7 +877,6 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                                     if ack.success {
                                         let _ = state
                                             .ticket_store
-                                            .db()
                                             .update_message_delivery(&chat_msg.id, "DELIVERED");
                                     } else {
                                         return IpcResponse::Error(ack.error.unwrap_or_else(
@@ -898,7 +896,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             }
         }
         IpcRequest::ListMessages { ticket_id } => {
-            match state.ticket_store.db().list_messages(&ticket_id) {
+            match state.ticket_store.list_messages(&ticket_id) {
                 Ok(messages) => IpcResponse::Messages(messages),
                 Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
             }
@@ -906,7 +904,7 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
         IpcRequest::SendFile {
             ticket_id,
             staged_path,
-        } => match state.ticket_store.db().get_ticket(&ticket_id) {
+        } => match state.ticket_store.get_ticket(&ticket_id) {
             Ok(Some(ticket)) => {
                 if !ticket.state.permits_work() {
                     return IpcResponse::Error(
@@ -960,13 +958,13 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
             Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
         },
         IpcRequest::ListAttachments { ticket_id } => {
-            match state.ticket_store.db().list_attachments(&ticket_id) {
+            match state.ticket_store.list_attachments(&ticket_id) {
                 Ok(attachments) => IpcResponse::Attachments(attachments),
                 Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
             }
         }
         IpcRequest::ListShellSessions { ticket_id } => {
-            match state.ticket_store.db().list_shell_sessions(&ticket_id) {
+            match state.ticket_store.list_shell_sessions(&ticket_id) {
                 Ok(sessions) => IpcResponse::ShellSessions(sessions),
                 Err(e) => IpcResponse::Error(format!("Erreur: {e}")),
             }
@@ -1233,7 +1231,7 @@ where
             return Ok(());
         }
     };
-    let _ticket = match state.ticket_store.db().get_ticket(&ticket_id)? {
+    let _ticket = match state.ticket_store.get_ticket(&ticket_id)? {
         Some(ticket) => ticket,
         None => {
             ipc_write
@@ -1395,7 +1393,7 @@ mod tests {
             .path()
             .join(format!("{}_secret.txt", uuid::Uuid::new_v4().simple()));
         tokio::fs::write(&outside, b"secret").await.unwrap();
-        let store = TicketStore::new(dir.path().join("tickets.json"));
+        let store = TicketDb::new(dir.path().join("tickets.json"));
 
         let error = import_staged_upload_from(&store, outside.to_str().unwrap(), &spool)
             .await
@@ -1413,7 +1411,7 @@ mod tests {
         tokio::fs::create_dir_all(&user_spool).await.unwrap();
         let staged = user_spool.join(format!("{}_evidence.txt", uuid::Uuid::new_v4().simple()));
         tokio::fs::write(&staged, b"stable bytes").await.unwrap();
-        let store = TicketStore::new(dir.path().join("tickets.json"));
+        let store = TicketDb::new(dir.path().join("tickets.json"));
 
         let imported = import_staged_upload_from(&store, staged.to_str().unwrap(), &spool)
             .await
@@ -1436,7 +1434,7 @@ mod tests {
         tokio::fs::write(&outside, b"secret").await.unwrap();
         let staged = user_spool.join(format!("{}_link", uuid::Uuid::new_v4().simple()));
         symlink(&outside, &staged).unwrap();
-        let store = TicketStore::new(dir.path().join("tickets.json"));
+        let store = TicketDb::new(dir.path().join("tickets.json"));
 
         assert!(
             import_staged_upload_from(&store, staged.to_str().unwrap(), &spool)
@@ -1465,7 +1463,7 @@ mod tests {
             config,
             peer_id: PeerId::random(),
             listen_addresses: vec![],
-            ticket_store: TicketStore::new(ticket_path),
+            ticket_store: TicketDb::new(ticket_path),
             p2p_sender: None,
             operator_session: Arc::new(tokio::sync::RwLock::new(None)),
             genesis: None,
@@ -1503,7 +1501,7 @@ mod tests {
             config,
             peer_id: PeerId::random(),
             listen_addresses: vec![],
-            ticket_store: TicketStore::new(ticket_path),
+            ticket_store: TicketDb::new(ticket_path),
             p2p_sender: None,
             operator_session: Arc::new(tokio::sync::RwLock::new(None)),
             genesis: Some(test_genesis_for_mnemonic(valid_test_mnemonic())),

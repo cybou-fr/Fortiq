@@ -2,7 +2,7 @@
 
 use fortiq_core::{
     CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig, NodeInfo, TicketConfig,
-    TicketPriority, TicketState, TicketStore,
+    TicketDb, TicketPriority, TicketState,
 };
 use fortiq_p2p::{P2pCommand, RunOptions};
 use libp2p::{identity::Keypair, Multiaddr};
@@ -75,13 +75,13 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         shell_peer: None,
         shell_command: None,
         command_receiver: None,
+        ticket_db: TicketDb::open_in_memory().unwrap(),
     };
 
     // 2. Managed Node configuration
     let managed_ticket_path = dir_managed.path().join("ticket.json");
-    let ticket_store = TicketStore::new(managed_ticket_path.clone());
+    let ticket_store = TicketDb::new(managed_ticket_path.clone());
     let opened_ticket = ticket_store
-        .db()
         .create_ticket(
             "Relay test",
             "Ticket-scoped shell test",
@@ -125,6 +125,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         shell_peer: None,
         shell_command: None,
         command_receiver: None,
+        ticket_db: ticket_store.clone(),
     };
 
     // 3. Operator Node configuration
@@ -162,6 +163,7 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
         shell_peer: None,
         shell_command: None,
         command_receiver: Some(op_cmd_rx),
+        ticket_db: TicketDb::open_in_memory().unwrap(),
     };
 
     // Start all 3 nodes (give relay a moment to initialize before clients connect)
@@ -242,7 +244,6 @@ async fn e2e_relay_rendezvous_three_nodes_interaction() {
 
     // Step D: Close the exact ticket through the ticket-aware protocol.
     ticket_store
-        .db()
         .update_ticket_state(&opened_ticket.id, TicketState::Closed, &operator_peer_id.to_string())
         .unwrap();
 
@@ -327,13 +328,13 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         shell_peer: None,
         shell_command: None,
         command_receiver: None,
+        ticket_db: TicketDb::open_in_memory().unwrap(),
     };
 
     // 2. Managed Node configuration
     let managed_ticket_path = dir_managed.path().join("ticket.json");
-    let ticket_store = TicketStore::new(managed_ticket_path.clone());
+    let ticket_store = TicketDb::new(managed_ticket_path.clone());
     let opened_ticket = ticket_store
-        .db()
         .create_ticket(
             "Relay rate-limit test",
             "Ticket-scoped shell test",
@@ -377,6 +378,7 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         shell_peer: None,
         shell_command: None,
         command_receiver: None,
+        ticket_db: ticket_store.clone(),
     };
 
     // 3. Operator Node configuration
@@ -414,6 +416,7 @@ async fn e2e_relay_production_rate_limiting_smoke() {
         shell_peer: None,
         shell_command: None,
         command_receiver: Some(op_cmd_rx),
+        ticket_db: TicketDb::open_in_memory().unwrap(),
     };
 
     // Start all 3 nodes (give relay a moment to initialize before clients connect)
@@ -494,7 +497,6 @@ async fn e2e_relay_production_rate_limiting_smoke() {
 
     // Step C: Close the exact ticket through the ticket-aware protocol.
     ticket_store
-        .db()
         .update_ticket_state(&opened_ticket.id, TicketState::Closed, &operator_peer_id.to_string())
         .unwrap();
 

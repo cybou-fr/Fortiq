@@ -2,7 +2,7 @@
 
 use fortiq_core::{
     CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig, NodeInfo, TicketConfig,
-    TicketPriority, TicketState, TicketStore,
+    TicketDb, TicketPriority, TicketState,
 };
 use fortiq_p2p::{P2pCommand, RunOptions};
 use libp2p::{identity::Keypair, Multiaddr};
@@ -29,9 +29,8 @@ async fn e2e_managed_operator_quic_interaction() {
     let dir_operator = tempfile::tempdir().unwrap();
 
     let managed_ticket_path = dir_managed.path().join("ticket.json");
-    let ticket_store = TicketStore::new(managed_ticket_path.clone());
+    let ticket_store = TicketDb::new(managed_ticket_path.clone());
     let opened_ticket = ticket_store
-        .db()
         .create_ticket(
             "Direct QUIC test",
             "Ticket-scoped close test",
@@ -94,6 +93,7 @@ async fn e2e_managed_operator_quic_interaction() {
         shell_peer: None,
         shell_command: None,
         command_receiver: None,
+        ticket_db: ticket_store.clone(),
     };
 
     let (op_cmd_tx, op_cmd_rx) = tokio::sync::mpsc::channel(32);
@@ -108,6 +108,7 @@ async fn e2e_managed_operator_quic_interaction() {
         shell_peer: None,
         shell_command: None,
         command_receiver: Some(op_cmd_rx),
+        ticket_db: TicketDb::open_in_memory().unwrap(),
     };
 
     let managed_handle = tokio::spawn(async move {
@@ -151,7 +152,6 @@ async fn e2e_managed_operator_quic_interaction() {
 
     // Close the exact ticket remotely as the authorized counterparty.
     ticket_store
-        .db()
         .update_ticket_state(&opened_ticket.id, TicketState::Closed, &operator_peer_id.to_string())
         .unwrap();
 
@@ -192,9 +192,8 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
     let dir_intruder = tempfile::tempdir().unwrap();
 
     let managed_ticket_path = dir_managed.path().join("ticket.json");
-    let ticket_store = TicketStore::new(managed_ticket_path.clone());
+    let ticket_store = TicketDb::new(managed_ticket_path.clone());
     let opened_ticket = ticket_store
-        .db()
         .create_ticket(
             "Unauthorized mutation",
             "must remain open",
@@ -258,6 +257,7 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
         shell_peer: None,
         shell_command: None,
         command_receiver: None,
+        ticket_db: ticket_store.clone(),
     };
 
     let (_intruder_cmd_tx, intruder_cmd_rx) = tokio::sync::mpsc::channel(32);
@@ -272,6 +272,7 @@ async fn e2e_unauthorized_peer_rejected_on_ticket_status_update() {
         shell_peer: None,
         shell_command: None,
         command_receiver: Some(intruder_cmd_rx),
+        ticket_db: TicketDb::open_in_memory().unwrap(),
     };
 
     let managed_handle = tokio::spawn(async move {

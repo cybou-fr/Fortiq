@@ -10,7 +10,7 @@ use std::{
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use fortiq_core::canonical::{from_canonical_cbor, ControlStore, DecoderLimits, Genesis};
-use fortiq_core::{Config, NodeInfo, TicketStore};
+use fortiq_core::{Config, NodeInfo, TicketDb};
 use fortiq_p2p::{load_or_create_identity, IdentityStatus, RunOptions};
 use fs2::FileExt;
 use libp2p::{multiaddr::Protocol, Multiaddr};
@@ -196,7 +196,7 @@ fn main() -> Result<()> {
 pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
     let config = Config::load(&config_path).await?;
     let _instance_lock = acquire_instance_lock(&config_path)?;
-    let ticket_store = TicketStore::try_new(config.ticket_path())
+    let ticket_db = TicketDb::try_new(config.ticket_path())
         .context("Failed to open persistent ticket database")?;
     let (keypair, _) = load_or_create_identity(&config.identity.path).await?;
     let peer_id = keypair.public().to_peer_id();
@@ -215,7 +215,7 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
         config: config.clone(),
         peer_id,
         listen_addresses: vec![listen_address.to_string()],
-        ticket_store,
+        ticket_store: ticket_db.clone(),
         p2p_sender: Some(p2p_cmd_tx),
         operator_session: Arc::new(tokio::sync::RwLock::new(None)),
         genesis,
@@ -233,6 +233,7 @@ pub async fn run_daemon(config_path: PathBuf) -> Result<()> {
         shell_peer: None,
         shell_command: None,
         command_receiver: Some(p2p_cmd_rx),
+        ticket_db,
     };
     fortiq_p2p::run(keypair, local_info, options).await
 }
@@ -256,14 +257,14 @@ async fn load_canonical_genesis(config: &Config) -> Result<Option<Genesis>> {
 async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
     let config = Config::load(&config_path).await?;
     let genesis = load_canonical_genesis(&config).await?;
-    let ticket_store = TicketStore::try_new(config.ticket_path())
+    let ticket_db = TicketDb::try_new(config.ticket_path())
         .context("Failed to open persistent ticket database")?;
     let dial = args.dial;
 
     if let Some(Action::Ticket { action }) = args.action {
         match action {
             TicketAction::Status => {
-                match ticket_store.get().await? {
+                match ticket_db.get().await? {
                     Some(ticket) => println!("Ticket {}: {}", ticket.id, ticket.state.as_str()),
                     None => println!("No ticket"),
                 }
@@ -304,7 +305,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
         config: config.clone(),
         peer_id,
         listen_addresses: vec![listen_address.to_string()],
-        ticket_store,
+        ticket_store: ticket_db.clone(),
         p2p_sender: Some(p2p_cmd_tx),
         operator_session: Arc::new(tokio::sync::RwLock::new(None)),
         genesis,
@@ -322,6 +323,7 @@ async fn async_main(args: Args, config_path: PathBuf) -> Result<()> {
         shell_peer: args.shell,
         shell_command: args.shell_command,
         command_receiver: Some(p2p_cmd_rx),
+        ticket_db,
     };
     fortiq_p2p::run(keypair, local_info, options).await
 }

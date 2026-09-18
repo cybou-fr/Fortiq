@@ -190,10 +190,6 @@ impl TicketDb {
         Self::open(path).expect("persistent ticket database must open")
     }
 
-    pub fn db(&self) -> &Self {
-        self
-    }
-
     pub fn storage_dir(&self) -> PathBuf {
         if let Some(path) = self.path() {
             if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -295,6 +291,7 @@ impl TicketDb {
             CREATE TABLE IF NOT EXISTS shell_sessions (
                 id TEXT PRIMARY KEY,
                 ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+                operator_peer_id TEXT NOT NULL,
                 started_at INTEGER NOT NULL,
                 ended_at INTEGER,
                 transport TEXT NOT NULL,
@@ -327,6 +324,24 @@ impl TicketDb {
             ",
         )
         .context("failed to execute sqlite schema migration")?;
+        let has_shell_operator_peer = {
+            let mut stmt = conn.prepare("PRAGMA table_info(shell_sessions)")?;
+            let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut found = false;
+            for column in columns {
+                if column? == "operator_peer_id" {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+        if !has_shell_operator_peer {
+            conn.execute(
+                "ALTER TABLE shell_sessions ADD COLUMN operator_peer_id TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
         let has_revision = {
             let mut stmt = conn.prepare("PRAGMA table_info(tickets)")?;
             let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
@@ -1415,5 +1430,23 @@ mod v4_tests {
         assert!(db
             .update_ticket_state(&ticket.id, TicketState::InProgress, "operator")
             .is_err());
+    }
+
+    #[test]
+    fn shell_session_persistence_matches_schema() {
+        let db = TicketDb::open_in_memory().unwrap();
+        let ticket = db
+            .create_ticket("Support", "Shell persistence", TicketPriority::Normal, "client")
+            .unwrap();
+
+        db.record_shell_session_start("session-1", &ticket.id, "operator-peer", "QUIC")
+            .unwrap();
+        db.record_shell_session_end("session-1", Some("SUCCESS"))
+            .unwrap();
+
+        let sessions = db.list_shell_sessions(&ticket.id).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].operator_peer_id, "operator-peer");
+        assert_eq!(sessions[0].result.as_deref(), Some("SUCCESS"));
     }
 }

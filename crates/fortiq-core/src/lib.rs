@@ -240,8 +240,6 @@ pub struct Ticket {
     pub state: TicketState,
 }
 
-pub type TicketStore = TicketDb;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInfo {
     pub peer_id: String,

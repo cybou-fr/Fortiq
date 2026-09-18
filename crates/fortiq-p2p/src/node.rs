@@ -15,7 +15,7 @@ use fortiq_core::{
         retirement::authority::CanonicalAuthorityResolver,
         signing::{derive_signing_key_id, Ed25519Signer, Ed25519Verifier, Verifier},
     },
-    Config, NodeInfo, TicketStore,
+    Config, NodeInfo, TicketDb,
 };
 use futures::StreamExt;
 use libp2p::{
@@ -528,7 +528,7 @@ fn spawn_send_file_stream(
     file_path: std::path::PathBuf,
     sender_peer_id: String,
     mut control: libp2p_stream::Control,
-    ticket_store: TicketStore,
+    ticket_db: TicketDb,
     completion: (
         Option<String>,
         tokio::sync::oneshot::Sender<Result<fortiq_core::AttachmentRecord, String>>,
@@ -668,11 +668,10 @@ fn spawn_send_file_stream(
                 state: "STORED".to_string(),
             };
 
-            ticket_store
-                .db()
+            ticket_db
                 .add_attachment(&attachment)
                 .map_err(|e| format!("Échec de persistance de la pièce jointe locale: {e}"))?;
-            let _ = ticket_store.db().record_event(
+            let _ = ticket_db.record_event(
                 &ticket_id,
                 "ATTACHMENT_SENT",
                 &sender_peer_id,
@@ -685,7 +684,7 @@ fn spawn_send_file_stream(
 
         if res.is_ok() {
             if let Some(outbox_id) = outbox_id.as_deref() {
-                let _ = ticket_store.db().remove_outbox(outbox_id);
+                let _ = ticket_db.remove_outbox(outbox_id);
             }
         }
         let _ = reply.send(res);
@@ -699,12 +698,13 @@ pub struct RunOptions {
     pub shell_peer: Option<PeerId>,
     pub shell_command: Option<String>,
     pub command_receiver: Option<tokio::sync::mpsc::Receiver<P2pCommand>>,
+    pub ticket_db: TicketDb,
 }
 
 struct EventOptions {
     local_info: NodeInfo,
     config: Config,
-    ticket_store: TicketStore,
+    ticket_db: TicketDb,
     active_shells: Arc<AtomicBool>,
     command_receiver: Option<tokio::sync::mpsc::Receiver<P2pCommand>>,
 }
@@ -742,6 +742,7 @@ pub async fn run(
         shell_peer,
         shell_command: _shell_command,
         command_receiver,
+        ticket_db,
     } = options;
     if shell_peer.is_some() {
         anyhow::bail!(
@@ -867,13 +868,11 @@ pub async fn run(
         .accept(FILE_PROTOCOL)
         .context("file protocol already registered")?;
 
-    let ticket_store = TicketStore::try_new(config.ticket_path())
-        .context("failed to open persistent ticket database")?;
     let active_shells = Arc::new(AtomicBool::new(false));
     let event_options = EventOptions {
         local_info,
         config,
-        ticket_store,
+        ticket_db,
         active_shells,
         command_receiver,
     };
@@ -897,7 +896,7 @@ async fn event_loop(
     let EventOptions {
         local_info,
         config,
-        ticket_store,
+        ticket_db: ticket_store,
         active_shells,
         command_receiver,
     } = options;
@@ -1037,7 +1036,7 @@ async fn event_loop(
                         let outbox_id = if is_ticket_mutation(&request) {
                             match serde_json::to_string(&request)
                                 .map_err(anyhow::Error::from)
-                                .and_then(|payload| ticket_store.db().enqueue_outbox(
+                                .and_then(|payload| ticket_store.enqueue_outbox(
                                     &peer.to_string(),
                                     "TICKET_SYNC",
                                     &payload,
@@ -1083,7 +1082,7 @@ async fn event_loop(
                         };
                         let outbox_id = match serde_json::to_string(&payload)
                             .map_err(anyhow::Error::from)
-                            .and_then(|payload| ticket_store.db().enqueue_outbox(
+                            .and_then(|payload| ticket_store.enqueue_outbox(
                                 &peer.to_string(),
                                 "FILE_SEND",
                                 &payload,
@@ -1208,7 +1207,7 @@ async fn event_loop(
                             pending_sync_tickets.insert(req_id, PendingTicketSync { reply, outbox_id });
                         }
                     }
-                    match ticket_store.db().list_outbox_for_peer(&peer_id.to_string()) {
+                    match ticket_store.list_outbox_for_peer(&peer_id.to_string()) {
                         Ok(records) => {
                             for record in records.into_iter().filter(|record| record.kind == "TICKET_SYNC") {
                                 match serde_json::from_str::<TicketSyncRequest>(&record.payload) {
@@ -1222,7 +1221,7 @@ async fn event_loop(
                                     }
                                     Err(error) => {
                                         warn!(outbox_id = %record.id, %error, "dropping invalid ticket sync outbox payload");
-                                        let _ = ticket_store.db().remove_outbox(&record.id);
+                                        let _ = ticket_store.remove_outbox(&record.id);
                                     }
                                 }
                             }
@@ -1235,7 +1234,7 @@ async fn event_loop(
                             pending_chat_messages.insert(req_id, reply);
                         }
                     }
-                    match ticket_store.db().list_pending_messages_for_peer(
+                    match ticket_store.list_pending_messages_for_peer(
                         &local_info.peer_id,
                         &peer_id.to_string(),
                     ) {
@@ -1252,7 +1251,7 @@ async fn event_loop(
                                     swarm.behaviour_mut().chat.send_request(&peer_id, wire);
                                 let (reply, response) = tokio::sync::oneshot::channel();
                                 pending_chat_messages.insert(request_id, reply);
-                                let db = ticket_store.db().clone();
+                                let db = ticket_store.clone();
                                 tokio::spawn(async move {
                                     if let Ok(Ok(ack)) = response.await {
                                         if ack.success {
@@ -1284,7 +1283,7 @@ async fn event_loop(
                             );
                         }
                     }
-                    match ticket_store.db().list_outbox_for_peer(&peer_id.to_string()) {
+                    match ticket_store.list_outbox_for_peer(&peer_id.to_string()) {
                         Ok(records) => {
                             for record in records.into_iter().filter(|record| {
                                 record.kind == "FILE_SEND"
@@ -1305,7 +1304,7 @@ async fn event_loop(
                                     }
                                     Err(error) => {
                                         warn!(outbox_id = %record.id, %error, "dropping invalid file outbox payload");
-                                        let _ = ticket_store.db().remove_outbox(&record.id);
+                                        let _ = ticket_store.remove_outbox(&record.id);
                                     }
                                 }
                             }
@@ -1582,7 +1581,7 @@ async fn handle_ticket_v2(
     swarm: &mut Swarm<Behaviour>,
     local_peer_id: &str,
     config: &Config,
-    ticket_store: &TicketStore,
+    ticket_store: &TicketDb,
     pending_sync_tickets: &mut std::collections::HashMap<
         request_response::OutboundRequestId,
         PendingTicketSync,
@@ -1596,7 +1595,6 @@ async fn handle_ticket_v2(
                 let response = match request {
                     TicketSyncRequest::GetTickets => {
                         let tickets = ticket_store
-                            .db()
                             .list_tickets(None)
                             .unwrap_or_default()
                             .into_iter()
@@ -1606,7 +1604,6 @@ async fn handle_ticket_v2(
                     }
                     TicketSyncRequest::GetTicket { ticket_id } => {
                         let ticket = ticket_store
-                            .db()
                             .get_ticket(&ticket_id)
                             .ok()
                             .flatten()
@@ -1623,13 +1620,12 @@ async fn handle_ticket_v2(
                                 canonical: None,
                             }
                         } else {
-                            match ticket_store.db().import_canonical_ticket(&ticket) {
+                            match ticket_store.import_canonical_ticket(&ticket) {
                                 Ok(()) => TicketSyncResponse::MutationApplied(ticket),
                                 Err(error) => TicketSyncResponse::MutationRejected {
                                     kind: MutationRejectionKind::Conflict,
                                     message: format!("Erreur: {error}"),
                                     canonical: ticket_store
-                                        .db()
                                         .get_ticket(&ticket.id)
                                         .ok()
                                         .flatten()
@@ -1639,7 +1635,7 @@ async fn handle_ticket_v2(
                         }
                     }
                     TicketSyncRequest::UpdateStatusSigned(mutation) => {
-                        let current = ticket_store.db().get_ticket(&mutation.ticket_id).ok().flatten();
+                        let current = ticket_store.get_ticket(&mutation.ticket_id).ok().flatten();
                         let genesis = tokio::fs::read(config.genesis_path())
                             .await
                             .ok()
@@ -1680,7 +1676,7 @@ async fn handle_ticket_v2(
                                 canonical: current.map(Box::new),
                             }
                         } else {
-                            match ticket_store.db().update_ticket_state(
+                            match ticket_store.update_ticket_state(
                                 &mutation.ticket_id,
                                 mutation.new_state,
                                 &peer.to_string(),
@@ -1717,18 +1713,18 @@ async fn handle_ticket_v2(
                     );
                     if terminal {
                         if let Some(outbox_id) = pending.outbox_id.as_deref() {
-                            let _ = ticket_store.db().remove_outbox(outbox_id);
+                            let _ = ticket_store.remove_outbox(outbox_id);
                         }
                     }
                     match &response {
                         TicketSyncResponse::MutationApplied(ticket) => {
-                            let _ = ticket_store.db().import_canonical_ticket(ticket);
+                            let _ = ticket_store.import_canonical_ticket(ticket);
                         }
                         TicketSyncResponse::MutationRejected {
                             canonical: Some(ticket),
                             ..
                         } if ticket.client_peer_id != local_peer_id => {
-                            let _ = ticket_store.db().import_canonical_ticket(ticket);
+                            let _ = ticket_store.import_canonical_ticket(ticket);
                         }
                         _ => {}
                     }
@@ -1753,7 +1749,7 @@ async fn handle_chat(
     event: request_response::Event<ChatMessageWire, ChatAckWire>,
     swarm: &mut Swarm<Behaviour>,
     local_peer_id: &str,
-    ticket_store: &TicketStore,
+    ticket_store: &TicketDb,
     pending_chat_messages: &mut std::collections::HashMap<
         request_response::OutboundRequestId,
         tokio::sync::oneshot::Sender<Result<ChatAckWire, String>>,
@@ -1764,7 +1760,7 @@ async fn handle_chat(
             request_response::Message::Request {
                 request, channel, ..
             } => {
-                let ack = match ticket_store.db().get_ticket(&request.ticket_id) {
+                let ack = match ticket_store.get_ticket(&request.ticket_id) {
                     Ok(Some(ticket)) => {
                         if !is_ticket_counterparty(&ticket, local_peer_id, &peer) {
                             ChatAckWire {
@@ -1787,7 +1783,7 @@ async fn handle_chat(
                                 created_at: request.created_at,
                                 delivery_state: "DELIVERED".to_string(),
                             };
-                            if let Err(error) = ticket_store.db().add_chat_message(&chat_msg) {
+                            if let Err(error) = ticket_store.add_chat_message(&chat_msg) {
                                 ChatAckWire {
                                     message_id: request.id,
                                     success: false,
@@ -1797,7 +1793,7 @@ async fn handle_chat(
                                 }
                             } else {
                                 let preview: String = request.body.chars().take(40).collect();
-                                let _ = ticket_store.db().record_event(
+                                let _ = ticket_store.record_event(
                                     &request.ticket_id,
                                     "CHAT_MESSAGE_RECEIVED",
                                     &peer.to_string(),
@@ -1843,7 +1839,7 @@ async fn handle_incoming_shell_next(
     mut stream: libp2p::Stream,
     remote_peer: PeerId,
     config: &Config,
-    ticket_store: &TicketStore,
+    ticket_store: &TicketDb,
     active_shells: &Arc<AtomicBool>,
     local_info: &NodeInfo,
 ) {
@@ -1928,7 +1924,6 @@ async fn handle_incoming_shell_next(
             .and_then(|verifier| verifier.verify(&payload, &handshake.challenge_signature))
             .is_ok();
     let ticket = match ticket_store
-        .db()
         .get_ticket(&handshake.ticket_id)
         .ok()
         .flatten()
@@ -1974,7 +1969,7 @@ async fn handle_incoming_shell_next(
     let info = local_info.clone();
     let shells_flag = active_shells.clone();
     let session_id = uuid::Uuid::new_v4().to_string();
-    let db = ticket_store.db().clone();
+    let db = ticket_store.clone();
     let ticket_id = ticket.id.clone();
     let operator_transport = remote_peer.to_string();
     let watched_certificate_expires_at = handshake.session_certificate.expires_at;
@@ -2018,7 +2013,7 @@ async fn handle_incoming_file_stream(
     mut stream: libp2p::Stream,
     remote_peer: PeerId,
     local_peer_id: &str,
-    ticket_store: TicketStore,
+    ticket_store: TicketDb,
     files_base_dir: std::path::PathBuf,
     file_slot: Option<tokio::sync::OwnedSemaphorePermit>,
 ) {
@@ -2059,7 +2054,7 @@ async fn handle_incoming_file_stream(
         }
     };
 
-    let ticket = match ticket_store.db().get_ticket(&offer.ticket_id) {
+    let ticket = match ticket_store.get_ticket(&offer.ticket_id) {
         Ok(Some(t)) => t,
         _ => {
             let _ = stream.write_all(&[FILE_DENIED_NO_TICKET]).await;
@@ -2084,7 +2079,6 @@ async fn handle_incoming_file_stream(
     }
 
     let stored_bytes = ticket_store
-        .db()
         .list_attachments(&offer.ticket_id)
         .unwrap_or_default()
         .into_iter()
@@ -2200,13 +2194,13 @@ async fn handle_incoming_file_stream(
         state: "STORED".to_string(),
     };
 
-    if let Err(error) = ticket_store.db().add_attachment(&attachment) {
+    if let Err(error) = ticket_store.add_attachment(&attachment) {
         warn!(%error, "failed to persist received attachment metadata");
         let _ = tokio::fs::remove_file(&final_path).await;
         let _ = stream.write_all(&[FILE_DENIED]).await;
         return;
     }
-    let _ = ticket_store.db().record_event(
+    let _ = ticket_store.record_event(
         &offer.ticket_id,
         "ATTACHMENT_RECEIVED",
         &remote_peer.to_string(),

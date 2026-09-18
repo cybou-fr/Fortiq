@@ -2,7 +2,7 @@
 
 use fortiq_core::{
     CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig, NodeInfo, TicketConfig,
-    TicketPriority, TicketState, TicketStore,
+    TicketDb, TicketPriority, TicketState,
 };
 use fortiq_p2p::{ChatMessageWire, P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
 use libp2p::{identity::Keypair, Multiaddr};
@@ -38,8 +38,8 @@ async fn e2e_ticket_centric_full_lifecycle() {
     let managed_ticket_path = dir_managed.path().join("fortiq.toml");
     let operator_ticket_path = dir_operator.path().join("fortiq.toml");
 
-    let managed_store = TicketStore::new(managed_ticket_path.clone());
-    let operator_store = TicketStore::new(operator_ticket_path.clone());
+    let managed_store = TicketDb::new(managed_ticket_path.clone());
+    let operator_store = TicketDb::new(operator_ticket_path.clone());
 
     let managed_config = Config {
         node: NodeConfig {
@@ -102,6 +102,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
         shell_peer: None,
         shell_command: None,
         command_receiver: Some(managed_cmd_rx),
+        ticket_db: managed_store.clone(),
     };
 
     let operator_options = RunOptions {
@@ -111,6 +112,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
         shell_peer: None,
         shell_command: None,
         command_receiver: Some(operator_cmd_rx),
+        ticket_db: operator_store.clone(),
     };
 
     let managed_handle = tokio::spawn(async move {
@@ -152,7 +154,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
 
     // 2. Managed node creates a Ticket in SQLite
     let created_ticket = managed_store
-        .db()
         .create_ticket(
             "Panne applicative critique",
             "L'application métier plante au démarrage",
@@ -187,7 +188,7 @@ async fn e2e_ticket_centric_full_lifecycle() {
     }
 
     // Also import into operator local db for local message/attachment indexing
-    operator_store.db().import_ticket(&created_ticket).unwrap();
+    operator_store.import_ticket(&created_ticket).unwrap();
 
     // 4. Bidirectional Chat via /fortiq/chat/1.0
     // (a) Operator -> Managed
@@ -214,7 +215,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
 
     // Verify Managed DB recorded the incoming message
     let managed_msgs = managed_store
-        .db()
         .list_messages(&created_ticket.id)
         .unwrap();
     assert_eq!(managed_msgs.len(), 1);
@@ -250,7 +250,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
     assert_eq!(ack2.message_id, client_msg_id);
 
     let op_msgs = operator_store
-        .db()
         .list_messages(&created_ticket.id)
         .unwrap();
     assert!(op_msgs
@@ -284,7 +283,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
     // Verify Managed DB received attachment and file saved to disk
     tokio::time::sleep(Duration::from_millis(300)).await;
     let managed_attachments = managed_store
-        .db()
         .list_attachments(&created_ticket.id)
         .unwrap();
     assert_eq!(managed_attachments.len(), 1);
@@ -326,7 +324,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
 
     // 7. Lifecycle closure is the sole ticket-level shell gate.
     managed_store
-        .db()
         .update_ticket_state(
             &created_ticket.id,
             TicketState::Closed,
@@ -335,7 +332,6 @@ async fn e2e_ticket_centric_full_lifecycle() {
         .unwrap();
     assert_eq!(
         managed_store
-            .db()
             .get_ticket(&created_ticket.id)
             .unwrap()
             .unwrap()
