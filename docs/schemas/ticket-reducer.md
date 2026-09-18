@@ -1,14 +1,9 @@
 # Ticket Reducer
 
-Conceptual lifecycle state:
+Ticket state:
 
 ```rust
-struct TicketSafetyState {
-    ticket_id: TicketId,
-    lifecycle: TicketLifecycle,
-}
-
-enum TicketLifecycle {
+enum TicketState {
     Open,
     InProgress,
     Resolved,
@@ -38,6 +33,8 @@ CLOSED
   -> terminal; create a new ticket for new work
 ```
 
-Shell admission is exactly `lifecycle in {OPEN, IN_PROGRESS}` plus a valid
-Owner-signed Operator Session. `TicketCryptoEpoch` remains an encryption-key
-rotation mechanism and has no relationship to shell authorization.
+Shell admission is exactly `state in {OPEN, IN_PROGRESS}` plus a valid
+Owner-signed Operator Session. Authorization is verified before event
+ingestion; the reducer only applies accepted events deterministically.
+`TicketCryptoEpoch` remains an encryption-key rotation mechanism and has no
+relationship to shell authorization.

@@ -187,11 +187,11 @@ The support ticket is the central coordination entity for client assistance. Ter
    |-- 4. Verify Local Epoch E_1 & State in (OPEN, IN_PROGRESS) ----|
    |      (Launch ConPTY / PTY shell stream)                        |
    |                                                                |
-   |-- 5. User clicks "REVOKE / CLOSE" -----------------------------+
-   |      a) Write & fsync AccessEpochRevoked locally               |
-   |      b) Terminate PTY child process tree immediately           |
-   |      c) Invalidate Epoch E_1 in memory                         |
-   |      d) Replicate Revocation EventPack to network              |
+  |-- 5. User closes/resolves the ticket --------------------------+
+  |      a) Persist the lifecycle transition locally               |
+  |      b) Terminate PTY child process tree immediately           |
+  |      c) Revoke active shell streams                            |
+  |      d) Replicate the accepted lifecycle event                 |
    |                                                                |
 ```
 
