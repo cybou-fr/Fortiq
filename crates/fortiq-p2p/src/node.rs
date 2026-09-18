@@ -31,8 +31,8 @@ use tracing::{info, warn};
 pub const HELLO_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/hello/1.0");
 pub const SHELL_PROTOCOL_V3: StreamProtocol = StreamProtocol::new("/fortiq/shell/3.0");
 pub const TICKET_PROTOCOL_V4: StreamProtocol = StreamProtocol::new("/fortiq/ticket/4.0");
-pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/2.0");
-pub const FILE_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/file/2.0");
+pub const CHAT_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/chat/3.0");
+pub const FILE_PROTOCOL: StreamProtocol = StreamProtocol::new("/fortiq/file/3.0");
 const MAX_HELLO_BYTES: usize = 16 * 1024;
 /// How often a node re-queries the rendezvous points it knows.
 const REDISCOVERY_INTERVAL: Duration = Duration::from_secs(10);
