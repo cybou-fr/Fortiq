@@ -1,11 +1,22 @@
 #![allow(deprecated)]
 
 use fortiq_core::{
+    canonical::{
+        codec::to_canonical_cbor,
+        control::{derive_owner_id, Genesis, GenesisTbs, GENESIS_SIG_DOMAIN},
+        portable::certificate::{OperatorCapabilities, OperatorSessionCertificate},
+        signing::{Ed25519Signer, Signer},
+        types::{CryptoProfileId, EntityId, NetworkId},
+    },
     CapabilitiesConfig, Config, IdentityConfig, NetworkConfig, NodeConfig, NodeInfo, TicketConfig,
     TicketDb, TicketPriority, TicketState,
 };
-use fortiq_p2p::{ChatMessageWire, P2pCommand, RunOptions, TicketSyncRequest, TicketSyncResponse};
+use fortiq_p2p::{
+    ChatMessageWire, OperatorSessionProof, P2pCommand, RunOptions, TicketSyncRequest,
+    TicketSyncResponse,
+};
 use libp2p::{identity::Keypair, Multiaddr};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn now_secs() -> u64 {
@@ -13,6 +24,25 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn test_genesis() -> (Genesis, Ed25519Signer) {
+    let owner_signer = Ed25519Signer::from_seed([0x42; 32]);
+    let owner_public_key = owner_signer.public_key().to_vec();
+    let tbs = GenesisTbs {
+        version: 1,
+        network_id: NetworkId::from_bytes([0x77; 32]),
+        owner_id: derive_owner_id(&owner_public_key),
+        owner_root_signing_public_key: owner_public_key,
+        recovery_public_key: None,
+        initial_crypto_profile: CryptoProfileId::FortiqClassicalDev1,
+        initial_policy_hash: [0x88; 32],
+        created_at: now_secs(),
+    };
+    let mut payload = GENESIS_SIG_DOMAIN.to_vec();
+    payload.extend_from_slice(&to_canonical_cbor(&tbs).unwrap());
+    let signature = owner_signer.sign(&payload).unwrap();
+    (Genesis { tbs, signature }, owner_signer)
 }
 
 #[tokio::test]
@@ -37,6 +67,30 @@ async fn e2e_ticket_centric_full_lifecycle() {
 
     let managed_ticket_path = dir_managed.path().join("fortiq.toml");
     let operator_ticket_path = dir_operator.path().join("fortiq.toml");
+
+    let (genesis, owner_signer) = test_genesis();
+    let genesis_bytes = to_canonical_cbor(&genesis).unwrap();
+    tokio::fs::write(dir_managed.path().join("id.genesis.cbor"), &genesis_bytes)
+        .await
+        .unwrap();
+    let session_signer = Arc::new(Ed25519Signer::from_seed([0x24; 32]));
+    let now = now_secs();
+    let operator_entity =
+        EntityId::from_bytes(*blake3::hash(&operator_peer_id.to_bytes()).as_bytes());
+    let certificate = OperatorSessionCertificate::issue(
+        genesis.tbs.network_id,
+        genesis.tbs.owner_id,
+        operator_entity,
+        operator_entity,
+        session_signer.key_id(),
+        session_signer.public_key(),
+        OperatorCapabilities::from_bits(OperatorCapabilities::ADMIN),
+        now.saturating_sub(1),
+        now + 3600,
+        [0x11; 16],
+        &owner_signer,
+    )
+    .unwrap();
 
     let managed_store = TicketDb::new(managed_ticket_path.clone());
     let operator_store = TicketDb::new(operator_ticket_path.clone());
@@ -193,18 +247,39 @@ async fn e2e_ticket_centric_full_lifecycle() {
     // 4. Bidirectional Chat via /fortiq/chat/1.0
     // (a) Operator -> Managed
     let op_msg_id = uuid::Uuid::new_v4().to_string();
+    let op_body = "Bonjour, je prends en charge votre demande.".to_string();
+    let signature = session_signer
+        .sign(&OperatorSessionProof::signing_payload(
+            "chat",
+            &created_ticket.id,
+            op_body.as_bytes(),
+            &operator_peer_id.to_string(),
+            OperatorCapabilities::WRITE,
+        ))
+        .unwrap();
+    let chat_authority = OperatorSessionProof::from_certificate(
+        &certificate,
+        operator_peer_id.to_string(),
+        OperatorCapabilities::WRITE,
+        signature,
+    )
+    .unwrap();
     let (chat_tx, chat_rx) = tokio::sync::oneshot::channel();
+    let chat_wire = ChatMessageWire {
+        id: op_msg_id.clone(),
+        ticket_id: created_ticket.id.clone(),
+        body: op_body.clone(),
+        created_at: now_secs(),
+        authority: Some(chat_authority.clone()),
+    };
+    let encoded_chat = serde_json::to_vec(&chat_wire).expect("signed chat wire must serialize");
+    serde_json::from_slice::<ChatMessageWire>(&encoded_chat)
+        .expect("signed chat wire must deserialize");
     operator_cmd_tx
         .send(P2pCommand::SendChatMessage {
             peer: managed_peer_id,
             dial: Some(managed_dial_addr.clone()),
-            message: ChatMessageWire {
-                id: op_msg_id.clone(),
-                ticket_id: created_ticket.id.clone(),
-                body: "Bonjour, je prends en charge votre demande.".to_string(),
-                created_at: now_secs(),
-                authority: None,
-            },
+            message: chat_wire,
             reply: chat_tx,
         })
         .await
@@ -269,8 +344,8 @@ async fn e2e_ticket_centric_full_lifecycle() {
             dial: Some(managed_dial_addr.clone()),
             ticket_id: created_ticket.id.clone(),
             file_path: test_file_path,
-            certificate: None,
-            session_signer: None,
+            certificate: Some(certificate),
+            session_signer: Some(session_signer),
             reply: file_tx,
         })
         .await

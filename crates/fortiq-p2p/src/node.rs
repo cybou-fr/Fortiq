@@ -9,7 +9,7 @@ use std::{
 use anyhow::{Context, Result};
 use fortiq_core::{
     canonical::{
-        codec::{from_canonical_cbor, DecoderLimits},
+        codec::{from_canonical_cbor, to_canonical_cbor, DecoderLimits},
         control::Genesis,
         portable::certificate::{OperatorCapabilities, OperatorSessionCertificate},
         retirement::authority::CanonicalAuthorityResolver,
@@ -140,7 +140,7 @@ pub struct FileOfferWire {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperatorSessionProof {
-    pub certificate: OperatorSessionCertificate,
+    pub certificate: Vec<u8>,
     pub transport_peer_id: String,
     pub capability: u32,
     pub signature: Vec<u8>,
@@ -169,6 +169,21 @@ impl OperatorSessionProof {
         }
         payload.extend_from_slice(&capability.to_be_bytes());
         payload
+    }
+
+    pub fn from_certificate(
+        certificate: &OperatorSessionCertificate,
+        transport_peer_id: String,
+        capability: u32,
+        signature: Vec<u8>,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            certificate: to_canonical_cbor(certificate)
+                .map_err(|error| format!("Certificate serialization failed: {error}"))?,
+            transport_peer_id,
+            capability,
+            signature,
+        })
     }
 }
 
@@ -199,6 +214,12 @@ async fn verify_operator_session_proof(
     ticket_id: &str,
     content: &[u8],
 ) -> bool {
+    let Ok(certificate) = from_canonical_cbor::<OperatorSessionCertificate>(
+        &proof.certificate,
+        DecoderLimits::CONTROL,
+    ) else {
+        return false;
+    };
     let Some(genesis) = tokio::fs::read(config.genesis_path())
         .await
         .ok()
@@ -220,23 +241,17 @@ async fn verify_operator_session_proof(
         *blake3::hash(&remote_peer.to_bytes()).as_bytes(),
     );
     if proof.transport_peer_id != remote_peer.to_string()
-        || proof.certificate.network_id != genesis.tbs.network_id
-        || proof.certificate.owner_id != genesis.tbs.owner_id
-        || proof.certificate.host_entity != expected_host
-        || proof.certificate.operator_key_id
-            != derive_signing_key_id(&proof.certificate.session_pubkey)
-        || !proof.certificate.capabilities.has(proof.capability)
-        || CanonicalAuthorityResolver::verify_operator_session(
-            &proof.certificate,
-            &owner_verifier,
-            now,
-        )
-        .is_err()
+        || certificate.network_id != genesis.tbs.network_id
+        || certificate.owner_id != genesis.tbs.owner_id
+        || certificate.host_entity != expected_host
+        || certificate.operator_key_id != derive_signing_key_id(&certificate.session_pubkey)
+        || !certificate.capabilities.has(proof.capability)
+        || CanonicalAuthorityResolver::verify_operator_session(&certificate, &owner_verifier, now)
+            .is_err()
     {
         return false;
     }
-    let Ok(session_verifier) = Ed25519Verifier::from_public_key(&proof.certificate.session_pubkey)
-    else {
+    let Ok(session_verifier) = Ed25519Verifier::from_public_key(&certificate.session_pubkey) else {
         return false;
     };
     session_verifier
@@ -691,22 +706,26 @@ fn spawn_send_file_stream(
                 authority: match (certificate, session_signer) {
                     (Some(certificate), Some(signer)) => {
                         let content = format!("{}:{}:{}", file_name, file_size, sha256);
-                        let mut proof = OperatorSessionProof {
-                            certificate,
-                            transport_peer_id: sender_peer_id.clone(),
-                            capability: OperatorCapabilities::FILE_TRANSFER,
-                            signature: Vec::new(),
-                        };
-                        proof.signature = signer
+                        let signature = signer
                             .sign(&OperatorSessionProof::signing_payload(
                                 "file",
                                 &ticket_id,
                                 content.as_bytes(),
-                                &proof.transport_peer_id,
-                                proof.capability,
+                                &sender_peer_id,
+                                OperatorCapabilities::FILE_TRANSFER,
                             ))
                             .map_err(|error| format!("Signature fichier impossible: {error}"))?;
-                        Some(proof)
+                        Some(
+                            OperatorSessionProof::from_certificate(
+                                &certificate,
+                                sender_peer_id.clone(),
+                                OperatorCapabilities::FILE_TRANSFER,
+                                signature,
+                            )
+                            .map_err(|error| {
+                                format!("Certificate serialization failed: {error}")
+                            })?,
+                        )
                     }
                     _ => None,
                 },
@@ -1939,7 +1958,7 @@ async fn handle_chat(
                                 )
                                 .await
                             }
-                            None => true,
+                            None => false,
                         }
                     }
                     _ => true,
@@ -2272,7 +2291,7 @@ async fn handle_incoming_file_stream(
                 )
                 .await
             }
-            None => true,
+            None => false,
         };
         if !valid {
             warn!(remote_peer_id = %remote_peer, ticket_id = %offer.ticket_id, "denied file with invalid FILE_TRANSFER authority");

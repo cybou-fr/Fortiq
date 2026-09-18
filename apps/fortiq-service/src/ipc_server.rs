@@ -868,19 +868,14 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                                         "Capability WRITE requise".to_string(),
                                     );
                                 }
-                                let mut proof = fortiq_p2p::OperatorSessionProof {
-                                    certificate: session.cert.clone(),
-                                    transport_peer_id: state.peer_id.to_string(),
-                                    capability: OperatorCapabilities::WRITE,
-                                    signature: Vec::new(),
-                                };
-                                proof.signature = match session.session_signer.sign(
+                                let transport_peer_id = state.peer_id.to_string();
+                                let signature = match session.session_signer.sign(
                                     &fortiq_p2p::OperatorSessionProof::signing_payload(
                                         "chat",
                                         &ticket_id,
                                         body.as_bytes(),
-                                        &proof.transport_peer_id,
-                                        proof.capability,
+                                        &transport_peer_id,
+                                        OperatorCapabilities::WRITE,
                                     ),
                                 ) {
                                     Ok(signature) => signature,
@@ -890,7 +885,17 @@ async fn process_request(req: IpcRequest, state: &IpcState) -> IpcResponse {
                                         ))
                                     }
                                 };
-                                Some(proof)
+                                match fortiq_p2p::OperatorSessionProof::from_certificate(
+                                    &session.cert,
+                                    transport_peer_id,
+                                    OperatorCapabilities::WRITE,
+                                    signature,
+                                ) {
+                                    Ok(proof) => Some(proof),
+                                    Err(error) => {
+                                        return IpcResponse::Error(error);
+                                    }
+                                }
                             } else {
                                 None
                             };
