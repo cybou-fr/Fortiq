@@ -146,9 +146,13 @@ fn is_ticket_counterparty(
     ticket: &fortiq_core::TicketRecord,
     local: &str,
     remote: &PeerId,
+    configured_route: Option<&str>,
 ) -> bool {
     let remote = remote.to_string();
-    ticket.client_peer_id == local || ticket.client_peer_id == remote
+    if ticket.client_peer_id == remote {
+        return true;
+    }
+    ticket.client_peer_id == local && configured_route == Some(remote.as_str())
 }
 
 struct ShellSessionGuard(Arc<AtomicBool>);
@@ -1128,12 +1132,14 @@ async fn event_loop(
                 let files_dir = ticket_store.storage_dir().join("tickets");
                 let t_store = ticket_store.clone();
                 let local_peer_id = local_info.peer_id.clone();
+                let configured_route = config.network.bootstrap_peer.clone();
                 let file_slot = incoming_file_slots.clone().try_acquire_owned().ok();
                 tokio::spawn(async move {
                     handle_incoming_file_stream(
                         stream,
                         remote_peer,
                         &local_peer_id,
+                        configured_route.as_deref(),
                         t_store,
                         files_dir,
                         file_slot,
@@ -1339,6 +1345,7 @@ async fn event_loop(
                         event,
                         swarm,
                         &local_info.peer_id,
+                        config.network.bootstrap_peer.as_deref(),
                         &ticket_store,
                         &mut pending_chat_messages,
                     ).await;
@@ -1598,7 +1605,14 @@ async fn handle_ticket_v2(
                             .list_tickets(None)
                             .unwrap_or_default()
                             .into_iter()
-                            .filter(|ticket| is_ticket_counterparty(ticket, local_peer_id, &peer))
+                            .filter(|ticket| {
+                                is_ticket_counterparty(
+                                    ticket,
+                                    local_peer_id,
+                                    &peer,
+                                    config.network.bootstrap_peer.as_deref(),
+                                )
+                            })
                             .collect();
                         TicketSyncResponse::Tickets(tickets)
                     }
@@ -1607,7 +1621,14 @@ async fn handle_ticket_v2(
                             .get_ticket(&ticket_id)
                             .ok()
                             .flatten()
-                            .filter(|ticket| is_ticket_counterparty(ticket, local_peer_id, &peer));
+                            .filter(|ticket| {
+                                is_ticket_counterparty(
+                                    ticket,
+                                    local_peer_id,
+                                    &peer,
+                                    config.network.bootstrap_peer.as_deref(),
+                                )
+                            });
                         TicketSyncResponse::Ticket(ticket)
                     }
                     TicketSyncRequest::PushTicket(ticket) => {
@@ -1749,6 +1770,7 @@ async fn handle_chat(
     event: request_response::Event<ChatMessageWire, ChatAckWire>,
     swarm: &mut Swarm<Behaviour>,
     local_peer_id: &str,
+    configured_route: Option<&str>,
     ticket_store: &TicketDb,
     pending_chat_messages: &mut std::collections::HashMap<
         request_response::OutboundRequestId,
@@ -1762,7 +1784,7 @@ async fn handle_chat(
             } => {
                 let ack = match ticket_store.get_ticket(&request.ticket_id) {
                     Ok(Some(ticket)) => {
-                        if !is_ticket_counterparty(&ticket, local_peer_id, &peer) {
+                        if !is_ticket_counterparty(&ticket, local_peer_id, &peer, configured_route) {
                             ChatAckWire {
                                 message_id: request.id,
                                 success: false,
@@ -2013,6 +2035,7 @@ async fn handle_incoming_file_stream(
     mut stream: libp2p::Stream,
     remote_peer: PeerId,
     local_peer_id: &str,
+    configured_route: Option<&str>,
     ticket_store: TicketDb,
     files_base_dir: std::path::PathBuf,
     file_slot: Option<tokio::sync::OwnedSemaphorePermit>,
@@ -2062,7 +2085,7 @@ async fn handle_incoming_file_stream(
         }
     };
 
-    if !is_ticket_counterparty(&ticket, local_peer_id, &remote_peer) {
+    if !is_ticket_counterparty(&ticket, local_peer_id, &remote_peer, configured_route) {
         warn!(remote_peer_id = %remote_peer, ticket_id = %offer.ticket_id, "denied file from non-counterparty");
         let _ = stream.write_all(&[FILE_DENIED]).await;
         return;
@@ -2319,6 +2342,41 @@ mod tests {
         );
         assert_eq!(normalize_file_id("../../authorized_keys"), None);
         assert_eq!(normalize_file_id("..\\..\\authorized_keys"), None);
+    }
+
+    #[test]
+    fn client_ticket_rejects_unconfigured_remote_counterparty() {
+        let local = PeerId::random();
+        let configured = PeerId::random();
+        let attacker = PeerId::random();
+        let db = TicketDb::open_in_memory().unwrap();
+        let ticket = db
+            .create_ticket(
+                "Support",
+                "route guard",
+                fortiq_core::TicketPriority::Normal,
+                &local.to_string(),
+            )
+            .unwrap();
+
+        assert!(is_ticket_counterparty(
+            &ticket,
+            &local.to_string(),
+            &configured,
+            Some(&configured.to_string()),
+        ));
+        assert!(!is_ticket_counterparty(
+            &ticket,
+            &local.to_string(),
+            &attacker,
+            Some(&configured.to_string()),
+        ));
+        assert!(!is_ticket_counterparty(
+            &ticket,
+            &local.to_string(),
+            &attacker,
+            None,
+        ));
     }
 
     #[test]
