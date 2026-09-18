@@ -102,6 +102,7 @@ pub struct OperatorSessionCertificate {
 }
 
 impl OperatorSessionCertificate {
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_tbs_bytes(
         network_id: &NetworkId,
         owner_id: &OwnerId,
@@ -142,6 +143,7 @@ impl OperatorSessionCertificate {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn issue(
         network_id: NetworkId,
         owner_id: OwnerId,
@@ -209,6 +211,10 @@ impl Genesis {
         Ok(Self { tbs, signature })
     }
 
+    pub fn genesis_id(&self) -> ObjectId {
+        derive_genesis_id(&self.tbs.network_id, &self.tbs.owner_id)
+    }
+
     pub fn verify(&self) -> Result<()> {
         let mut tbs = Vec::new();
         tbs.extend_from_slice(self.tbs.network_id.as_bytes());
@@ -218,6 +224,17 @@ impl Genesis {
 
         let verifier = Ed25519Verifier::from_public_key(&self.tbs.owner_root_signing_public_key)?;
         verifier.verify_domain(GENESIS_SIG_DOMAIN, &tbs, &self.signature)?;
+        Ok(())
+    }
+
+    pub fn verify_pinned(&self, expected_genesis_id: &ObjectId) -> Result<()> {
+        self.verify()?;
+        let actual_id = self.genesis_id();
+        if &actual_id != expected_genesis_id {
+            bail!(
+                "genesis verification failed: expected genesis_id {expected_genesis_id}, got {actual_id}"
+            );
+        }
         Ok(())
     }
 }

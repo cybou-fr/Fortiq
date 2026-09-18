@@ -1,5 +1,5 @@
-use crate::object::{NetworkId, OwnerId};
 use super::mnemonic::OwnerSegmentMasterSeed;
+use crate::object::{NetworkId, OwnerId};
 
 /// Ephemeral in-memory operator workspace holding decrypted data and segment secrets.
 #[derive(Default)]

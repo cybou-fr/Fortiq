@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use fortiq_core::{
-    derive_owner_id, parse_mnemonic_phrase, Config, Ed25519Signer, EntityId, Genesis,
-    MemoryWorkspace, MnemonicDeriver, OperatorCapabilities, OperatorSessionCertificate, OwnerId,
-    Signer, TicketDb,
+    derive_owner_id,
     ipc::{DaemonStatus, IpcRequest, IpcResponse, OperatorSessionStatus},
+    parse_mnemonic_phrase, Config, Ed25519Signer, EntityId, Genesis, MemoryWorkspace,
+    MnemonicDeriver, OperatorCapabilities, OperatorSessionCertificate, OwnerId, Signer, TicketDb,
 };
 use libp2p::PeerId;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -1407,9 +1407,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fortiq_core::{
-        entropy_to_mnemonic, GenesisTbs, MnemonicEntropy, NetworkId,
-    };
+    use fortiq_core::{entropy_to_mnemonic, GenesisTbs, MnemonicEntropy, NetworkId};
 
     fn valid_test_mnemonic() -> &'static str {
         "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"

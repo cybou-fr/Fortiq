@@ -247,6 +247,10 @@ impl Ed25519Signer {
         Self::from_bytes(&seed)
     }
 
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.signing_key.to_bytes()
+    }
+
     pub fn public_key(&self) -> PublicKey {
         self.public_key
     }
@@ -298,8 +302,8 @@ impl fmt::Debug for Ed25519Verifier {
 
 impl Ed25519Verifier {
     pub fn from_public_key(pk: &PublicKey) -> Result<Self> {
-        let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&pk.0)
-            .context("invalid ed25519 public key")?;
+        let verifying_key =
+            ed25519_dalek::VerifyingKey::from_bytes(&pk.0).context("invalid ed25519 public key")?;
         Ok(Self {
             verifying_key,
             public_key: *pk,
@@ -310,7 +314,12 @@ impl Ed25519Verifier {
         self.public_key
     }
 
-    pub fn verify_domain(&self, domain: &[u8], payload: &[u8], signature: &Signature) -> Result<()> {
+    pub fn verify_domain(
+        &self,
+        domain: &[u8],
+        payload: &[u8],
+        signature: &Signature,
+    ) -> Result<()> {
         let mut hasher = blake3::Hasher::new();
         hasher.update(domain);
         hasher.update(b":");
@@ -352,7 +361,9 @@ mod tests {
 
         let sig = signer.sign_domain(domain, message);
         assert!(verifier.verify_domain(domain, message, &sig).is_ok());
-        assert!(verifier.verify_domain(domain, b"corrupted message", &sig).is_err());
+        assert!(verifier
+            .verify_domain(domain, b"corrupted message", &sig)
+            .is_err());
     }
 
     #[test]

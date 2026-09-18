@@ -21,8 +21,12 @@ impl FsObjectStore {
         let objects_dir = root.join("objects");
         let tmp_dir = root.join("tmp");
 
-        fs::create_dir_all(&objects_dir)
-            .with_context(|| format!("failed to create objects directory {}", objects_dir.display()))?;
+        fs::create_dir_all(&objects_dir).with_context(|| {
+            format!(
+                "failed to create objects directory {}",
+                objects_dir.display()
+            )
+        })?;
         fs::create_dir_all(&tmp_dir)
             .with_context(|| format!("failed to create tmp directory {}", tmp_dir.display()))?;
 
@@ -67,7 +71,7 @@ impl FsObjectStore {
                     .with_context(|| format!("failed to read object file {}", path.display()))?;
                 let obj: SignedObject = ciborium::from_reader(bytes.as_slice())
                     .with_context(|| format!("failed to decode object {}", path.display()))?;
-                
+
                 obj.verify()
                     .with_context(|| format!("corrupted object in store: {}", path.display()))?;
                 objects.push(obj);
@@ -80,7 +84,9 @@ impl FsObjectStore {
 
 impl ObjectStore for FsObjectStore {
     fn put(&self, object: &SignedObject) -> Result<ObjectId> {
-        object.verify().context("cannot store invalid SignedObject")?;
+        object
+            .verify()
+            .context("cannot store invalid SignedObject")?;
 
         let hex = object.id.to_hex();
         let shard_dir = self.objects_dir.join(&hex[..2]);
@@ -93,7 +99,9 @@ impl ObjectStore for FsObjectStore {
         fs::create_dir_all(&shard_dir)
             .with_context(|| format!("failed to create shard dir {}", shard_dir.display()))?;
 
-        let tmp_path = self.tmp_dir.join(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
+        let tmp_path = self
+            .tmp_dir
+            .join(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
         {
             let file = File::create(&tmp_path)
                 .with_context(|| format!("failed to create temp file {}", tmp_path.display()))?;
@@ -119,15 +127,20 @@ impl ObjectStore for FsObjectStore {
             return Ok(None);
         }
 
-        let bytes = fs::read(&path)
-            .with_context(|| format!("failed to read object {}", path.display()))?;
+        let bytes =
+            fs::read(&path).with_context(|| format!("failed to read object {}", path.display()))?;
         let obj: SignedObject = ciborium::from_reader(bytes.as_slice())
             .with_context(|| format!("failed to decode object {}", path.display()))?;
 
         if obj.id != *id {
-            bail!("object file {} ID mismatch: expected {}", path.display(), id);
+            bail!(
+                "object file {} ID mismatch: expected {}",
+                path.display(),
+                id
+            );
         }
-        obj.verify().context("corrupted object signature in store")?;
+        obj.verify()
+            .context("corrupted object signature in store")?;
 
         Ok(Some(obj))
     }

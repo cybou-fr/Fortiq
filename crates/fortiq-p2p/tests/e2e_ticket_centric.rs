@@ -417,3 +417,235 @@ async fn e2e_ticket_centric_full_lifecycle() {
     managed_handle.abort();
     operator_handle.abort();
 }
+
+#[tokio::test]
+async fn e2e_heads_and_signed_objects_sync() {
+    let managed_port = {
+        let s = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        s.local_addr().unwrap().port()
+    };
+    let operator_port = {
+        let s = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        s.local_addr().unwrap().port()
+    };
+
+    let managed_keypair = Keypair::generate_ed25519();
+    let managed_peer_id = managed_keypair.public().to_peer_id();
+
+    let operator_keypair = Keypair::generate_ed25519();
+    let operator_peer_id = operator_keypair.public().to_peer_id();
+
+    let dir_managed = tempfile::tempdir().unwrap();
+    let dir_operator = tempfile::tempdir().unwrap();
+
+    let managed_ticket_path = dir_managed.path().join("fortiq.toml");
+    let operator_ticket_path = dir_operator.path().join("fortiq.toml");
+
+    let (genesis, _owner_signer) = test_genesis();
+    let genesis_bytes = to_canonical_cbor(&genesis).unwrap();
+    tokio::fs::write(dir_managed.path().join("id.genesis.cbor"), &genesis_bytes)
+        .await
+        .unwrap();
+
+    let managed_store = TicketDb::new(managed_ticket_path.clone());
+    let operator_store = TicketDb::new(operator_ticket_path.clone());
+
+    let managed_config = Config {
+        node: NodeConfig {
+            name: "managed-sync".to_string(),
+        },
+        identity: IdentityConfig {
+            path: dir_managed.path().join("id.key"),
+        },
+        network: NetworkConfig {
+            listen_quic: format!("127.0.0.1:{managed_port}"),
+            public_addr: None,
+            relay_peer: None,
+            bootstrap_peer: Some(operator_peer_id.to_string()),
+        },
+        capabilities: CapabilitiesConfig::default(),
+        ticket: TicketConfig {
+            path: Some(managed_ticket_path.clone()),
+        },
+        ipc: fortiq_core::IpcConfig::default(),
+    };
+
+    let operator_config = Config {
+        node: NodeConfig {
+            name: "operator-sync".to_string(),
+        },
+        identity: IdentityConfig {
+            path: dir_operator.path().join("id.key"),
+        },
+        network: NetworkConfig {
+            listen_quic: format!("127.0.0.1:{operator_port}"),
+            public_addr: None,
+            relay_peer: None,
+            bootstrap_peer: None,
+        },
+        capabilities: CapabilitiesConfig::default(),
+        ticket: TicketConfig {
+            path: Some(operator_ticket_path.clone()),
+        },
+        ipc: fortiq_core::IpcConfig::default(),
+    };
+
+    let managed_listen_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{managed_port}/quic-v1")
+        .parse()
+        .unwrap();
+    let operator_listen_addr: Multiaddr = "/ip4/127.0.0.1/udp/0/quic-v1".parse().unwrap();
+
+    let managed_info = NodeInfo::local(managed_peer_id, "managed-sync".to_string());
+    let operator_info = NodeInfo::local(operator_peer_id, "operator-sync".to_string());
+
+    let managed_dial_addr: Multiaddr = format!("/ip4/127.0.0.1/udp/{managed_port}/quic-v1")
+        .parse()
+        .unwrap();
+
+    let (_managed_cmd_tx, managed_cmd_rx) = tokio::sync::mpsc::channel(32);
+    let (operator_cmd_tx, operator_cmd_rx) = tokio::sync::mpsc::channel(32);
+
+    let managed_options = RunOptions {
+        config: managed_config,
+        listen_address: managed_listen_addr.clone(),
+        dial_address: None,
+        shell_peer: None,
+        shell_command: None,
+        command_receiver: Some(managed_cmd_rx),
+        ticket_db: managed_store.clone(),
+    };
+
+    let operator_options = RunOptions {
+        config: operator_config,
+        listen_address: operator_listen_addr,
+        dial_address: Some(managed_dial_addr.clone()),
+        shell_peer: None,
+        shell_command: None,
+        command_receiver: Some(operator_cmd_rx),
+        ticket_db: operator_store.clone(),
+    };
+
+    let managed_handle = tokio::spawn(async move {
+        if let Err(e) = fortiq_p2p::run(managed_keypair, managed_info, managed_options).await {
+            eprintln!("Managed node error: {e:?}");
+        }
+    });
+
+    let operator_handle = tokio::spawn(async move {
+        if let Err(e) = fortiq_p2p::run(operator_keypair, operator_info, operator_options).await {
+            eprintln!("Operator node error: {e:?}");
+        }
+    });
+
+    // Wait for peer discovery via HELLO
+    let mut discovered = false;
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if operator_cmd_tx
+            .send(P2pCommand::ListPeers { reply: tx })
+            .await
+            .is_ok()
+        {
+            if let Ok(peers) = rx.await {
+                if peers
+                    .iter()
+                    .any(|p| p.peer_id == managed_peer_id.to_string())
+                {
+                    discovered = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(discovered, "Peers must discover each other via HELLO");
+
+    // 1. Managed node creates a ticket locally
+    let ticket = managed_store
+        .create_ticket(
+            "DAG Sync Issue",
+            "Validating Heads and SignedObject exchange",
+            TicketPriority::High,
+            &managed_peer_id.to_string(),
+        )
+        .unwrap();
+
+    // 2. Operator requests GetHeads from Managed node
+    let (heads_tx, heads_rx) = tokio::sync::oneshot::channel();
+    operator_cmd_tx
+        .send(P2pCommand::SyncTickets {
+            peer: managed_peer_id,
+            dial: Some(managed_dial_addr.clone()),
+            request: TicketSyncRequest::GetHeads {
+                network_id: genesis.tbs.network_id,
+                ticket_id: Some(ticket.id.clone()),
+            },
+            reply: heads_tx,
+        })
+        .await
+        .unwrap();
+
+    let heads_res = heads_rx.await.unwrap().expect("GetHeads failed");
+    let received_heads = match heads_res {
+        TicketSyncResponse::Heads(heads) => heads,
+        other => panic!("Expected Heads response, got {other:?}"),
+    };
+    assert!(!received_heads.is_empty(), "Heads should not be empty");
+
+    // 3. Operator requests GetObjects for the heads
+    let (obj_tx, obj_rx) = tokio::sync::oneshot::channel();
+    operator_cmd_tx
+        .send(P2pCommand::SyncTickets {
+            peer: managed_peer_id,
+            dial: Some(managed_dial_addr.clone()),
+            request: TicketSyncRequest::GetObjects {
+                ids: received_heads.clone(),
+            },
+            reply: obj_tx,
+        })
+        .await
+        .unwrap();
+
+    let obj_res = obj_rx.await.unwrap().expect("GetObjects failed");
+    match obj_res {
+        TicketSyncResponse::Objects(objs) => {
+            assert_eq!(objs.len(), received_heads.len());
+        }
+        other => panic!("Expected Objects response, got {other:?}"),
+    }
+
+    // Verify operator now has the ticket reduced locally
+    let operator_ticket = operator_store
+        .get_ticket(&ticket.id)
+        .unwrap()
+        .expect("Operator should have ticket after object ingestion");
+    assert_eq!(operator_ticket.id, ticket.id);
+    assert_eq!(operator_ticket.title, ticket.title);
+    assert_eq!(operator_ticket.state, TicketState::Open);
+
+    // 4. Test PushObjects: Operator pushes objects to Managed node
+    let objects_to_push = operator_store.get_ticket_objects(&ticket.id).unwrap();
+    let (push_tx, push_rx) = tokio::sync::oneshot::channel();
+    operator_cmd_tx
+        .send(P2pCommand::SyncTickets {
+            peer: managed_peer_id,
+            dial: Some(managed_dial_addr.clone()),
+            request: TicketSyncRequest::PushObjects {
+                objects: objects_to_push,
+            },
+            reply: push_tx,
+        })
+        .await
+        .unwrap();
+
+    let push_res = push_rx.await.unwrap().expect("PushObjects failed");
+    match push_res {
+        TicketSyncResponse::SyncAck { accepted, rejected } => {
+            assert!(accepted > 0 || rejected == 0);
+        }
+        other => panic!("Expected SyncAck response, got {other:?}"),
+    }
+
+    managed_handle.abort();
+    operator_handle.abort();
+}

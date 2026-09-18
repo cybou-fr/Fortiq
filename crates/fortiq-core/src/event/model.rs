@@ -100,6 +100,14 @@ impl Event {
         let obj = SignedObject::sign(signer, payload_bytes, self.timestamp);
         Ok(obj)
     }
+
+    /// Returns the ticket_id associated with this Event, if it is a ticket payload.
+    pub fn ticket_id(&self) -> Option<&str> {
+        match &self.payload {
+            EventPayload::Ticket(t) => Some(t.ticket_id()),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

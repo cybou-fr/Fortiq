@@ -1,7 +1,7 @@
-use std::path::Path;
 use anyhow::{Context, Result};
 use libp2p::identity::ed25519;
 use libp2p::PeerId;
+use std::path::Path;
 
 use crate::object::{Ed25519Signer, PublicKey};
 

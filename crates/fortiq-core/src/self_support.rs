@@ -12,7 +12,10 @@ pub struct ThisDevice {
 
 impl ThisDevice {
     pub fn new(entity_id: EntityId, endpoint: LoopbackEndpoint) -> Self {
-        Self { entity_id, endpoint }
+        Self {
+            entity_id,
+            endpoint,
+        }
     }
 }
 

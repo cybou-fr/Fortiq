@@ -9,8 +9,9 @@ use std::{
 use anyhow::{Context, Result};
 use fortiq_core::{
     derive_signing_key_id, from_canonical_cbor, to_canonical_cbor, Config, DecoderLimits,
-    Ed25519Signer, Ed25519Verifier, EntityId, Genesis, NetworkId, NodeInfo, OperatorCapabilities,
-    OperatorSessionCertificate, OwnerId, Signer, TicketDb, Verifier,
+    Ed25519Signer, Ed25519Verifier, EntityId, Genesis, NetworkId, NodeInfo, ObjectId,
+    OperatorCapabilities, OperatorSessionCertificate, OwnerId, SignedObject, Signer, TicketDb,
+    Verifier,
 };
 use futures::StreamExt;
 use libp2p::{
@@ -48,9 +49,7 @@ impl AuthorityContext {
         required_capability: u32,
         now: u64,
     ) -> bool {
-        let expected_host = EntityId::from_bytes(
-            *blake3::hash(&remote_peer.to_bytes()).as_bytes(),
-        );
+        let expected_host = EntityId::from_bytes(*blake3::hash(&remote_peer.to_bytes()).as_bytes());
         certificate.network_id == self.network_id
             && certificate.owner_id == self.owner_id
             && certificate.host_entity == expected_host
@@ -99,6 +98,16 @@ pub enum TicketSyncRequest {
     },
     PushTicket(Box<fortiq_core::TicketRecord>),
     UpdateStatusSigned(Box<TicketStateMutation>),
+    GetHeads {
+        network_id: NetworkId,
+        ticket_id: Option<String>,
+    },
+    GetObjects {
+        ids: Vec<ObjectId>,
+    },
+    PushObjects {
+        objects: Vec<SignedObject>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +149,12 @@ pub enum TicketSyncResponse {
         kind: MutationRejectionKind,
         message: String,
         canonical: Option<Box<fortiq_core::TicketRecord>>,
+    },
+    Heads(Vec<ObjectId>),
+    Objects(Vec<SignedObject>),
+    SyncAck {
+        accepted: usize,
+        rejected: usize,
     },
 }
 
@@ -307,7 +322,9 @@ pub struct OpenShellNextCommand {
 fn is_ticket_mutation(request: &TicketSyncRequest) -> bool {
     matches!(
         request,
-        TicketSyncRequest::PushTicket(_) | TicketSyncRequest::UpdateStatusSigned(_)
+        TicketSyncRequest::PushTicket(_)
+            | TicketSyncRequest::UpdateStatusSigned(_)
+            | TicketSyncRequest::PushObjects { .. }
     )
 }
 
@@ -1767,102 +1784,103 @@ async fn handle_ticket_v2(
     >,
 ) {
     match event {
-        request_response::Event::Message { peer, message, .. } => {
-            match message {
-                request_response::Message::Request {
-                    request, channel, ..
-                } => {
-                    let response = match request {
-                        TicketSyncRequest::GetTickets {
-                            authority: request_authority,
-                        } => {
-                            let can_read = authority
-                                .as_ref()
-                                .zip(request_authority.as_ref())
-                                .is_some_and(|(context, proof)| {
-                                    verify_operator_session_proof(
-                                        context,
-                                        &peer,
-                                        proof,
-                                        "ticket-read",
-                                        "*",
-                                        "*",
-                                        0,
-                                        b"",
-                                        OperatorCapabilities::READ,
-                                    )
-                                });
-                            let tickets = ticket_store
-                                .list_tickets(None)
-                                .unwrap_or_default()
-                                .into_iter()
+        request_response::Event::Message { peer, message, .. } => match message {
+            request_response::Message::Request {
+                request, channel, ..
+            } => {
+                let response = match request {
+                    TicketSyncRequest::GetTickets {
+                        authority: request_authority,
+                    } => {
+                        let can_read = authority
+                            .as_ref()
+                            .zip(request_authority.as_ref())
+                            .is_some_and(|(context, proof)| {
+                                verify_operator_session_proof(
+                                    context,
+                                    &peer,
+                                    proof,
+                                    "ticket-read",
+                                    "*",
+                                    "*",
+                                    0,
+                                    b"",
+                                    OperatorCapabilities::READ,
+                                )
+                            });
+                        let tickets = ticket_store
+                            .list_tickets(None)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|ticket| {
+                                ticket.client_peer_id == peer.to_string()
+                                    || (ticket.client_peer_id == local_peer_id && can_read)
+                            })
+                            .collect();
+                        TicketSyncResponse::Tickets(tickets)
+                    }
+                    TicketSyncRequest::GetTicket {
+                        ticket_id,
+                        authority: request_authority,
+                    } => {
+                        let can_read = authority
+                            .as_ref()
+                            .zip(request_authority.as_ref())
+                            .is_some_and(|(context, proof)| {
+                                verify_operator_session_proof(
+                                    context,
+                                    &peer,
+                                    proof,
+                                    "ticket-read",
+                                    &ticket_id,
+                                    &ticket_id,
+                                    0,
+                                    b"",
+                                    OperatorCapabilities::READ,
+                                )
+                            });
+                        let ticket =
+                            ticket_store
+                                .get_ticket(&ticket_id)
+                                .ok()
+                                .flatten()
                                 .filter(|ticket| {
                                     ticket.client_peer_id == peer.to_string()
                                         || (ticket.client_peer_id == local_peer_id && can_read)
-                                })
-                                .collect();
-                            TicketSyncResponse::Tickets(tickets)
-                        }
-                        TicketSyncRequest::GetTicket {
-                            ticket_id,
-                            authority: request_authority,
-                        } => {
-                            let can_read = authority
-                                .as_ref()
-                                .zip(request_authority.as_ref())
-                                .is_some_and(|(context, proof)| {
-                                    verify_operator_session_proof(
-                                        context,
-                                        &peer,
-                                        proof,
-                                        "ticket-read",
-                                        &ticket_id,
-                                        &ticket_id,
-                                        0,
-                                        b"",
-                                        OperatorCapabilities::READ,
-                                    )
                                 });
-                            let ticket = ticket_store.get_ticket(&ticket_id).ok().flatten().filter(
-                                |ticket| {
-                                    ticket.client_peer_id == peer.to_string()
-                                        || (ticket.client_peer_id == local_peer_id && can_read)
+                        TicketSyncResponse::Ticket(ticket)
+                    }
+                    TicketSyncRequest::PushTicket(ticket) => {
+                        let remote = peer.to_string();
+                        let authorized = ticket.client_peer_id == remote
+                            && ticket.state == fortiq_core::TicketState::Open
+                            && ticket.revision == 1
+                            && ticket.closed_at.is_none()
+                            && ticket_store.get_ticket(&ticket.id).ok().flatten().is_none();
+                        if !authorized {
+                            TicketSyncResponse::MutationRejected {
+                                kind: MutationRejectionKind::Permanent,
+                                message: "PeerId non autorisé à publier ce ticket".to_string(),
+                                canonical: None,
+                            }
+                        } else {
+                            match ticket_store.import_canonical_ticket(&ticket) {
+                                Ok(()) => TicketSyncResponse::MutationApplied(ticket),
+                                Err(error) => TicketSyncResponse::MutationRejected {
+                                    kind: MutationRejectionKind::Conflict,
+                                    message: format!("Erreur: {error}"),
+                                    canonical: ticket_store
+                                        .get_ticket(&ticket.id)
+                                        .ok()
+                                        .flatten()
+                                        .map(Box::new),
                                 },
-                            );
-                            TicketSyncResponse::Ticket(ticket)
-                        }
-                        TicketSyncRequest::PushTicket(ticket) => {
-                            let remote = peer.to_string();
-                            let authorized = ticket.client_peer_id == remote
-                                && ticket.state == fortiq_core::TicketState::Open
-                                && ticket.revision == 1
-                                && ticket.closed_at.is_none()
-                                && ticket_store.get_ticket(&ticket.id).ok().flatten().is_none();
-                            if !authorized {
-                                TicketSyncResponse::MutationRejected {
-                                    kind: MutationRejectionKind::Permanent,
-                                    message: "PeerId non autorisé à publier ce ticket".to_string(),
-                                    canonical: None,
-                                }
-                            } else {
-                                match ticket_store.import_canonical_ticket(&ticket) {
-                                    Ok(()) => TicketSyncResponse::MutationApplied(ticket),
-                                    Err(error) => TicketSyncResponse::MutationRejected {
-                                        kind: MutationRejectionKind::Conflict,
-                                        message: format!("Erreur: {error}"),
-                                        canonical: ticket_store
-                                            .get_ticket(&ticket.id)
-                                            .ok()
-                                            .flatten()
-                                            .map(Box::new),
-                                    },
-                                }
                             }
                         }
-                        TicketSyncRequest::UpdateStatusSigned(mutation) => {
-                            let current =
-                                ticket_store.get_ticket(&mutation.ticket_id).ok().flatten();
-                            let authorized = current.as_ref().is_some_and(|ticket| {
+                    }
+                    TicketSyncRequest::UpdateStatusSigned(mutation) => {
+                        let current = ticket_store.get_ticket(&mutation.ticket_id).ok().flatten();
+                        let authorized = current.as_ref().is_some_and(|ticket| {
                             authority.is_some_and(|authority| {
                                 mutation.network_id == authority.network_id
                                     && mutation.operator_transport_peer_id == peer.to_string()
@@ -1872,76 +1890,111 @@ async fn handle_ticket_v2(
                                         OperatorCapabilities::TICKET_MANAGE,
                                         now_secs(),
                                     )
+                            }) && Ed25519Verifier::from_public_key(
+                                &mutation.certificate.session_pubkey,
+                            )
+                            .and_then(|verifier| {
+                                Ok(verifier
+                                    .verify(&mutation.signing_payload(), &mutation.signature)?)
                             })
-                                && Ed25519Verifier::from_public_key(&mutation.certificate.session_pubkey)
-                                    .and_then(|verifier| {
-                                        Ok(verifier.verify(&mutation.signing_payload(), &mutation.signature)?)
-                                    })
-                                    .is_ok()
+                            .is_ok()
                                 && ticket.client_peer_id == local_peer_id
                                 && ticket.revision == mutation.expected_revision
                         });
-                            if !authorized {
-                                TicketSyncResponse::MutationRejected {
-                                    kind: MutationRejectionKind::Permanent,
-                                    message: "Signed lifecycle mutation rejected".to_string(),
-                                    canonical: current.map(Box::new),
-                                }
-                            } else {
-                                match ticket_store.update_ticket_state(
-                                    &mutation.ticket_id,
-                                    mutation.new_state,
-                                    &peer.to_string(),
-                                ) {
-                                    Ok(ticket) => {
-                                        TicketSyncResponse::MutationApplied(Box::new(ticket))
-                                    }
-                                    Err(error) => TicketSyncResponse::MutationRejected {
-                                        kind: MutationRejectionKind::Conflict,
-                                        message: error.to_string(),
-                                        canonical: current.map(Box::new),
-                                    },
-                                }
-                            }
-                        }
-                    };
-                    let _ = swarm
-                        .behaviour_mut()
-                        .ticket_v2
-                        .send_response(channel, response);
-                }
-                request_response::Message::Response {
-                    request_id,
-                    response,
-                } => {
-                    if let Some(pending) = pending_sync_tickets.remove(&request_id) {
-                        let terminal = matches!(
-                            response,
-                            TicketSyncResponse::MutationApplied(_)
-                                | TicketSyncResponse::MutationRejected { .. }
-                        );
-                        if terminal {
-                            if let Some(outbox_id) = pending.outbox_id.as_deref() {
-                                let _ = ticket_store.remove_outbox(outbox_id);
-                            }
-                        }
-                        match &response {
-                            TicketSyncResponse::MutationApplied(ticket) => {
-                                let _ = ticket_store.import_canonical_ticket(ticket);
-                            }
+                        if !authorized {
                             TicketSyncResponse::MutationRejected {
-                                canonical: Some(ticket),
-                                ..
-                            } if ticket.client_peer_id != local_peer_id => {
-                                let _ = ticket_store.import_canonical_ticket(ticket);
+                                kind: MutationRejectionKind::Permanent,
+                                message: "Signed lifecycle mutation rejected".to_string(),
+                                canonical: current.map(Box::new),
                             }
-                            _ => {}
+                        } else {
+                            match ticket_store.update_ticket_state(
+                                &mutation.ticket_id,
+                                mutation.new_state,
+                                &peer.to_string(),
+                            ) {
+                                Ok(ticket) => TicketSyncResponse::MutationApplied(Box::new(ticket)),
+                                Err(error) => TicketSyncResponse::MutationRejected {
+                                    kind: MutationRejectionKind::Conflict,
+                                    message: error.to_string(),
+                                    canonical: current.map(Box::new),
+                                },
+                            }
                         }
-                        let _ = pending.reply.send(Ok(response));
                     }
+                    TicketSyncRequest::GetHeads {
+                        network_id: _,
+                        ticket_id,
+                    } => {
+                        let heads = match ticket_id {
+                            Some(tid) => ticket_store.ticket_heads(&tid),
+                            None => ticket_store.current_heads(),
+                        };
+                        TicketSyncResponse::Heads(heads)
+                    }
+                    TicketSyncRequest::GetObjects { ids } => {
+                        let objects = ticket_store.get_objects(&ids).unwrap_or_default();
+                        TicketSyncResponse::Objects(objects)
+                    }
+                    TicketSyncRequest::PushObjects { objects } => {
+                        let total = objects.len();
+                        match ticket_store.apply_remote_objects(&objects) {
+                            Ok(accepted) => TicketSyncResponse::SyncAck {
+                                accepted,
+                                rejected: total.saturating_sub(accepted),
+                            },
+                            Err(error) => {
+                                warn!(%error, "failed to apply remote objects");
+                                TicketSyncResponse::SyncAck {
+                                    accepted: 0,
+                                    rejected: total,
+                                }
+                            }
+                        }
+                    }
+                };
+                let _ = swarm
+                    .behaviour_mut()
+                    .ticket_v2
+                    .send_response(channel, response);
+            }
+            request_response::Message::Response {
+                request_id,
+                response,
+            } => {
+                if let Some(pending) = pending_sync_tickets.remove(&request_id) {
+                    let terminal = matches!(
+                        response,
+                        TicketSyncResponse::MutationApplied(_)
+                            | TicketSyncResponse::MutationRejected { .. }
+                            | TicketSyncResponse::SyncAck { .. }
+                    );
+                    if terminal {
+                        if let Some(outbox_id) = pending.outbox_id.as_deref() {
+                            let _ = ticket_store.remove_outbox(outbox_id);
+                        }
+                    }
+                    match &response {
+                        TicketSyncResponse::MutationApplied(ticket) => {
+                            let _ = ticket_store.import_canonical_ticket(ticket);
+                        }
+                        TicketSyncResponse::MutationRejected {
+                            canonical: Some(ticket),
+                            ..
+                        } if ticket.client_peer_id != local_peer_id => {
+                            let _ = ticket_store.import_canonical_ticket(ticket);
+                        }
+                        TicketSyncResponse::Objects(objects) => {
+                            if let Err(error) = ticket_store.apply_remote_objects(objects) {
+                                warn!(%error, "failed to apply received objects");
+                            }
+                        }
+                        _ => {}
+                    }
+                    let _ = pending.reply.send(Ok(response));
                 }
             }
-        }
+        },
         request_response::Event::OutboundFailure {
             request_id, error, ..
         } => {

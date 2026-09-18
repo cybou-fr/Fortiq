@@ -6,11 +6,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::authority::AuthorityPolicy;
 use crate::event::{Event, EventGraph, EventPayload};
 use crate::object::{Ed25519Signer, ObjectId, SignedObject};
-use crate::reducer::{TicketAggregate, TicketReducer, TicketStateStore};
+use crate::reducer::{TicketReducer, TicketStateStore};
 use crate::store::{FsObjectStore, ObjectStore};
 use crate::ticket::{
-    AttachmentRecord, ChatMessage, ShellSessionRecord, TicketDetail, TicketEvent,
-    TicketPriority, TicketRecord, TicketState,
+    AttachmentRecord, ChatMessage, ShellSessionRecord, TicketDetail, TicketEvent, TicketPriority,
+    TicketRecord, TicketState,
 };
 
 fn current_timestamp() -> u64 {
@@ -34,8 +34,34 @@ pub struct TicketEngine {
 
 impl TicketEngine {
     pub fn try_new(root_path: impl AsRef<Path>) -> Result<Self> {
-        let signer = Ed25519Signer::generate();
+        let root = root_path.as_ref();
+        let key_file = root.join("node.key");
+        let signer = if key_file.exists() {
+            let bytes = std::fs::read(&key_file)?;
+            if bytes.len() >= 32 {
+                let mut seed = [0u8; 32];
+                seed.copy_from_slice(&bytes[..32]);
+                Ed25519Signer::from_bytes(&seed)
+            } else {
+                let s = Ed25519Signer::generate();
+                let _ = std::fs::write(&key_file, s.to_bytes());
+                s
+            }
+        } else {
+            let s = Ed25519Signer::generate();
+            let _ = std::fs::create_dir_all(root);
+            let _ = std::fs::write(&key_file, s.to_bytes());
+            s
+        };
         let policy = AuthorityPolicy::default();
+        Self::open(root, signer, policy)
+    }
+
+    pub fn open_with_signer(
+        root_path: impl AsRef<Path>,
+        signer: Ed25519Signer,
+        policy: AuthorityPolicy,
+    ) -> Result<Self> {
         Self::open(root_path, signer, policy)
     }
 
@@ -44,11 +70,16 @@ impl TicketEngine {
     }
 
     pub fn open_in_memory() -> Result<Self> {
-        let path = std::env::temp_dir().join(format!("fortiq-inmem-{}", uuid::Uuid::new_v4().simple()));
+        let path =
+            std::env::temp_dir().join(format!("fortiq-inmem-{}", uuid::Uuid::new_v4().simple()));
         Self::open(path, Ed25519Signer::generate(), AuthorityPolicy::default())
     }
 
-    pub fn open(root_path: impl AsRef<Path>, signer: Ed25519Signer, policy: AuthorityPolicy) -> Result<Self> {
+    pub fn open(
+        root_path: impl AsRef<Path>,
+        signer: Ed25519Signer,
+        policy: AuthorityPolicy,
+    ) -> Result<Self> {
         let store = FsObjectStore::open(root_path)?;
         let mut graph = EventGraph::new();
 
@@ -95,7 +126,11 @@ impl TicketEngine {
     }
 
     /// Internal helper to append a TicketEvent to the DAG and store it.
-    fn append_ticket_event(&self, ticket_event: TicketEvent, timestamp: u64) -> Result<(Event, SignedObject)> {
+    fn append_ticket_event(
+        &self,
+        ticket_event: TicketEvent,
+        timestamp: u64,
+    ) -> Result<(Event, SignedObject)> {
         let mut graph = self.graph.write().expect("graph lock poisoned");
         let parents = graph.heads().to_vec();
         let lamport = graph.next_lamport(&parents);
@@ -155,9 +190,7 @@ impl TicketEngine {
         new_state: TicketState,
         actor_peer_id: &str,
     ) -> Result<TicketRecord> {
-        let current = self
-            .get_ticket(ticket_id)?
-            .context("ticket not found")?;
+        let current = self.get_ticket(ticket_id)?.context("ticket not found")?;
 
         if !self
             .policy
@@ -232,41 +265,71 @@ impl TicketEngine {
         actor_peer_id: &str,
         metadata: Option<&str>,
     ) -> Result<()> {
-        let state = self.state.write().expect("state lock poisoned");
-        if let Some(detail) = state.get_ticket_detail(ticket_id) {
-            let mut updated_agg = state.get_ticket(ticket_id).unwrap();
-            updated_agg.updated_at = current_timestamp();
-            let mut agg = TicketAggregate {
-                record: updated_agg,
-                messages: detail.messages,
-                attachments: detail.attachments,
-                shell_sessions: detail.shell_sessions,
-                events: detail.events,
-            };
-            agg.events.push(crate::ticket::TicketEventRecord {
-                id: uuid::Uuid::new_v4().simple().to_string(),
-                ticket_id: ticket_id.to_string(),
-                kind: kind.to_string(),
-                actor_peer_id: actor_peer_id.to_string(),
-                timestamp: current_timestamp(),
-                metadata: metadata.map(|s| s.to_string()),
-            });
-            // Re-insert into state
-            let _ = TicketReducer::reduce(&self.graph.read().expect("graph lock poisoned"));
+        let now = current_timestamp();
+        let event = TicketEvent::CustomAudit {
+            ticket_id: ticket_id.to_string(),
+            event_id: uuid::Uuid::new_v4().simple().to_string(),
+            kind: kind.to_string(),
+            actor_peer_id: actor_peer_id.to_string(),
+            metadata: metadata.map(|s| s.to_string()),
+            timestamp: now,
+        };
+        self.append_ticket_event(event, now)?;
+        Ok(())
+    }
+
+    fn outbox_dir(&self) -> PathBuf {
+        self.store.root().join("outbox")
+    }
+
+    pub fn remove_outbox(&self, outbox_id: &str) -> Result<()> {
+        let path = self.outbox_dir().join(format!("{outbox_id}.json"));
+        if path.exists() {
+            std::fs::remove_file(path)?;
         }
         Ok(())
     }
 
-    pub fn remove_outbox(&self, _outbox_id: &str) -> Result<()> {
-        Ok(())
+    pub fn enqueue_outbox(&self, peer_id: &str, kind: &str, payload: &str) -> Result<String> {
+        let dir = self.outbox_dir();
+        std::fs::create_dir_all(&dir)?;
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let rec = OutboxRecord {
+            id: id.clone(),
+            peer_id: peer_id.to_string(),
+            kind: kind.to_string(),
+            payload: payload.to_string(),
+            created_at: current_timestamp(),
+        };
+        let bytes = serde_json::to_vec_pretty(&rec)?;
+        let tmp_path = dir.join(format!("{id}.tmp"));
+        let final_path = dir.join(format!("{id}.json"));
+        std::fs::write(&tmp_path, &bytes)?;
+        std::fs::rename(tmp_path, final_path)?;
+        Ok(id)
     }
 
-    pub fn enqueue_outbox(&self, _peer_id: &str, _kind: &str, _payload: &str) -> Result<String> {
-        Ok(uuid::Uuid::new_v4().simple().to_string())
-    }
-
-    pub fn list_outbox_for_peer(&self, _peer_id: &str) -> Result<Vec<OutboxRecord>> {
-        Ok(Vec::new())
+    pub fn list_outbox_for_peer(&self, peer_id: &str) -> Result<Vec<OutboxRecord>> {
+        let dir = self.outbox_dir();
+        if !dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut list = Vec::new();
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                if let Ok(bytes) = std::fs::read(&path) {
+                    if let Ok(rec) = serde_json::from_slice::<OutboxRecord>(&bytes) {
+                        if rec.peer_id == peer_id {
+                            list.push(rec);
+                        }
+                    }
+                }
+            }
+        }
+        list.sort_by_key(|r| r.created_at);
+        Ok(list)
     }
 
     pub fn list_pending_messages_for_peer(
@@ -292,18 +355,18 @@ impl TicketEngine {
             .map(|_| ())
     }
 
-    pub fn record_shell_session_end(
-        &self,
-        session_id: &str,
-        result: Option<&str>,
-    ) -> Result<()> {
-        let mut state = self.state.write().expect("state lock poisoned");
-        for agg in state.tickets_mut().values_mut() {
-            if let Some(session) = agg.shell_sessions.iter_mut().find(|s| s.id == session_id) {
-                session.ended_at = Some(current_timestamp());
-                session.result = result.map(|s| s.to_string());
-                break;
-            }
+    pub fn record_shell_session_end(&self, session_id: &str, result: Option<&str>) -> Result<()> {
+        let ticket_id = {
+            let state = self.state.read().expect("state lock poisoned");
+            state
+                .tickets()
+                .values()
+                .find(|agg| agg.shell_sessions.iter().any(|s| s.id == session_id))
+                .map(|agg| agg.record.id.clone())
+        };
+
+        if let Some(ticket_id) = ticket_id {
+            self.end_shell_session(&ticket_id, session_id, result.map(|s| s.to_string()))?;
         }
         Ok(())
     }
@@ -400,20 +463,95 @@ impl TicketEngine {
 
     /// Ingests a remote signed object received over the network (P2P synchronization).
     pub fn apply_remote_object(&self, obj: &SignedObject) -> Result<()> {
+        obj.verify()
+            .context("failed to verify remote SignedObject")?;
         let event = Event::from_signed_object(obj)?;
 
         // Persist object to disk
         self.store.put(obj)?;
 
         // Insert into graph
-        let mut graph = self.graph.write().expect("graph lock poisoned");
-        graph.insert(event.clone())?;
+        {
+            let mut graph = self.graph.write().expect("graph lock poisoned");
+            graph.insert(event)?;
+        }
 
-        // Update in-memory state
-        let mut state = self.state.write().expect("state lock poisoned");
-        let _ = TicketReducer::apply_event(&mut state, &event);
+        // Full deterministic reduction ensures out-of-order deliveries and DAG branches converge
+        let graph = self.graph.read().expect("graph lock poisoned");
+        let new_state = TicketReducer::reduce(&graph);
+        *self.state.write().expect("state lock poisoned") = new_state;
 
         Ok(())
+    }
+
+    /// Ingests a batch of remote signed objects received over the network.
+    pub fn apply_remote_objects(&self, objects: &[SignedObject]) -> Result<usize> {
+        let mut count = 0;
+        {
+            let mut graph = self.graph.write().expect("graph lock poisoned");
+            for obj in objects {
+                if let Err(e) = obj.verify() {
+                    tracing::warn!("Rejecting unverified remote object {}: {}", obj.id, e);
+                    continue;
+                }
+                match Event::from_signed_object(obj) {
+                    Ok(event) => {
+                        if let Err(e) = self.store.put(obj) {
+                            tracing::warn!("Failed to store remote object {}: {}", obj.id, e);
+                            continue;
+                        }
+                        if let Err(e) = graph.insert(event) {
+                            tracing::warn!("Failed to insert event {} into graph: {}", obj.id, e);
+                            continue;
+                        }
+                        count += 1;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to decode event from object {}: {}", obj.id, e);
+                    }
+                }
+            }
+        }
+
+        if count > 0 {
+            let graph = self.graph.read().expect("graph lock poisoned");
+            let new_state = TicketReducer::reduce(&graph);
+            *self.state.write().expect("state lock poisoned") = new_state;
+        }
+
+        Ok(count)
+    }
+
+    pub fn get_object(&self, id: &ObjectId) -> Result<Option<SignedObject>> {
+        self.store.get(id)
+    }
+
+    pub fn get_objects(&self, ids: &[ObjectId]) -> Result<Vec<SignedObject>> {
+        let mut objects = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(obj) = self.store.get(id)? {
+                objects.push(obj);
+            }
+        }
+        Ok(objects)
+    }
+
+    pub fn get_ticket_objects(&self, ticket_id: &str) -> Result<Vec<SignedObject>> {
+        let ids = {
+            let graph = self.graph.read().expect("graph lock poisoned");
+            graph.ticket_event_ids(ticket_id)
+        };
+        self.get_objects(&ids)
+    }
+
+    pub fn ticket_heads(&self, ticket_id: &str) -> Vec<ObjectId> {
+        let graph = self.graph.read().expect("graph lock poisoned");
+        graph.ticket_heads(ticket_id)
+    }
+
+    pub fn missing_parents(&self) -> Vec<ObjectId> {
+        let graph = self.graph.read().expect("graph lock poisoned");
+        graph.missing_parents()
     }
 
     // ==========================================

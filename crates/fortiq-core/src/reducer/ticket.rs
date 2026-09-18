@@ -42,6 +42,10 @@ impl TicketStateStore {
         }
     }
 
+    pub fn tickets(&self) -> &HashMap<String, TicketAggregate> {
+        &self.tickets
+    }
+
     pub fn tickets_mut(&mut self) -> &mut HashMap<String, TicketAggregate> {
         &mut self.tickets
     }
@@ -51,10 +55,14 @@ impl TicketStateStore {
             .tickets
             .values()
             .map(|a| a.record.clone())
-            .filter(|r| state_filter.map_or(true, |f| r.state == f))
+            .filter(|r| state_filter.is_none_or(|f| r.state == f))
             .collect();
         // Sort descending by updated_at, then ID
-        list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then_with(|| a.id.cmp(&b.id)));
+        list.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
         list
     }
 
@@ -297,6 +305,33 @@ impl TicketReducer {
                 if let Some(session) = agg.shell_sessions.iter_mut().find(|s| s.id == *session_id) {
                     session.ended_at = Some(*ended_at);
                     session.result = result.clone();
+                    agg.record.updated_at = event.timestamp;
+                    agg.record.revision += 1;
+                }
+            }
+
+            TicketEvent::CustomAudit {
+                ticket_id,
+                event_id,
+                kind,
+                actor_peer_id,
+                metadata,
+                timestamp,
+            } => {
+                let agg = match store.tickets.get_mut(ticket_id) {
+                    Some(a) => a,
+                    None => bail!("ticket not found: {ticket_id}"),
+                };
+
+                if !agg.events.iter().any(|e| e.id == *event_id) {
+                    agg.events.push(crate::ticket::TicketEventRecord {
+                        id: event_id.clone(),
+                        ticket_id: ticket_id.clone(),
+                        kind: kind.clone(),
+                        actor_peer_id: actor_peer_id.clone(),
+                        timestamp: *timestamp,
+                        metadata: metadata.clone(),
+                    });
                     agg.record.updated_at = event.timestamp;
                     agg.record.revision += 1;
                 }

@@ -54,7 +54,8 @@ fn test_engine_ticket_lifecycle() -> Result<()> {
     engine.add_attachment(&att)?;
 
     // 4. Update status to IN_PROGRESS
-    let updated = engine.update_ticket_state(&ticket.id, TicketState::InProgress, "peer-operator-456")?;
+    let updated =
+        engine.update_ticket_state(&ticket.id, TicketState::InProgress, "peer-operator-456")?;
     assert_eq!(updated.state, TicketState::InProgress);
     assert_eq!(updated.revision, 4); // created (1), msg (2), att (3), status (4)
 
@@ -98,10 +99,15 @@ fn test_engine_crash_recovery_from_disk() -> Result<()> {
     }; // engine is dropped here!
 
     // Reopen from disk with a fresh engine instance
-    let reopened_engine =
-        TicketEngine::open(dir.path(), Ed25519Signer::generate(), AuthorityPolicy::default())?;
+    let reopened_engine = TicketEngine::open(
+        dir.path(),
+        Ed25519Signer::generate(),
+        AuthorityPolicy::default(),
+    )?;
 
-    let t = reopened_engine.get_ticket(&ticket_id)?.expect("ticket must be restored from disk");
+    let t = reopened_engine
+        .get_ticket(&ticket_id)?
+        .expect("ticket must be restored from disk");
     assert_eq!(t.state, TicketState::Resolved);
     assert_eq!(t.revision, 3);
 
@@ -147,6 +153,59 @@ fn test_engine_p2p_sync_remote_object() -> Result<()> {
         .expect("ticket must be present on Node B after sync");
 
     assert_eq!(ticket_a, ticket_b);
+
+    Ok(())
+}
+
+#[test]
+fn test_engine_heads_and_batch_sync() -> Result<()> {
+    let dir_a = tempdir()?;
+    let dir_b = tempdir()?;
+
+    let signer_a = Ed25519Signer::generate();
+    let signer_b = Ed25519Signer::generate();
+
+    let engine_a = TicketEngine::open(dir_a.path(), signer_a, AuthorityPolicy::default())?;
+    let engine_b = TicketEngine::open(dir_b.path(), signer_b, AuthorityPolicy::default())?;
+
+    let ticket = engine_a.create_ticket(
+        "P2P Batch Sync Test",
+        "Testing heads and batch ingestion",
+        TicketPriority::Normal,
+        "peer-a",
+    )?;
+
+    let msg = fortiq_core::ChatMessage {
+        id: "M-1".into(),
+        ticket_id: ticket.id.clone(),
+        sender_peer_id: "peer-a".into(),
+        body: "Hello from A".into(),
+        created_at: 1_000,
+        delivery_state: "PENDING".into(),
+    };
+    engine_a.add_chat_message(&msg)?;
+
+    // Check heads and ticket objects on Node A
+    let heads_a = engine_a.ticket_heads(&ticket.id);
+    assert_eq!(heads_a.len(), 1);
+
+    let objects_a = engine_a.get_ticket_objects(&ticket.id)?;
+    assert_eq!(objects_a.len(), 2); // Created + ChatMessageAdded
+
+    // Batch apply on Node B
+    let ingested = engine_b.apply_remote_objects(&objects_a)?;
+    assert_eq!(ingested, 2);
+
+    let heads_b = engine_b.ticket_heads(&ticket.id);
+    assert_eq!(heads_a, heads_b);
+
+    let ticket_b = engine_b.get_ticket(&ticket.id)?.unwrap();
+    assert_eq!(ticket_b.id, ticket.id);
+    assert_eq!(ticket_b.revision, 2);
+
+    let msgs_b = engine_b.list_messages(&ticket.id)?;
+    assert_eq!(msgs_b.len(), 1);
+    assert_eq!(msgs_b[0].body, "Hello from A");
 
     Ok(())
 }

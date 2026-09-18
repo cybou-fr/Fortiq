@@ -22,7 +22,7 @@ pub use authority::{
     MnemonicError, OperatorCapabilities, OperatorSessionCertificate, OperatorSessionProof,
     OperatorSessionSeed, OwnerRootSigningSeed, OwnerSegmentMasterSeed,
 };
-pub use codec::{from_canonical_cbor, to_canonical_cbor, DecoderLimits};
+pub use codec::{from_canonical_cbor, to_canonical_cbor, CodecError, DecoderLimits};
 pub use engine::{OutboxRecord, TicketEngine};
 pub type TicketDb = TicketEngine;
 pub use event::{Event, EventGraph, EventPayload, Heads};

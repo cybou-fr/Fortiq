@@ -50,6 +50,15 @@ pub enum TicketEvent {
         #[serde(default)]
         result: Option<String>,
     },
+    CustomAudit {
+        ticket_id: String,
+        event_id: String,
+        kind: String,
+        actor_peer_id: String,
+        #[serde(default)]
+        metadata: Option<String>,
+        timestamp: u64,
+    },
 }
 
 impl TicketEvent {
@@ -60,7 +69,8 @@ impl TicketEvent {
             | Self::ChatMessageAdded { ticket_id, .. }
             | Self::AttachmentAdded { ticket_id, .. }
             | Self::ShellSessionStarted { ticket_id, .. }
-            | Self::ShellSessionEnded { ticket_id, .. } => ticket_id,
+            | Self::ShellSessionEnded { ticket_id, .. }
+            | Self::CustomAudit { ticket_id, .. } => ticket_id,
         }
     }
 }

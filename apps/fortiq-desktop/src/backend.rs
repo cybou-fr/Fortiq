@@ -3,9 +3,9 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tracing::warn;
 
+use fortiq_core::ipc::{IpcRequest, IpcResponse};
 use fortiq_core::self_support::{LoopbackEndpoint, SelfSupportEngine, ThisDevice};
 use fortiq_core::EntityId;
-use fortiq_core::ipc::{IpcRequest, IpcResponse};
 
 use crate::command::DesktopCommand;
 use crate::event::DesktopEvent;
@@ -34,7 +34,7 @@ impl BackendActor {
         event_tx: mpsc::Sender<DesktopEvent>,
     ) -> Self {
         let device_id = EntityId::from_bytes([0x42; 32]);
-        let this_device = ThisDevice::new(device_id, LoopbackEndpoint::default());
+        let this_device = ThisDevice::new(device_id, LoopbackEndpoint);
         let engine = SelfSupportEngine::new(this_device);
 
         Self {
