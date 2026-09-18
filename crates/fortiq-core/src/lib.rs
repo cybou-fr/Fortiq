@@ -60,7 +60,7 @@ impl Config {
         self.ticket
             .path
             .clone()
-            .unwrap_or_else(|| self.identity.path.with_extension("ticket.json"))
+            .unwrap_or_else(|| self.identity.path.with_file_name("tickets.db"))
     }
 
     /// Canonical signed Genesis stored beside the node transport identity.
@@ -247,17 +247,9 @@ pub struct TicketStore {
 
 impl TicketStore {
     pub fn try_new(path: PathBuf) -> Result<Self> {
-        let (db_path, legacy_path) = if path.extension().is_some_and(|ext| ext == "json") {
-            let db_p = path.with_extension("db");
-            (db_p, Some(path))
-        } else {
-            (path, None)
-        };
-        let db = TicketDb::open(&db_path)?;
-        if let Some(ref leg) = legacy_path {
-            db.migrate_from_legacy_file(leg, "local", "operator")?;
-        }
-        Ok(Self { db })
+        Ok(Self {
+            db: TicketDb::open(path)?,
+        })
     }
 
     pub fn new(path: PathBuf) -> Self {
